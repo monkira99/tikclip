@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Project
+.superpowers/
+
+# Rust / Tauri
+src-tauri/target/
