@@ -33,6 +33,12 @@ export class WebSocketClient {
       const socket = new WebSocket(url);
       this.ws = socket;
 
+      socket.onopen = () => {
+        if (import.meta.env.DEV) {
+          console.debug("[TikClip] sidecar WebSocket connected", url);
+        }
+      };
+
       socket.onmessage = (ev) => {
         try {
           const msg = JSON.parse(String(ev.data)) as {
@@ -71,6 +77,9 @@ export class WebSocketClient {
       };
 
       socket.onerror = () => {
+        if (import.meta.env.DEV) {
+          console.debug("[TikClip] sidecar WebSocket error (check Wry / CSP / port)");
+        }
         socket.close();
       };
     } catch {

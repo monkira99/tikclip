@@ -15,6 +15,8 @@ interface AccountState {
    * overwrite this row with a stale snapshot (common when fetchAccounts overlaps WS).
    */
   patchAccountLive: (id: number, isLive: boolean) => boolean;
+  /** Batch update is_live from HTTP live-overview (single gen bump). */
+  applyLiveFlagsFromSidecar: (rows: { id: number; isLive: boolean }[]) => void;
   addAccount: (input: CreateAccountInput) => Promise<void>;
   removeAccount: (id: number) => Promise<void>;
 }
@@ -58,6 +60,21 @@ export const useAccountStore = create<AccountState>((set, get) => ({
         : prev,
     });
     return matched;
+  },
+
+  applyLiveFlagsFromSidecar: (rows) => {
+    if (rows.length === 0) {
+      return;
+    }
+    listAccountsGeneration += 1;
+    const map = new Map(rows.map((r) => [Number(r.id), r.isLive]));
+    set((s) => ({
+      loading: false,
+      accounts: s.accounts.map((a) => {
+        const live = map.get(Number(a.id));
+        return live === undefined ? a : { ...a, is_live: live };
+      }),
+    }));
   },
 
   addAccount: async (input) => {

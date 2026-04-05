@@ -138,7 +138,35 @@ export async function unwatchAccount(accountId: number): Promise<void> {
 
 /** Persist live flag from sidecar into app SQLite (drives Accounts UI). */
 export async function updateAccountLiveStatus(id: number, isLive: boolean): Promise<void> {
+  if (import.meta.env.DEV) {
+    console.debug("[TikClip] invoke update_account_live_status", { id, isLive });
+  }
   await invoke("update_account_live_status", { id, is_live: isLive });
+}
+
+/** Single transaction — avoids N× invoke racing with list_accounts (StrictMode / duplicate fetches). */
+export async function syncAccountsLiveStatus(
+  rows: { account_id: number; is_live: boolean }[],
+): Promise<void> {
+  if (rows.length === 0) {
+    return;
+  }
+  if (import.meta.env.DEV) {
+    console.debug("[TikClip] invoke sync_accounts_live_status", { count: rows.length, rows });
+  }
+  await invoke("sync_accounts_live_status", { rows });
+}
+
+/** Last poller snapshot (HTTP); works when WebSocket from sidecar → webview is blocked. */
+export type LiveOverviewAccount = {
+  account_id: number;
+  username: string;
+  is_live: boolean;
+};
+
+export async function getLiveOverview(): Promise<LiveOverviewAccount[]> {
+  const data = await sidecarJson<{ accounts: LiveOverviewAccount[] }>("/api/accounts/live-overview");
+  return data.accounts;
 }
 
 /** Re-register every DB account with the sidecar after connect/restart. */

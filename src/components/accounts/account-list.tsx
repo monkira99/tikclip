@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { AccountForm } from "@/components/accounts/account-form";
 import { AccountBadge } from "@/components/accounts/account-badge";
 import { Badge } from "@/components/ui/badge";
@@ -20,13 +20,8 @@ function accountStatus(account: { is_live: boolean }): AccountStatus {
 }
 
 export function AccountList() {
-  const { accounts, loading, error, fetchAccounts, addAccount, removeAccount } =
-    useAccountStore();
+  const { accounts, loading, error, addAccount, removeAccount } = useAccountStore();
   const [formOpen, setFormOpen] = useState(false);
-
-  useEffect(() => {
-    void fetchAccounts();
-  }, [fetchAccounts]);
 
   return (
     <div className="space-y-4">

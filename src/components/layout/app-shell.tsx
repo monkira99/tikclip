@@ -47,6 +47,24 @@ const pageComponents: Record<PageId, ComponentType> = {
 };
 
 const FINISHED_CLEANUP_MS = 8000;
+/** HTTP backup for live flags; sidecar poll is ~30s, sync often enough for UI without hammering. */
+const LIVE_HTTP_SYNC_MS = 5000;
+
+async function syncLiveFromSidecarHttp(): Promise<void> {
+  try {
+    const rows = await api.getLiveOverview();
+    await api.syncAccountsLiveStatus(
+      rows.map((r) => ({ account_id: r.account_id, is_live: r.is_live })),
+    );
+    useAccountStore.getState().applyLiveFlagsFromSidecar(
+      rows.map((r) => ({ id: r.account_id, isLive: r.is_live })),
+    );
+  } catch (e) {
+    if (import.meta.env.DEV) {
+      console.warn("[TikClip] syncLiveFromSidecarHttp failed", e);
+    }
+  }
+}
 
 export function AppShell() {
   useSidecar();
@@ -67,7 +85,6 @@ export function AppShell() {
       useRecordingStore.getState().hydrateFromSidecar([]);
       return;
     }
-    wsClient.connect(sidecarPort);
 
     const onRecordingEvent = (data: Record<string, unknown>) => {
       applyRecordingWsPayload(data);
@@ -127,6 +144,8 @@ export function AppShell() {
       dispatchSidecarNotification("clip_ready", data);
     });
 
+    wsClient.connect(sidecarPort);
+
     return () => {
       unsubStart();
       unsubProgress();
@@ -175,9 +194,25 @@ export function AppShell() {
           proxy_url: a.proxy_url,
         })),
       );
+      if (!cancelled) {
+        await syncLiveFromSidecarHttp();
+      }
     })();
     return () => {
       cancelled = true;
+    };
+  }, [sidecarPort, sidecarConnected]);
+
+  useEffect(() => {
+    if (sidecarPort == null || !sidecarConnected) {
+      return;
+    }
+    void syncLiveFromSidecarHttp();
+    const timer = window.setInterval(() => {
+      void syncLiveFromSidecarHttp();
+    }, LIVE_HTTP_SYNC_MS);
+    return () => {
+      window.clearInterval(timer);
     };
   }, [sidecarPort, sidecarConnected]);
 
