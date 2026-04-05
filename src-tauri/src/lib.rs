@@ -1,3 +1,4 @@
+mod commands;
 mod db;
 mod sidecar;
 
@@ -19,7 +20,13 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![sidecar::get_sidecar_status])
+        .invoke_handler(tauri::generate_handler![
+            sidecar::get_sidecar_status,
+            commands::accounts::list_accounts,
+            commands::accounts::create_account,
+            commands::accounts::delete_account,
+            commands::accounts::update_account_live_status,
+        ])
         .setup(|app| {
             let app_data = app.path().app_data_dir().expect("failed to get app data dir");
             let storage_path = app_data.join("TikTokApp");

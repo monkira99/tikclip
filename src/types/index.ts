@@ -11,6 +11,7 @@ export interface Account {
   avatar_url: string | null;
   type: AccountType;
   tiktok_uid: string | null;
+  cookies_json: string | null;
   auto_record: boolean;
   auto_record_schedule: AutoRecordSchedule | null;
   priority: number;
@@ -21,6 +22,17 @@ export interface Account {
   notes: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface CreateAccountInput {
+  username: string;
+  display_name: string;
+  type: AccountType;
+  cookies_json?: string | null;
+  proxy_url?: string | null;
+  auto_record: boolean;
+  priority: number;
+  notes?: string | null;
 }
 
 export interface AutoRecordSchedule {
