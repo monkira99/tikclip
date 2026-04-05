@@ -1,6 +1,9 @@
 from pathlib import Path
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# sidecar/src/config.py -> repo sidecar/ (where pyproject.toml and .env live)
+_SIDECAR_ROOT = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
@@ -10,6 +13,8 @@ class Settings(BaseSettings):
     port_fallback_range_end: int = 18330
     storage_path: Path = Path.home() / "TikTokApp"
     log_level: str = "info"
+    # TIKCLIP_DEBUG_TIKTOK=1 — log short HTML snippet when room_id parse fails (no secrets).
+    debug_tiktok: bool = False
     poll_interval_seconds: int = 30
     max_concurrent_recordings: int = 5
     max_duration_hours: int = 4
@@ -22,7 +27,13 @@ class Settings(BaseSettings):
     auto_cleanup_raw: bool = True
     raw_retention_days: int = 7
 
-    model_config = {"env_prefix": "TIKCLIP_"}
+    model_config = SettingsConfigDict(
+        env_prefix="TIKCLIP_",
+        # Loaded on sidecar start (incl. Tauri-spawned python); no uv --env-file needed.
+        env_file=_SIDECAR_ROOT / ".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 
 settings = Settings()

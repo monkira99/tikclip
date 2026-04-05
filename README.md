@@ -100,9 +100,12 @@ Prefix **`TIKCLIP_`** (xem `sidecar/src/config.py`). Một số biến thường
 | `TIKCLIP_PORT` | `18321` | Cổng ưu tiên (có dải fallback nếu bận) |
 | `TIKCLIP_STORAGE_PATH` | `~/TikTokApp` | Thư mục lưu raw/clips |
 | `TIKCLIP_POLL_INTERVAL_SECONDS` | `30` | Chu kỳ watcher kiểm tra live |
-| `TIKCLIP_LOG_LEVEL` | `info` | Log uvicorn |
+| `TIKCLIP_LOG_LEVEL` | `info` | Mức log cho logger `tikclip.*` (vd. `debug` để trace TikTok) |
+| `TIKCLIP_DEBUG_TIKTOK` | `false` | Nếu `true`: khi không parse được `room_id` từ trang live, log một đoạn HTML rút gọn (không log cookie) |
 
-Có thể đặt trong `sidecar/.env` khi chạy tay với `uv run --env-file .env` (không commit secret).
+Log sidecar dạng `tikclip.tiktok` / `tikclip.watcher` / `tikclip.routes.accounts` in ra **stderr** (Terminal khi chạy `tauri dev` hoặc process Python).
+
+Mẫu biến: `sidecar/.env.example` — copy thành `sidecar/.env`. Sidecar **tự đọc** `sidecar/.env` khi khởi động (kể cả khi Tauri spawn Python); biến môi trường của process vẫn **ghi đè** giá trị trong file. Không commit `.env`.
 
 ## Dữ liệu & Phase 1
 
