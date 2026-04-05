@@ -22,6 +22,14 @@ class AccountStatusResponse(BaseModel):
     viewer_count: int | None = None
 
 
+class WatchAccountRequest(BaseModel):
+    account_id: int
+    username: str
+    auto_record: bool = False
+    cookies_json: str | None = None
+    proxy_url: str | None = None
+
+
 class StartRecordingRequest(BaseModel):
     account_id: int
     username: str
