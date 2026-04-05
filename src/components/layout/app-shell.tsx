@@ -7,6 +7,7 @@ import { ClipsPage } from "@/pages/clips";
 import { DashboardPage } from "@/pages/dashboard";
 import { RecordingsPage } from "@/pages/recordings";
 import { SettingsPage } from "@/pages/settings";
+import { dispatchSidecarNotification } from "@/lib/sidecar-notifications";
 import { useAppStore } from "@/stores/app-store";
 import {
   applyRecordingWsPayload,
@@ -73,6 +74,7 @@ export function AppShell() {
 
     const onFinished = (data: Record<string, unknown>) => {
       applyRecordingWsPayload(data);
+      dispatchSidecarNotification("recording_finished", data);
       const id = data.recording_id;
       if (typeof id === "string") {
         window.setTimeout(() => {
@@ -84,11 +86,19 @@ export function AppShell() {
     const unsubStart = wsClient.on("recording_started", onRecordingEvent);
     const unsubProgress = wsClient.on("recording_progress", onRecordingEvent);
     const unsubFinished = wsClient.on("recording_finished", onFinished);
+    const unsubLive = wsClient.on("account_live", (data) => {
+      dispatchSidecarNotification("account_live", data);
+    });
+    const unsubClip = wsClient.on("clip_ready", (data) => {
+      dispatchSidecarNotification("clip_ready", data);
+    });
 
     return () => {
       unsubStart();
       unsubProgress();
       unsubFinished();
+      unsubLive();
+      unsubClip();
       wsClient.disconnect();
     };
   }, [sidecarPort]);

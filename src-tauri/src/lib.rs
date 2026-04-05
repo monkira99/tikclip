@@ -1,6 +1,7 @@
 mod commands;
 mod db;
 mod sidecar;
+mod tray;
 
 use db::init::initialize_database;
 use rusqlite::Connection;
@@ -46,6 +47,8 @@ pub fn run() {
                 eprintln!("sidecar start failed: {e}");
             }
             app.manage(sidecar);
+
+            tray::setup_tray(app.handle())?;
 
             Ok(())
         })
