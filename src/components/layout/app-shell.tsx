@@ -195,7 +195,17 @@ export function AppShell() {
         })),
       );
       if (!cancelled) {
-        await syncLiveFromSidecarHttp();
+        try {
+          const fresh = await api.pollNow();
+          await api.syncAccountsLiveStatus(
+            fresh.map((r) => ({ account_id: r.account_id, is_live: r.is_live })),
+          );
+          useAccountStore.getState().applyLiveFlagsFromSidecar(
+            fresh.map((r) => ({ id: r.account_id, isLive: r.is_live })),
+          );
+        } catch {
+          await syncLiveFromSidecarHttp();
+        }
       }
     })();
     return () => {

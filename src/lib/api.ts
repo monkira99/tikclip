@@ -169,6 +169,14 @@ export async function getLiveOverview(): Promise<LiveOverviewAccount[]> {
   return data.accounts;
 }
 
+/** Force an immediate poll of all watched accounts and return fresh live flags. */
+export async function pollNow(): Promise<LiveOverviewAccount[]> {
+  const data = await sidecarJson<{ accounts: LiveOverviewAccount[] }>("/api/accounts/poll-now", {
+    method: "POST",
+  });
+  return data.accounts;
+}
+
 /** Re-register every DB account with the sidecar after connect/restart. */
 export async function syncWatcherForAccounts(
   accounts: {
