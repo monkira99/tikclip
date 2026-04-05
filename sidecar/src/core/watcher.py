@@ -51,14 +51,22 @@ class AccountWatcher:
         proxy_url: str | None = None,
         auto_record: bool = False,
     ) -> None:
+        existing = self._accounts.get(account_id)
         self._accounts[account_id] = WatchedAccount(
             username=username,
             account_id=account_id,
             cookies_json=cookies_json,
             proxy_url=proxy_url,
             auto_record=auto_record,
-            was_live=False,
+            was_live=existing.was_live if existing is not None else False,
         )
+        if existing is not None:
+            logger.debug(
+                "add_account re-register account_id=%s username=%s preserve_was_live=%s",
+                account_id,
+                username,
+                existing.was_live,
+            )
 
     def remove_account(self, account_id: int) -> bool:
         return self._accounts.pop(account_id, None) is not None
