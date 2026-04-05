@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
@@ -9,8 +10,10 @@ from models.schemas import (
     AccountStatusResponse,
     WatchAccountRequest,
 )
+from tiktok.api import cookie_key_summary
 
 router = APIRouter()
+logger = logging.getLogger("tikclip.routes.accounts")
 
 
 def _resolve_watch_request(
@@ -52,10 +55,21 @@ def _parse_cookies(cookies_json: str | None) -> dict | None:
 @router.post("/api/accounts/check-status", response_model=AccountStatusResponse)
 async def check_account_status(body: AccountStatusRequest):
     cookies = _parse_cookies(body.cookies_json)
+    logger.info(
+        "HTTP check-status username=%s cookies=%s",
+        body.username.lstrip("@"),
+        cookie_key_summary(cookies),
+    )
     result = await account_watcher.check_account(
         body.username,
         cookies,
         body.proxy_url,
+    )
+    logger.info(
+        "HTTP check-status result username=%s is_live=%s room_id=%s",
+        result.get("username"),
+        result.get("is_live"),
+        result.get("room_id"),
     )
     return AccountStatusResponse(
         username=result["username"],
@@ -68,6 +82,13 @@ async def check_account_status(body: AccountStatusRequest):
 
 @router.post("/api/accounts/watch")
 async def watch_account(req: Annotated[WatchAccountRequest, Depends(_resolve_watch_request)]):
+    logger.info(
+        "HTTP watch account_id=%s username=%s auto_record=%s cookies=%s",
+        req.account_id,
+        req.username.lstrip("@"),
+        req.auto_record,
+        cookie_key_summary(_parse_cookies(req.cookies_json) if req.cookies_json else None),
+    )
     account_watcher.add_account(
         req.account_id,
         req.username,

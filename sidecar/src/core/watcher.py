@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from dataclasses import dataclass, replace
 
 from config import settings
 from core.recorder import recording_manager
-from tiktok.api import TikTokAPI
+from tiktok.api import TikTokAPI, cookie_key_summary
 from tiktok.stream import StreamResolver
 from ws.manager import ws_manager
+
+logger = logging.getLogger("tikclip.watcher")
 
 
 @dataclass
@@ -134,10 +137,24 @@ class AccountWatcher:
             cookies: dict | None
             try:
                 cookies = _parse_cookies_json(acc.cookies_json)
-            except (json.JSONDecodeError, ValueError):
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(
+                    "account_id=%s username=%s invalid cookies_json: %s",
+                    account_id,
+                    acc.username,
+                    e,
+                )
                 cookies = None
             result = await self.check_account(acc.username, cookies, acc.proxy_url)
             is_live = bool(result.get("is_live"))
+            logger.info(
+                "poll account_id=%s username=%s is_live=%s room_id=%s cookies=%s",
+                account_id,
+                acc.username,
+                is_live,
+                result.get("room_id"),
+                cookie_key_summary(cookies),
+            )
             room_id = result.get("room_id")
             if is_live and not acc.was_live:
                 await ws_manager.broadcast(
@@ -169,6 +186,14 @@ class AccountWatcher:
                             pass
             acc = replace(acc, was_live=is_live)
             self._accounts[account_id] = acc
+            await ws_manager.broadcast(
+                "account_status",
+                {
+                    "account_id": account_id,
+                    "username": acc.username,
+                    "is_live": is_live,
+                },
+            )
 
 
 account_watcher = AccountWatcher()

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import httpx
 
+from tiktok.cookies import normalize_tiktok_cookies
+
 _STREAM_QUALITY_ORDER = ("FULL_HD1", "HD1", "SD1", "SD2")
 
 
@@ -40,7 +42,7 @@ class StreamResolver:
     """Resolves FLV/HLS stream URL for a TikTok live room."""
 
     def __init__(self, cookies: dict | None = None, proxy: str | None = None):
-        self._cookies = cookies or {}
+        self._cookies = normalize_tiktok_cookies(cookies)
         self._proxy = proxy
 
     async def get_stream_url(self, room_id: str) -> str | None:
@@ -57,8 +59,10 @@ class StreamResolver:
             },
             follow_redirects=True,
         ) as client:
-            url = f"https://webcast.tiktok.com/webcast/room/info/?room_id={room_id}"
-            response = await client.get(url)
+            response = await client.get(
+                "https://webcast.tiktok.com/webcast/room/info/",
+                params={"aid": "1988", "room_id": room_id},
+            )
             response.raise_for_status()
             payload = response.json()
             data = payload.get("data") or {}

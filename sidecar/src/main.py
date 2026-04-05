@@ -4,6 +4,7 @@ import uvicorn
 
 from app import create_app
 from config import settings
+from logging_config import setup_sidecar_logging
 
 
 def find_available_port() -> int:
@@ -25,6 +26,7 @@ def is_port_available(port: int) -> bool:
 
 
 def main():
+    setup_sidecar_logging()
     port = find_available_port()
     print(f"SIDECAR_PORT={port}", flush=True)
 
