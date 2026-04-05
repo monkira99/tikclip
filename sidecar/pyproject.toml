@@ -10,6 +10,7 @@ dependencies = [
     "httpx>=0.28",
     "pydantic>=2.10",
     "pydantic-settings>=2.7",
+    "scenedetect[opencv]>=0.6",
 ]
 
 [project.optional-dependencies]

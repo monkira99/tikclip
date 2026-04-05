@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class HealthResponse(BaseModel):
@@ -56,9 +56,35 @@ class RecordingStatusResponse(BaseModel):
 
 
 class ProcessVideoRequest(BaseModel):
-    recording_id: int
+    recording_id: str
+    username: str
     file_path: str
     account_id: int
     clip_min_duration: int = 15
     clip_max_duration: int = 90
     scene_threshold: float = 30.0
+
+
+class ClipOutput(BaseModel):
+    index: int
+    path: str
+    thumbnail_path: str
+    start_sec: float
+    end_sec: float
+    duration_sec: float
+
+
+class ProcessingStatusResponse(BaseModel):
+    recording_id: str
+    account_id: int
+    username: str
+    status: str
+    progress_percent: float = 0.0
+    clips: list[ClipOutput] = Field(default_factory=list)
+    error_message: str | None = None
+
+
+class ProcessVideoAcceptedResponse(BaseModel):
+    recording_id: str
+    status: str = "accepted"
+    message: str = "Processing started"

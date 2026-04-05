@@ -4,7 +4,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from .core.watcher import account_watcher
-from .routes import accounts, health, recordings
+from .routes import accounts, clips as clips_routes, health, recordings
 from .ws.manager import ws_manager
 
 
@@ -27,6 +27,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(recordings.router)
+    app.include_router(clips_routes.router)
     app.include_router(accounts.router, tags=["accounts"])
 
     @app.websocket("/ws")
