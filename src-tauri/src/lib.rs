@@ -40,6 +40,7 @@ pub fn run() {
             commands::accounts::create_account,
             commands::accounts::delete_account,
             commands::accounts::update_account_live_status,
+            commands::accounts::sync_accounts_live_status,
             commands::clips::list_clips,
             commands::settings::get_setting,
             commands::settings::set_setting,

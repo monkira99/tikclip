@@ -113,12 +113,59 @@ pub fn delete_account(state: State<'_, AppState>, id: i64) -> Result<(), String>
     Ok(())
 }
 
+#[derive(Debug, Deserialize)]
+pub struct LiveFlagRow {
+    pub account_id: i64,
+    pub is_live: bool,
+}
+
+/// Applies sidecar live flags in one SQLite transaction (avoids list_accounts interleaving between rows).
+#[tauri::command]
+pub fn sync_accounts_live_status(
+    state: State<'_, AppState>,
+    rows: Vec<LiveFlagRow>,
+) -> Result<(), String> {
+    if rows.is_empty() {
+        return Ok(());
+    }
+    debug!("sync_accounts_live_status: enter {} row(s)", rows.len());
+    let mut conn = state.db.lock().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    for row in &rows {
+        let flag = if row.is_live { 1i64 } else { 0i64 };
+        let n = tx
+            .execute(
+                "UPDATE accounts SET \
+                 is_live = ?1, \
+                 last_checked_at = datetime('now'), \
+                 last_live_at = CASE WHEN ?1 != 0 THEN datetime('now') ELSE last_live_at END, \
+                 updated_at = datetime('now') \
+                 WHERE id = ?2",
+                params![flag, row.account_id],
+            )
+            .map_err(|e| e.to_string())?;
+        if n == 0 {
+            warn!(
+                "sync_accounts_live_status: unknown account_id={} (skipped)",
+                row.account_id
+            );
+        }
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    info!(
+        "sync_accounts_live_status: committed {} live flag(s)",
+        rows.len()
+    );
+    Ok(())
+}
+
 #[tauri::command]
 pub fn update_account_live_status(
     state: State<'_, AppState>,
     id: i64,
     is_live: bool,
 ) -> Result<(), String> {
+    debug!("update_account_live_status: enter id={id} is_live={is_live}");
     let conn = state.db.lock().map_err(|e| e.to_string())?;
     let flag = if is_live { 1i64 } else { 0i64 };
     let n = conn
@@ -194,6 +241,43 @@ mod tests {
             )
             .expect("select");
         assert_eq!(live, 1);
+        drop(conn);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn transaction_sync_updates_two_rows() {
+        let (mut conn, path) = open_temp_db();
+        conn.execute(
+            "INSERT INTO accounts (username, display_name, type, is_live) VALUES ('a','a','monitored',0)",
+            [],
+        )
+        .expect("insert1");
+        let id1 = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO accounts (username, display_name, type, is_live) VALUES ('b','b','monitored',0)",
+            [],
+        )
+        .expect("insert2");
+        let id2 = conn.last_insert_rowid();
+        let tx = conn.transaction().expect("tx");
+        for (id, flag) in [(id1, 1i64), (id2, 1i64)] {
+            tx.execute(
+                "UPDATE accounts SET is_live = ?1, last_checked_at = datetime('now'), \
+                 last_live_at = CASE WHEN ?1 != 0 THEN datetime('now') ELSE last_live_at END, \
+                 updated_at = datetime('now') WHERE id = ?2",
+                params![flag, id],
+            )
+            .expect("upd");
+        }
+        tx.commit().expect("commit");
+        let c1: i64 = conn
+            .query_row("SELECT is_live FROM accounts WHERE id=?1", params![id1], |r| r.get(0))
+            .unwrap();
+        let c2: i64 = conn
+            .query_row("SELECT is_live FROM accounts WHERE id=?1", params![id2], |r| r.get(0))
+            .unwrap();
+        assert_eq!((c1, c2), (1, 1));
         drop(conn);
         let _ = std::fs::remove_file(&path);
     }
