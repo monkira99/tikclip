@@ -28,3 +28,9 @@ dist-ssr
 
 # Rust / Tauri
 src-tauri/target/
+
+# Python sidecar
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
