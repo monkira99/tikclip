@@ -139,3 +139,12 @@ export async function createAccount(input: CreateAccountInput): Promise<number> 
 export async function deleteAccount(id: number): Promise<void> {
   await invoke("delete_account", { id });
 }
+
+export async function getSetting(key: string): Promise<string | null> {
+  const value = await invoke<string | null>("get_setting", { key });
+  return value ?? null;
+}
+
+export async function setSetting(key: string, value: string): Promise<void> {
+  await invoke("set_setting", { key, value });
+}
