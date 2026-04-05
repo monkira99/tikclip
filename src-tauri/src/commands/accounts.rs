@@ -185,9 +185,7 @@ pub fn update_account_live_status(
         );
         return Err(format!("account id {id} not found"));
     }
-    info!(
-        "update_account_live_status: ok id={id} is_live={is_live} rows_updated={n}"
-    );
+    info!("update_account_live_status: ok id={id} is_live={is_live} rows_updated={n}");
     Ok(())
 }
 
@@ -272,10 +270,18 @@ mod tests {
         }
         tx.commit().expect("commit");
         let c1: i64 = conn
-            .query_row("SELECT is_live FROM accounts WHERE id=?1", params![id1], |r| r.get(0))
+            .query_row(
+                "SELECT is_live FROM accounts WHERE id=?1",
+                params![id1],
+                |r| r.get(0),
+            )
             .unwrap();
         let c2: i64 = conn
-            .query_row("SELECT is_live FROM accounts WHERE id=?1", params![id2], |r| r.get(0))
+            .query_row(
+                "SELECT is_live FROM accounts WHERE id=?1",
+                params![id2],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!((c1, c2), (1, 1));
         drop(conn);

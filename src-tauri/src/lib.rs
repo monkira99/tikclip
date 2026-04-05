@@ -21,9 +21,10 @@ fn init_rust_logging() {
     } else {
         "warn,tikclip_lib::commands::accounts=warn"
     };
-    let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default_filter))
-        .format_timestamp_millis()
-        .try_init();
+    let _ =
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default_filter))
+            .format_timestamp_millis()
+            .try_init();
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
