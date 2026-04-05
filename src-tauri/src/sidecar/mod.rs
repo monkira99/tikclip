@@ -33,7 +33,9 @@ impl SidecarManager {
         }
     }
 
-    /// Starts `python3 -m main` with cwd = `sidecar/` and `PYTHONPATH=src` so first-party imports resolve. Returns bound port from first stdout line `SIDECAR_PORT=<n>`.
+    /// Starts the sidecar with `python -m main`, cwd = `sidecar/`, `PYTHONPATH=src`.
+    /// Uses `sidecar/.venv/bin/python3` when present (from `uv sync` / `python -m venv`), else `python3` on PATH.
+    /// Returns bound port from first stdout line `SIDECAR_PORT=<n>`.
     pub fn start(&self) -> Result<u16, String> {
         let mut guard = self
             .inner
@@ -46,8 +48,9 @@ impl SidecarManager {
 
         let sidecar_dir = resolve_sidecar_dir()?;
         let pythonpath = sidecar_dir.join("src");
+        let python = resolve_python_executable(&sidecar_dir);
 
-        let mut child = Command::new("python3")
+        let mut child = Command::new(&python)
             .env("PYTHONPATH", &pythonpath)
             .args(["-m", "main"])
             .current_dir(&sidecar_dir)
@@ -56,7 +59,9 @@ impl SidecarManager {
             .spawn()
             .map_err(|e| {
                 format!(
-                    "failed to spawn sidecar (is `python3` on PATH and sidecar deps installed?): {e}"
+                    "failed to spawn sidecar with {:?}: {e}. \
+                     Create sidecar/.venv (e.g. `cd sidecar && uv sync`) or install deps into the chosen Python.",
+                    python
                 )
             })?;
 
@@ -175,6 +180,32 @@ fn resolve_sidecar_dir() -> Result<PathBuf, String> {
 
 fn sidecar_looks_valid(path: &Path) -> bool {
     path.is_dir() && path.join("src").join("main.py").is_file()
+}
+
+/// Prefer `sidecar/.venv` so Tauri does not rely on a global `python3` having uvicorn/FastAPI.
+fn resolve_python_executable(sidecar_dir: &Path) -> PathBuf {
+    if let Some(p) = venv_python(sidecar_dir) {
+        return p;
+    }
+    PathBuf::from("python3")
+}
+
+fn venv_python(sidecar_dir: &Path) -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        let p = sidecar_dir.join(".venv").join("Scripts").join("python.exe");
+        return p.is_file().then_some(p);
+    }
+    #[cfg(not(windows))]
+    {
+        for name in ["python3", "python"] {
+            let p = sidecar_dir.join(".venv").join("bin").join(name);
+            if p.is_file() {
+                return Some(p);
+            }
+        }
+        None
+    }
 }
 
 fn port_tcp_reachable(port: u16) -> bool {

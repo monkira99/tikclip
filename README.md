@@ -10,13 +10,13 @@
 | **Tauri / Rust** (`src-tauri/`) | SQLite, tray, khởi động sidecar, lệnh CRUD accounts/clips/settings |
 | **Sidecar** (`sidecar/`) | FastAPI, health/recording/accounts/clips API, watcher live, worker FFmpeg, processor scene-detect |
 
-Sidecar được spawn tự động khi mở app (`python3 -m main` với `PYTHONPATH` trỏ tới `sidecar/src`). Cổng HTTP được in ra stdout dạng `SIDECAR_PORT=<n>`; UI dùng cổng đó cho REST và WebSocket.
+Sidecar được spawn tự động khi mở app: **`sidecar/.venv/bin/python3`** nếu có (sau `uv sync`), nếu không thì **`python3` trên PATH**, cùng `PYTHONPATH=sidecar/src` và `-m main`. Cổng HTTP in ra stdout dạng `SIDECAR_PORT=<n>`; UI dùng cổng đó cho REST và WebSocket.
 
 ## Yêu cầu hệ thống
 
 - **Node.js** 20+ (khuyến nghị LTS) và npm
 - **Rust** stable + **Cargo** (cài qua [rustup](https://rustup.rs/))
-- **Python** 3.11+ trên `PATH` với tên lệnh **`python3`** (Tauri gọi `python3`)
+- **Python** 3.11+ (dùng để tạo `sidecar/.venv`; fallback khi không có venv: **`python3` trên PATH**)
 - **[uv](https://docs.astral.sh/uv/)** (khuyến nghị) để cài dependency và chạy sidecar/tests
 - **FFmpeg** và **ffprobe** trên `PATH` (ghi stream, probe duration, cắt clip, thumbnail)
 - **OpenCV** (qua gói `scenedetect[opencv]`) cho PySceneDetect khi chạy xử lý cảnh
@@ -52,9 +52,7 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 ```
 
-Đảm bảo khi chạy app desktop, lệnh `python3` tìm thấy môi trường đã cài `tikclip-sidecar` (global hoặc `uv`/`venv` được kích hoạt trong shell **không** áp dụng cho process con của Tauri — thường cần `python3` trỏ tới interpreter đã `pip install -e sidecar/`).
-
-**Gợi ý ổn định:** cài package editable vào user site hoặc dùng `uv tool` / shim sao cho `python3` mặc định là interpreter có dependency sidecar.
+**Bắt buộc cho dev ổn định:** chạy `cd sidecar && uv sync` (hoặc `pip install -e ".[dev]"` trong `.venv`) để có thư mục **`sidecar/.venv`**. App Tauri sẽ ưu tiên interpreter này — không phụ thuộc shell đang bật venv. Nếu không có `.venv`, app dùng `python3` hệ thống (phải tự cài đủ dependency sidecar).
 
 ## Chạy ứng dụng (dev)
 
