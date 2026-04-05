@@ -1,5 +1,6 @@
 use crate::db::models::Account;
 use crate::AppState;
+use log::{debug, info, warn};
 use rusqlite::params;
 use serde::Deserialize;
 use tauri::State;
@@ -57,6 +58,14 @@ pub fn list_accounts(state: State<'_, AppState>) -> Result<Vec<Account>, String>
     for r in rows {
         out.push(r.map_err(|e| e.to_string())?);
     }
+    debug!(
+        "list_accounts: {} row(s) — {}",
+        out.len(),
+        out.iter()
+            .map(|a| format!("id={} user={} is_live={}", a.id, a.username, a.is_live))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     Ok(out)
 }
 
@@ -124,7 +133,68 @@ pub fn update_account_live_status(
         )
         .map_err(|e| e.to_string())?;
     if n == 0 {
+        warn!(
+            "update_account_live_status: no row updated (id={id} is_live={is_live}) — id missing in SQLite"
+        );
         return Err(format!("account id {id} not found"));
     }
+    info!(
+        "update_account_live_status: ok id={id} is_live={is_live} rows_updated={n}"
+    );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::init::initialize_database;
+    use rusqlite::Connection;
+    use std::path::PathBuf;
+
+    fn open_temp_db() -> (Connection, PathBuf) {
+        let path = std::env::temp_dir().join(format!(
+            "tikclip-accounts-test-{}-{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let conn = initialize_database(&path).expect("init db");
+        (conn, path)
+    }
+
+    #[test]
+    fn update_live_status_sets_is_live_column() {
+        let (conn, path) = open_temp_db();
+        conn.execute(
+            "INSERT INTO accounts (username, display_name, type, is_live) VALUES (?1, ?2, ?3, 0)",
+            params!["u1", "d1", "monitored"],
+        )
+        .expect("insert");
+        let id = conn.last_insert_rowid();
+        let flag = 1i64;
+        let n = conn
+            .execute(
+                "UPDATE accounts SET \
+                 is_live = ?1, \
+                 last_checked_at = datetime('now'), \
+                 last_live_at = CASE WHEN ?1 != 0 THEN datetime('now') ELSE last_live_at END, \
+                 updated_at = datetime('now') \
+                 WHERE id = ?2",
+                params![flag, id],
+            )
+            .expect("update");
+        assert_eq!(n, 1);
+        let live: i64 = conn
+            .query_row(
+                "SELECT is_live FROM accounts WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .expect("select");
+        assert_eq!(live, 1);
+        drop(conn);
+        let _ = std::fs::remove_file(&path);
+    }
 }
