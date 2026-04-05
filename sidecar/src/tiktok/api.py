@@ -246,14 +246,8 @@ class TikTokAPI:
                     room_id,
                 )
                 is_live = True
-            stream_candidate = pick_stream_url_from_room_data(room_info)
-            if not is_live and stream_candidate:
-                logger.info(
-                    "check_alive=false but stream_url present; treating as live room_id=%s",
-                    room_id,
-                )
-                is_live = True
 
+            stream_candidate = pick_stream_url_from_room_data(room_info)
             viewer_count = self._viewer_count_from_merged(room_info) if is_live else None
             title = self._title_from_merged(room_info) if is_live else None
             stream_url = stream_candidate if is_live else None

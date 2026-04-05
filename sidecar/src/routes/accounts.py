@@ -104,3 +104,11 @@ async def unwatch_account(account_id: int):
     if not account_watcher.remove_account(account_id):
         raise HTTPException(status_code=404, detail="Account not watched")
     return {"ok": True}
+
+
+@router.get("/api/accounts/live-overview")
+async def live_overview():
+    """Snapshot of last poll results; use when desktop WebSocket does not reach the UI."""
+    rows = account_watcher.live_overview()
+    logger.debug("live-overview %s account(s)", len(rows))
+    return {"accounts": rows}

@@ -63,6 +63,17 @@ class AccountWatcher:
     def remove_account(self, account_id: int) -> bool:
         return self._accounts.pop(account_id, None) is not None
 
+    def live_overview(self) -> list[dict]:
+        """Last known live flags from the poller (for HTTP sync when WebSocket is unavailable)."""
+        return [
+            {
+                "account_id": aid,
+                "username": acc.username,
+                "is_live": acc.was_live,
+            }
+            for aid, acc in sorted(self._accounts.items(), key=lambda x: x[0])
+        ]
+
     def update_account(
         self,
         account_id: int,
@@ -186,6 +197,12 @@ class AccountWatcher:
                             pass
             acc = replace(acc, was_live=is_live)
             self._accounts[account_id] = acc
+            logger.info(
+                "ws broadcast account_status account_id=%s is_live=%s ws_clients=%s",
+                account_id,
+                is_live,
+                ws_manager.active_count,
+            )
             await ws_manager.broadcast(
                 "account_status",
                 {
