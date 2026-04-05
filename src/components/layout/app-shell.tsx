@@ -1,11 +1,18 @@
-import { useState, type ComponentType } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 import { useSidecar } from "@/hooks/use-sidecar";
+import { getRecordingStatus } from "@/lib/api";
+import { wsClient } from "@/lib/ws";
 import { AccountsPage } from "@/pages/accounts";
 import { ClipsPage } from "@/pages/clips";
 import { DashboardPage } from "@/pages/dashboard";
 import { RecordingsPage } from "@/pages/recordings";
 import { SettingsPage } from "@/pages/settings";
 import { useAppStore } from "@/stores/app-store";
+import {
+  applyRecordingWsPayload,
+  countActiveRecordings,
+  useRecordingStore,
+} from "@/stores/recording-store";
 import { Sidebar } from "./sidebar";
 import { TopBar } from "./top-bar";
 
@@ -37,11 +44,71 @@ const pageComponents: Record<PageId, ComponentType> = {
   settings: SettingsPage,
 };
 
+const FINISHED_CLEANUP_MS = 8000;
+
 export function AppShell() {
   useSidecar();
   const [currentPage, setCurrentPage] = useState<PageId>("dashboard");
+  const sidecarPort = useAppStore((s) => s.sidecarPort);
   const sidecarConnected = useAppStore((s) => s.sidecarConnected);
   const activeRecordings = useAppStore((s) => s.activeRecordings);
+  const setActiveRecordings = useAppStore((s) => s.setActiveRecordings);
+  const activeRecordingCount = useRecordingStore((s) => countActiveRecordings(s.recordings));
+
+  useEffect(() => {
+    setActiveRecordings(activeRecordingCount);
+  }, [activeRecordingCount, setActiveRecordings]);
+
+  useEffect(() => {
+    if (sidecarPort == null) {
+      wsClient.disconnect();
+      useRecordingStore.getState().hydrateFromSidecar([]);
+      return;
+    }
+    wsClient.connect(sidecarPort);
+
+    const onRecordingEvent = (data: Record<string, unknown>) => {
+      applyRecordingWsPayload(data);
+    };
+
+    const onFinished = (data: Record<string, unknown>) => {
+      applyRecordingWsPayload(data);
+      const id = data.recording_id;
+      if (typeof id === "string") {
+        window.setTimeout(() => {
+          useRecordingStore.getState().removeRecording(id);
+        }, FINISHED_CLEANUP_MS);
+      }
+    };
+
+    const unsubStart = wsClient.on("recording_started", onRecordingEvent);
+    const unsubProgress = wsClient.on("recording_progress", onRecordingEvent);
+    const unsubFinished = wsClient.on("recording_finished", onFinished);
+
+    return () => {
+      unsubStart();
+      unsubProgress();
+      unsubFinished();
+      wsClient.disconnect();
+    };
+  }, [sidecarPort]);
+
+  useEffect(() => {
+    if (sidecarPort == null || !sidecarConnected) {
+      return;
+    }
+    let cancelled = false;
+    void getRecordingStatus()
+      .then((list) => {
+        if (!cancelled) {
+          useRecordingStore.getState().hydrateFromSidecar(list);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [sidecarPort, sidecarConnected]);
 
   const meta = pageMeta[currentPage];
   const PageComponent = pageComponents[currentPage];

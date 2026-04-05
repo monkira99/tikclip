@@ -5,6 +5,7 @@ type AppStore = {
   sidecarPort: number | null;
   activeRecordings: number;
   setSidecarStatus: (connected: boolean, port: number | null) => void;
+  setActiveRecordings: (n: number) => void;
 };
 
 export const useAppStore = create<AppStore>((set) => ({
@@ -13,4 +14,5 @@ export const useAppStore = create<AppStore>((set) => ({
   activeRecordings: 0,
   setSidecarStatus: (connected, port) =>
     set({ sidecarConnected: connected, sidecarPort: port }),
+  setActiveRecordings: (n) => set({ activeRecordings: n }),
 }));

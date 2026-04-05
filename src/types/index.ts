@@ -74,9 +74,22 @@ export interface Clip {
   status: ClipStatus;
   quality_score: number | null;
   scene_type: SceneType | null;
+  ai_tags_json: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** Row returned by sidecar `GET /api/recording/status` and recording WebSocket payloads. */
+export interface SidecarRecordingStatus {
+  recording_id: string;
+  account_id: number;
+  username: string;
+  status: string;
+  duration_seconds: number;
+  file_size_bytes: number;
+  file_path: string | null;
+  error_message: string | null;
 }
 
 export interface SidecarStatus {

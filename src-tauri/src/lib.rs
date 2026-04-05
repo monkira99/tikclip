@@ -26,6 +26,7 @@ pub fn run() {
             commands::accounts::create_account,
             commands::accounts::delete_account,
             commands::accounts::update_account_live_status,
+            commands::clips::list_clips,
         ])
         .setup(|app| {
             let app_data = app.path().app_data_dir().expect("failed to get app data dir");

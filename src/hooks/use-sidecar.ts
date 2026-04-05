@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect } from "react";
+import { setSidecarPort } from "@/lib/api";
 import { useAppStore } from "@/stores/app-store";
 
 type SidecarStatusPayload = {
@@ -20,10 +21,12 @@ export function useSidecar(pollMs = 2000) {
           const port =
             status.port !== undefined && status.port !== null ? status.port : null;
           setSidecarStatus(status.connected, port);
+          setSidecarPort(port);
         }
       } catch {
         if (!cancelled) {
           setSidecarStatus(false, null);
+          setSidecarPort(null);
         }
       }
     };
