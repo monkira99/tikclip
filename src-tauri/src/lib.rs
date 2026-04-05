@@ -1,7 +1,9 @@
 mod db;
+mod sidecar;
 
 use db::init::initialize_database;
 use rusqlite::Connection;
+use sidecar::SidecarManager;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::Manager;
@@ -17,6 +19,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![sidecar::get_sidecar_status])
         .setup(|app| {
             let app_data = app.path().app_data_dir().expect("failed to get app data dir");
             let storage_path = app_data.join("TikTokApp");
@@ -29,6 +32,12 @@ pub fn run() {
                 db: Mutex::new(conn),
                 storage_path,
             });
+
+            let sidecar = SidecarManager::new();
+            if let Err(e) = sidecar.start() {
+                eprintln!("sidecar start failed: {e}");
+            }
+            app.manage(sidecar);
 
             Ok(())
         })

@@ -1,9 +1,11 @@
 import { useState, type ComponentType } from "react";
+import { useSidecar } from "@/hooks/use-sidecar";
 import { AccountsPage } from "@/pages/accounts";
 import { ClipsPage } from "@/pages/clips";
 import { DashboardPage } from "@/pages/dashboard";
 import { RecordingsPage } from "@/pages/recordings";
 import { SettingsPage } from "@/pages/settings";
+import { useAppStore } from "@/stores/app-store";
 import { Sidebar } from "./sidebar";
 import { TopBar } from "./top-bar";
 
@@ -36,7 +38,10 @@ const pageComponents: Record<PageId, ComponentType> = {
 };
 
 export function AppShell() {
+  useSidecar();
   const [currentPage, setCurrentPage] = useState<PageId>("dashboard");
+  const sidecarConnected = useAppStore((s) => s.sidecarConnected);
+  const activeRecordings = useAppStore((s) => s.activeRecordings);
 
   const meta = pageMeta[currentPage];
   const PageComponent = pageComponents[currentPage];
@@ -46,8 +51,8 @@ export function AppShell() {
       <Sidebar
         currentPage={currentPage}
         onNavigate={setCurrentPage}
-        sidecarConnected={false}
-        activeRecordings={0}
+        sidecarConnected={sidecarConnected}
+        activeRecordings={activeRecordings}
       />
       <div className="flex flex-1 flex-col overflow-hidden">
         <TopBar title={meta.title} subtitle={meta.subtitle} />
