@@ -112,3 +112,17 @@ async def live_overview():
     rows = account_watcher.live_overview()
     logger.debug("live-overview %s account(s)", len(rows))
     return {"accounts": rows}
+
+
+@router.post("/api/accounts/poll-now")
+async def poll_now():
+    """Trigger an immediate poll of all watched accounts (used on app startup)."""
+    logger.info("poll-now triggered")
+    await account_watcher.poll_now()
+    rows = account_watcher.live_overview()
+    logger.info(
+        "poll-now done %s account(s): %s",
+        len(rows),
+        ", ".join(f"{r['username']}={'live' if r['is_live'] else 'off'}" for r in rows),
+    )
+    return {"accounts": rows}

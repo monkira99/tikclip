@@ -143,6 +143,10 @@ class AccountWatcher:
             except asyncio.CancelledError:
                 pass
 
+    async def poll_now(self) -> None:
+        """Run one poll immediately (called from HTTP trigger, skips interval wait)."""
+        await self._poll_once()
+
     async def _poll_loop(self) -> None:
         try:
             while self._running:
