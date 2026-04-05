@@ -3,8 +3,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
-from ..core.watcher import account_watcher
-from ..models.schemas import (
+from core.watcher import account_watcher
+from models.schemas import (
     AccountStatusRequest,
     AccountStatusResponse,
     WatchAccountRequest,

@@ -1,18 +1,15 @@
 import socket
-import sys
 
 import uvicorn
 
-from .app import create_app
-from .config import settings
+from app import create_app
+from config import settings
 
 
 def find_available_port() -> int:
     if is_port_available(settings.port):
         return settings.port
-    for port in range(
-        settings.port_fallback_range_start, settings.port_fallback_range_end + 1
-    ):
+    for port in range(settings.port_fallback_range_start, settings.port_fallback_range_end + 1):
         if is_port_available(port):
             return port
     raise RuntimeError("No available port found in configured range")

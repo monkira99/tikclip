@@ -102,9 +102,7 @@ class RecordingWorker:
         elif return_code != 0:
             self.status = "error"
             text = stderr_data.decode(errors="replace").strip() if stderr_data else ""
-            self.error_message = (
-                text[:2000] if text else f"ffmpeg exited with code {return_code}"
-            )
+            self.error_message = text[:2000] if text else f"ffmpeg exited with code {return_code}"
         else:
             self.status = "completed"
 

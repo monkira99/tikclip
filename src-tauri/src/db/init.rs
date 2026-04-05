@@ -20,9 +20,11 @@ fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     )?;
 
     let current_version: i64 = conn
-        .query_row("SELECT COALESCE(MAX(version), 0) FROM schema_version", [], |row| {
-            row.get(0)
-        })
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+            [],
+            |row| row.get(0),
+        )
         .unwrap_or(0);
 
     let migrations: Vec<(i64, &str)> = vec![(1, include_str!("migrations/001_initial.sql"))];
@@ -30,7 +32,10 @@ fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     for (version, sql) in migrations {
         if version > current_version {
             conn.execute_batch(sql)?;
-            conn.execute("INSERT INTO schema_version (version) VALUES (?1)", [version])?;
+            conn.execute(
+                "INSERT INTO schema_version (version) VALUES (?1)",
+                [version],
+            )?;
         }
     }
 

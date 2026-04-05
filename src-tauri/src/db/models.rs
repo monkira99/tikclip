@@ -22,6 +22,7 @@ pub struct Account {
     pub updated_at: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Recording {
     pub id: i64,
@@ -63,6 +64,7 @@ pub struct Clip {
     pub updated_at: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Notification {
     pub id: i64,

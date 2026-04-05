@@ -1,0 +1,1 @@
+"""TikClip sidecar application package."""

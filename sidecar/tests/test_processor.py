@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from src.core.processor import VideoProcessor
+from core.processor import VideoProcessor
 
 
 def test_processor_initializes():

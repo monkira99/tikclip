@@ -2,13 +2,13 @@ import json
 
 from fastapi import APIRouter, HTTPException
 
-from ..core.recorder import recording_manager
-from ..models.schemas import (
+from core.recorder import recording_manager
+from models.schemas import (
     RecordingStatusResponse,
     StartRecordingRequest,
     StopRecordingRequest,
 )
-from ..tiktok.stream import StreamResolver
+from tiktok.stream import StreamResolver
 
 router = APIRouter()
 

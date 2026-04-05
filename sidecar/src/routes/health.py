@@ -1,8 +1,8 @@
 from fastapi import APIRouter
 
-from ..core.recorder import recording_manager
-from ..models.schemas import HealthResponse
-from ..ws.manager import ws_manager
+from core.recorder import recording_manager
+from models.schemas import HealthResponse
+from ws.manager import ws_manager
 
 router = APIRouter()
 

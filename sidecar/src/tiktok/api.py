@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from .stream import pick_stream_url_from_room_data
+from tiktok.stream import pick_stream_url_from_room_data
 
 
 @dataclass

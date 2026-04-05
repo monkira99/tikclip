@@ -46,7 +46,7 @@ pub fn list_clips(state: State<'_, AppState>) -> Result<Vec<Clip>, String> {
         .map_err(|e| e.to_string())?;
 
     let rows = stmt
-        .query_map([], |row| map_clip_row(row))
+        .query_map([], map_clip_row)
         .map_err(|e| e.to_string())?;
 
     let mut out = Vec::new();

@@ -32,7 +32,10 @@ pub fn run() {
             commands::settings::set_setting,
         ])
         .setup(|app| {
-            let app_data = app.path().app_data_dir().expect("failed to get app data dir");
+            let app_data = app
+                .path()
+                .app_data_dir()
+                .expect("failed to get app data dir");
             let storage_path = app_data.join("TikTokApp");
             std::fs::create_dir_all(&storage_path).ok();
 

@@ -1,7 +1,8 @@
-import pytest
 from unittest.mock import AsyncMock, patch
 
-from src.tiktok.api import TikTokAPI
+import pytest
+
+from tiktok.api import TikTokAPI
 
 
 @pytest.mark.asyncio

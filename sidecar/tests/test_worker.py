@@ -1,7 +1,7 @@
 import tempfile
 from pathlib import Path
 
-from src.core.worker import RecordingWorker
+from core.worker import RecordingWorker
 
 
 def test_build_ffmpeg_command_contains_ffmpeg_and_stream_url():

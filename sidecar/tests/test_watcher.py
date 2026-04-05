@@ -2,9 +2,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.core.watcher import AccountWatcher
-from src.tiktok.api import LiveStatus
-from src.ws.manager import ws_manager
+from core.watcher import AccountWatcher
+from tiktok.api import LiveStatus
+from ws.manager import ws_manager
 
 
 @pytest.mark.asyncio
@@ -17,7 +17,7 @@ async def test_check_account_returns_dict_from_tiktok_api():
         stream_url="https://example.com/live.flv",
         viewer_count=42,
     )
-    with patch("src.core.watcher.TikTokAPI") as MockAPI:
+    with patch("core.watcher.TikTokAPI") as MockAPI:
         inst = MockAPI.return_value
         inst.check_live_status = AsyncMock(return_value=mock_status)
         inst.aclose = AsyncMock()
@@ -47,9 +47,10 @@ async def test_poll_once_emits_account_live_on_transition_only():
         viewer_count=100,
     )
 
-    with patch("src.core.watcher.TikTokAPI") as MockAPI, patch.object(
-        ws_manager, "broadcast", new_callable=AsyncMock
-    ) as broadcast:
+    with (
+        patch("core.watcher.TikTokAPI") as MockAPI,
+        patch.object(ws_manager, "broadcast", new_callable=AsyncMock) as broadcast,
+    ):
         inst = MockAPI.return_value
         inst.check_live_status = AsyncMock(return_value=live)
         inst.aclose = AsyncMock()

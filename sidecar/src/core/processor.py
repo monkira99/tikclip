@@ -8,8 +8,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from ..config import settings
-from ..ws.manager import ws_manager
+from config import settings
+from ws.manager import ws_manager
 
 logger = logging.getLogger(__name__)
 
@@ -33,20 +33,14 @@ class VideoProcessor:
     clip_min_duration: int
     clip_max_duration: int
     scene_threshold: float
-    date_str: str | None = None
+    date_str: str = field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d"))
     status: str = "pending"
     progress_percent: float = 0.0
     clips: list[ClipInfo] = field(default_factory=list)
     error_message: str | None = None
 
-    def __post_init__(self) -> None:
-        if self.date_str is None:
-            self.date_str = datetime.now().strftime("%Y-%m-%d")
-
     @staticmethod
-    def build_clip_path(
-        storage_root: Path, username: str, date_str: str, index: int
-    ) -> Path:
+    def build_clip_path(storage_root: Path, username: str, date_str: str, index: int) -> Path:
         return storage_root / "clips" / username / date_str / f"clip_{index:03d}.mp4"
 
     async def process(self) -> None:
@@ -237,8 +231,7 @@ def _probe_duration_seconds(video_path: Path) -> float:
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=120)
     if proc.returncode != 0:
         raise RuntimeError(
-            f"ffprobe failed ({proc.returncode}): "
-            f"{(proc.stderr or proc.stdout or '').strip()}"
+            f"ffprobe failed ({proc.returncode}): {(proc.stderr or proc.stdout or '').strip()}"
         )
     line = (proc.stdout or "").strip().splitlines()[-1] if proc.stdout else ""
     try:
@@ -272,9 +265,7 @@ def _extract_clip_sync(src: Path, dest: Path, start_sec: float, duration_sec: fl
         raise RuntimeError(f"ffmpeg clip extract failed ({proc.returncode}): {err[:2000]}")
 
 
-def _extract_thumbnail_sync(
-    video_path: Path, dest_jpg: Path, clip_duration_sec: float
-) -> None:
+def _extract_thumbnail_sync(video_path: Path, dest_jpg: Path, clip_duration_sec: float) -> None:
     import subprocess
 
     offset = min(1.0, max(0.0, clip_duration_sec / 2))

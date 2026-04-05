@@ -3,12 +3,12 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
-from ..core.processor import VideoProcessor
-from ..models.schemas import (
+from core.processor import VideoProcessor
+from models.schemas import (
     ClipOutput,
+    ProcessingStatusResponse,
     ProcessVideoAcceptedResponse,
     ProcessVideoRequest,
-    ProcessingStatusResponse,
 )
 
 router = APIRouter()

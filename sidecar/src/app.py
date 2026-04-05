@@ -3,9 +3,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from .core.watcher import account_watcher
-from .routes import accounts, clips as clips_routes, health, recordings
-from .ws.manager import ws_manager
+from core.watcher import account_watcher
+from routes import accounts, health, recordings
+from routes import clips as clips_routes
+from ws.manager import ws_manager
 
 
 @asynccontextmanager

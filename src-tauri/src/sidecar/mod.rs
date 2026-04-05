@@ -33,7 +33,7 @@ impl SidecarManager {
         }
     }
 
-    /// Starts `python3 -m src.main` with cwd = repo `sidecar/`. Returns bound port from first stdout line `SIDECAR_PORT=<n>`.
+    /// Starts `python3 -m main` with cwd = `sidecar/` and `PYTHONPATH=src` so first-party imports resolve. Returns bound port from first stdout line `SIDECAR_PORT=<n>`.
     pub fn start(&self) -> Result<u16, String> {
         let mut guard = self
             .inner
@@ -45,9 +45,11 @@ impl SidecarManager {
         }
 
         let sidecar_dir = resolve_sidecar_dir()?;
+        let pythonpath = sidecar_dir.join("src");
 
         let mut child = Command::new("python3")
-            .args(["-m", "src.main"])
+            .env("PYTHONPATH", &pythonpath)
+            .args(["-m", "main"])
             .current_dir(&sidecar_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -72,7 +74,7 @@ impl SidecarManager {
                 match reader.read_line(&mut line) {
                     Ok(0) => {
                         let _ = tx.send(Err(
-                            "sidecar stdout closed before SIDECAR_PORT line".to_string(),
+                            "sidecar stdout closed before SIDECAR_PORT line".to_string()
                         ));
                         return;
                     }
@@ -136,10 +138,7 @@ impl SidecarManager {
     }
 
     pub fn port(&self) -> Option<u16> {
-        self.inner
-            .lock()
-            .ok()
-            .and_then(|g| g.port)
+        self.inner.lock().ok().and_then(|g| g.port)
     }
 }
 
@@ -187,8 +186,6 @@ fn port_tcp_reachable(port: u16) -> bool {
 #[tauri::command]
 pub fn get_sidecar_status(manager: State<'_, SidecarManager>) -> SidecarStatus {
     let port = manager.port();
-    let connected = port
-        .map(port_tcp_reachable)
-        .unwrap_or(false);
+    let connected = port.map(port_tcp_reachable).unwrap_or(false);
     SidecarStatus { connected, port }
 }

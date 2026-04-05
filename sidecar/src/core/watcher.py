@@ -6,11 +6,11 @@ import asyncio
 import json
 from dataclasses import dataclass, replace
 
-from ..config import settings
-from ..tiktok.api import TikTokAPI
-from ..tiktok.stream import StreamResolver
-from ..ws.manager import ws_manager
-from .recorder import recording_manager
+from config import settings
+from core.recorder import recording_manager
+from tiktok.api import TikTokAPI
+from tiktok.stream import StreamResolver
+from ws.manager import ws_manager
 
 
 @dataclass

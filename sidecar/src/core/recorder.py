@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import uuid
 
-from ..config import settings
-from ..ws.manager import ws_manager
-from .worker import RecordingWorker
+from config import settings
+from core.worker import RecordingWorker
+from ws.manager import ws_manager
 
 
 class RecordingManager:
@@ -18,11 +18,7 @@ class RecordingManager:
 
     @property
     def active_count(self) -> int:
-        return sum(
-            1
-            for w in self._workers.values()
-            if w.status in ("pending", "recording")
-        )
+        return sum(1 for w in self._workers.values() if w.status in ("pending", "recording"))
 
     def _effective_max_duration(self, max_duration_seconds: int | None) -> int:
         if max_duration_seconds is not None:
@@ -37,11 +33,7 @@ class RecordingManager:
         max_duration_seconds: int | None = None,
     ) -> str:
         async with self._lock:
-            active = sum(
-                1
-                for w in self._workers.values()
-                if w.status in ("pending", "recording")
-            )
+            active = sum(1 for w in self._workers.values() if w.status in ("pending", "recording"))
             if active >= settings.max_concurrent_recordings:
                 raise RuntimeError("Maximum concurrent recordings reached")
             recording_id = str(uuid.uuid4())
