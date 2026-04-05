@@ -1,7 +1,7 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routes import health
+from .routes import health, recordings
 from .ws.manager import ws_manager
 
 
@@ -16,6 +16,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(health.router)
+    app.include_router(recordings.router)
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):
