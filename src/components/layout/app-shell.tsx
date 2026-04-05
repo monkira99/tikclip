@@ -1,6 +1,6 @@
 import { useEffect, useState, type ComponentType } from "react";
 import { useSidecar } from "@/hooks/use-sidecar";
-import { getRecordingStatus } from "@/lib/api";
+import * as api from "@/lib/api";
 import { wsClient } from "@/lib/ws";
 import { AccountsPage } from "@/pages/accounts";
 import { ClipsPage } from "@/pages/clips";
@@ -8,6 +8,7 @@ import { DashboardPage } from "@/pages/dashboard";
 import { RecordingsPage } from "@/pages/recordings";
 import { SettingsPage } from "@/pages/settings";
 import { dispatchSidecarNotification } from "@/lib/sidecar-notifications";
+import { useAccountStore } from "@/stores/account-store";
 import { useAppStore } from "@/stores/app-store";
 import {
   applyRecordingWsPayload,
@@ -86,8 +87,41 @@ export function AppShell() {
     const unsubStart = wsClient.on("recording_started", onRecordingEvent);
     const unsubProgress = wsClient.on("recording_progress", onRecordingEvent);
     const unsubFinished = wsClient.on("recording_finished", onFinished);
+    const persistLive = (id: number, isLive: boolean, source: string) => {
+      void (async () => {
+        try {
+          await api.updateAccountLiveStatus(id, isLive);
+          const ok = useAccountStore.getState().patchAccountLive(id, isLive);
+          if (!ok) {
+            void useAccountStore.getState().fetchAccounts();
+          }
+        } catch (err) {
+          console.warn(`[TikClip] ${source} → SQLite failed, refetching`, err);
+          void useAccountStore.getState().fetchAccounts();
+        }
+      })();
+    };
+
     const unsubLive = wsClient.on("account_live", (data) => {
       dispatchSidecarNotification("account_live", data);
+      const rawId = data.account_id;
+      const id = typeof rawId === "number" ? rawId : Number(rawId);
+      if (Number.isFinite(id)) {
+        persistLive(id, true, "account_live");
+      }
+    });
+    const unsubAccountStatus = wsClient.on("account_status", (data) => {
+      const rawId = data.account_id;
+      const rawLive = data.is_live;
+      const id = typeof rawId === "number" ? rawId : Number(rawId);
+      const isLive =
+        typeof rawLive === "boolean"
+          ? rawLive
+          : rawLive === 1 || rawLive === "1" || rawLive === "true";
+      if (!Number.isFinite(id)) {
+        return;
+      }
+      persistLive(id, isLive, "account_status");
     });
     const unsubClip = wsClient.on("clip_ready", (data) => {
       dispatchSidecarNotification("clip_ready", data);
@@ -98,6 +132,7 @@ export function AppShell() {
       unsubProgress();
       unsubFinished();
       unsubLive();
+      unsubAccountStatus();
       unsubClip();
       wsClient.disconnect();
     };
@@ -108,13 +143,39 @@ export function AppShell() {
       return;
     }
     let cancelled = false;
-    void getRecordingStatus()
+    void api.getRecordingStatus()
       .then((list) => {
         if (!cancelled) {
           useRecordingStore.getState().hydrateFromSidecar(list);
         }
       })
       .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [sidecarPort, sidecarConnected]);
+
+  useEffect(() => {
+    if (sidecarPort == null || !sidecarConnected) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      await useAccountStore.getState().fetchAccounts();
+      if (cancelled) {
+        return;
+      }
+      const accounts = useAccountStore.getState().accounts;
+      await api.syncWatcherForAccounts(
+        accounts.map((a) => ({
+          id: a.id,
+          username: a.username,
+          auto_record: a.auto_record,
+          cookies_json: a.cookies_json,
+          proxy_url: a.proxy_url,
+        })),
+      );
+    })();
     return () => {
       cancelled = true;
     };

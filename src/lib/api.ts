@@ -96,6 +96,76 @@ export async function checkAccountStatus(body: {
   });
 }
 
+export type WatchAccountBody = {
+  account_id: number;
+  username: string;
+  auto_record: boolean;
+  cookies_json?: string | null;
+  proxy_url?: string | null;
+};
+
+function normalizeUsername(username: string): string {
+  return username.trim().replace(/^@/, "");
+}
+
+/** Register account with sidecar poller (required for live checks + auto-record). */
+export async function watchAccount(body: WatchAccountBody): Promise<void> {
+  await sidecarJson<{ ok: boolean }>("/api/accounts/watch", {
+    method: "POST",
+    body: JSON.stringify({
+      account_id: body.account_id,
+      username: normalizeUsername(body.username),
+      auto_record: body.auto_record,
+      cookies_json: body.cookies_json ?? null,
+      proxy_url: body.proxy_url ?? null,
+    }),
+  });
+}
+
+export async function unwatchAccount(accountId: number): Promise<void> {
+  const base = getSidecarBaseUrl();
+  if (!base) {
+    return;
+  }
+  const res = await fetch(`${base}/api/accounts/watch/${accountId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok && res.status !== 404) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `unwatch failed: ${res.status}`);
+  }
+}
+
+/** Persist live flag from sidecar into app SQLite (drives Accounts UI). */
+export async function updateAccountLiveStatus(id: number, isLive: boolean): Promise<void> {
+  await invoke("update_account_live_status", { id, is_live: isLive });
+}
+
+/** Re-register every DB account with the sidecar after connect/restart. */
+export async function syncWatcherForAccounts(
+  accounts: {
+    id: number;
+    username: string;
+    auto_record: boolean;
+    cookies_json: string | null;
+    proxy_url: string | null;
+  }[],
+): Promise<void> {
+  await Promise.all(
+    accounts.map((a) =>
+      watchAccount({
+        account_id: a.id,
+        username: a.username,
+        auto_record: a.auto_record,
+        cookies_json: a.cookies_json,
+        proxy_url: a.proxy_url,
+      }).catch(() => {
+        /* sidecar may be mid-restart */
+      }),
+    ),
+  );
+}
+
 export async function listClips(): Promise<Clip[]> {
   return invoke<Clip[]>("list_clips");
 }
