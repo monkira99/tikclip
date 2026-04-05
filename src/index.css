@@ -11,8 +11,8 @@
   --color-bg: #0a0a0f;
   --color-surface: #111118;
   --color-border: #222222;
-  --color-text: #e0e0e0;
-  --color-text-muted: #888888;
+  --color-text: #e8e8ed;
+  --color-text-muted: #a1a1b0;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);

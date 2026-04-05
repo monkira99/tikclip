@@ -98,24 +98,42 @@ export function AccountForm({ open, onOpenChange, onSubmit }: AccountFormProps) 
             />
           </div>
           <div className="grid gap-2">
-            <span className="text-sm font-medium">Type</span>
-            <div className="flex flex-wrap gap-2">
-              <Button
+            <span className="text-sm font-medium text-[var(--color-text)]" id="acc-type-label">
+              Type
+            </span>
+            <div
+              className="flex flex-wrap gap-2"
+              role="group"
+              aria-labelledby="acc-type-label"
+            >
+              <button
                 type="button"
-                variant={accountType === "own" ? "default" : "outline"}
-                size="sm"
+                aria-pressed={accountType === "own"}
+                className={cn(
+                  "min-w-[7.5rem] rounded-lg border-2 px-3 py-1.5 text-sm font-medium transition-colors outline-none",
+                  "focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)]",
+                  accountType === "own"
+                    ? "border-[var(--color-primary)] bg-[var(--color-primary)] text-white shadow-sm"
+                    : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] hover:border-[var(--color-text-muted)] hover:bg-[var(--color-bg)]",
+                )}
                 onClick={() => setAccountType("own")}
               >
                 My account
-              </Button>
-              <Button
+              </button>
+              <button
                 type="button"
-                variant={accountType === "monitored" ? "default" : "outline"}
-                size="sm"
+                aria-pressed={accountType === "monitored"}
+                className={cn(
+                  "min-w-[7.5rem] rounded-lg border-2 px-3 py-1.5 text-sm font-medium transition-colors outline-none",
+                  "focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)]",
+                  accountType === "monitored"
+                    ? "border-[var(--color-primary)] bg-[var(--color-primary)] text-white shadow-sm"
+                    : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] hover:border-[var(--color-text-muted)] hover:bg-[var(--color-bg)]",
+                )}
                 onClick={() => setAccountType("monitored")}
               >
                 Monitored
-              </Button>
+              </button>
             </div>
           </div>
           <div className="flex items-center gap-2">

@@ -125,14 +125,16 @@ export async function listAccounts(): Promise<Account[]> {
 
 export async function createAccount(input: CreateAccountInput): Promise<number> {
   return invoke<number>("create_account", {
-    username: input.username,
-    display_name: input.display_name,
-    type: input.type,
-    cookies_json: input.cookies_json ?? null,
-    proxy_url: input.proxy_url ?? null,
-    auto_record: input.auto_record,
-    priority: input.priority,
-    notes: input.notes ?? null,
+    input: {
+      username: input.username,
+      display_name: input.display_name,
+      type: input.type,
+      cookies_json: input.cookies_json ?? null,
+      proxy_url: input.proxy_url ?? null,
+      auto_record: input.auto_record,
+      priority: input.priority,
+      notes: input.notes ?? null,
+    },
   });
 }
 

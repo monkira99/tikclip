@@ -89,10 +89,10 @@ export function AccountList() {
               </TableRow>
             ))}
             {accounts.length === 0 && !loading ? (
-              <TableRow>
+              <TableRow className="hover:bg-transparent">
                 <TableCell
                   colSpan={6}
-                  className="py-8 text-center text-[var(--color-text-muted)]"
+                  className="bg-[var(--color-bg)] py-10 text-center text-base text-[var(--color-text)]"
                 >
                   No accounts yet. Click &quot;Add account&quot; to create one.
                 </TableCell>
