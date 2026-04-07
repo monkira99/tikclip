@@ -20,7 +20,6 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import {
   useNotificationStore,
@@ -206,7 +205,7 @@ export function NotificationMenu() {
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
-        className="w-[min(100vw-2rem,24rem)] overflow-hidden border-[var(--color-border)] bg-[var(--color-surface)] p-0 shadow-xl shadow-black/40"
+        className="w-[min(100vw-2rem,24rem)] overflow-x-hidden border-[var(--color-border)] bg-[var(--color-surface)] p-0 shadow-xl shadow-black/40"
       >
         <div className="flex items-center justify-between gap-2 border-b border-[var(--color-border)]/80 bg-[var(--color-bg)]/30 px-3 py-2.5">
           <div className="flex items-center gap-2">
@@ -243,7 +242,12 @@ export function NotificationMenu() {
             </p>
           </div>
         ) : (
-          <ScrollArea className="max-h-80">
+          <div
+            className={cn(
+              "max-h-80 min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain",
+              "[-webkit-overflow-scrolling:touch]",
+            )}
+          >
             <div className="flex flex-col gap-2 p-2">
               {items.map((n) => (
                 <NotificationRow
@@ -253,7 +257,7 @@ export function NotificationMenu() {
                 />
               ))}
             </div>
-          </ScrollArea>
+          </div>
         )}
       </DropdownMenuContent>
     </DropdownMenu>
