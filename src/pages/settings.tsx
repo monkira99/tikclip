@@ -354,7 +354,7 @@ export function SettingsPage() {
             Thông tin cấu hình quá trình quay video.
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="max_concurrent">Số luồng record đồng thời tối đa</Label>
             <Input
