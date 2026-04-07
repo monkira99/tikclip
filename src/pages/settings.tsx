@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,6 +34,8 @@ const DEFAULTS = {
   pollInterval: "30",
   clipMin: "15",
   clipMax: "90",
+  /** Minutes per recording when auto-record does not override (maps to TIKCLIP_MAX_DURATION_MINUTES). */
+  recordingMaxMinutes: "5",
 } as const;
 
 function valueFromDb(db: string | null, fallback: string): string {
@@ -41,11 +43,6 @@ function valueFromDb(db: string | null, fallback: string): string {
     return fallback;
   }
   return db;
-}
-
-function effectiveTrimmed(raw: string, fallback: string): string {
-  const t = raw.trim();
-  return t === "" ? fallback : t;
 }
 
 function PathRow({
@@ -95,6 +92,7 @@ export function SettingsPage() {
   const [paths, setPaths] = useState<AppDataPaths | null>(null);
   const [maxConcurrent, setMaxConcurrent] = useState("");
   const [pollInterval, setPollInterval] = useState("");
+  const [recordingMaxMinutes, setRecordingMaxMinutes] = useState("");
   const [clipMinDuration, setClipMinDuration] = useState("");
   const [clipMaxDuration, setClipMaxDuration] = useState("");
   const [maxStorageGb, setMaxStorageGb] = useState("");
@@ -109,11 +107,13 @@ export function SettingsPage() {
     let cancelled = false;
     void (async () => {
       try {
-        const [pathInfo, isCustom, mc, pi, cmin, cmax, sg] = await Promise.all([
+        const [pathInfo, isCustom, mc, pi, rmin, rhLegacy, cmin, cmax, sg] = await Promise.all([
           getAppDataPaths(),
           storageRootIsCustom(),
           getSetting("max_concurrent"),
           getSetting("poll_interval"),
+          getSetting("recording_max_minutes"),
+          getSetting("recording_max_hours"),
           getSetting("clip_min_duration"),
           getSetting("clip_max_duration"),
           getSetting("max_storage_gb"),
@@ -123,6 +123,14 @@ export function SettingsPage() {
         setStorageIsCustom(isCustom);
         setMaxConcurrent(valueFromDb(mc, DEFAULTS.maxConcurrent));
         setPollInterval(valueFromDb(pi, DEFAULTS.pollInterval));
+        let initialMinutes = rmin;
+        if (initialMinutes === null && rhLegacy !== null && rhLegacy.trim() !== "") {
+          const h = Number(rhLegacy.trim());
+          if (!Number.isNaN(h) && Number.isInteger(h) && h > 0) {
+            initialMinutes = String(h * 60);
+          }
+        }
+        setRecordingMaxMinutes(valueFromDb(initialMinutes, DEFAULTS.recordingMaxMinutes));
         setClipMinDuration(valueFromDb(cmin, DEFAULTS.clipMin));
         setClipMaxDuration(valueFromDb(cmax, DEFAULTS.clipMax));
         setMaxStorageGb(sg === null ? "" : sg);
@@ -199,10 +207,24 @@ export function SettingsPage() {
       setError("Poll interval must be a number.");
       return;
     }
+    const rmin = recordingMaxMinutes.trim();
+    if (rmin && Number.isNaN(Number(rmin))) {
+      setError("Thời lượng tối đa mỗi lần ghi phải là số (phút).");
+      return;
+    }
+    if (rmin) {
+      const n = Number(rmin);
+      if (!Number.isInteger(n) || n < 1 || n > 10080) {
+        setError("Thời lượng ghi: nhập số nguyên phút từ 1 đến 10080 (tối đa 7 ngày).");
+        return;
+      }
+    }
     setSaving("recording");
     try {
       await setSetting("max_concurrent", mc);
       await setSetting("poll_interval", pi);
+      await setSetting("recording_max_minutes", rmin);
+      await setSetting("recording_max_hours", "");
       await restartSidecar();
       await resyncSidecarWatchers();
       const fresh = await getAppDataPaths();
@@ -213,7 +235,7 @@ export function SettingsPage() {
     } finally {
       setSaving(null);
     }
-  }, [clearFeedback, maxConcurrent, pollInterval]);
+  }, [clearFeedback, maxConcurrent, pollInterval, recordingMaxMinutes]);
 
   const saveClips = useCallback(async () => {
     clearFeedback();
@@ -290,7 +312,7 @@ export function SettingsPage() {
           <CardHeader>
             <CardTitle>Thư mục gốc dữ liệu</CardTitle>
             <CardDescription>
-              Nơi lưu trư dữ liệu của ứng dụng và các video đã quay.
+              Nơi lưu trữ dữ liệu của ứng dụng.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
@@ -332,9 +354,9 @@ export function SettingsPage() {
             Thông tin cấu hình quá trình quay video.
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
+        <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <div className="space-y-2">
-            <Label htmlFor="max_concurrent">Sô luồng record đồng thời tối đa</Label>
+            <Label htmlFor="max_concurrent">Số luồng record đồng thời tối đa</Label>
             <Input
               id="max_concurrent"
               type="text"
@@ -355,6 +377,18 @@ export function SettingsPage() {
               value={pollInterval}
               onChange={(e) => setPollInterval(e.target.value)}
               placeholder={DEFAULTS.pollInterval}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="recording_max_minutes">Thời lượng tối đa mỗi lần ghi (phút)</Label>
+            <Input
+              id="recording_max_minutes"
+              type="text"
+              inputMode="numeric"
+              className={fieldSurface}
+              value={recordingMaxMinutes}
+              onChange={(e) => setRecordingMaxMinutes(e.target.value)}
+              placeholder={DEFAULTS.recordingMaxMinutes}
             />
           </div>
         </CardContent>

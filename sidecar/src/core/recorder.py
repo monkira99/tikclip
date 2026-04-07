@@ -23,7 +23,7 @@ class RecordingManager:
     def _effective_max_duration(self, max_duration_seconds: int | None) -> int:
         if max_duration_seconds is not None:
             return max_duration_seconds
-        return settings.max_duration_hours * 3600
+        return settings.max_duration_minutes * 60
 
     async def start_recording(
         self,

@@ -32,7 +32,8 @@ class RecordingWorker:
         time_part = now.strftime("%H%M%S")
         out_dir = self.output_dir / "records" / self.username / date_part
         out_dir.mkdir(parents=True, exist_ok=True)
-        return out_dir / f"{time_part}.flv"
+        # MP4 container with stream copy (H.264/AAC from typical TikTok FLV pull URLs).
+        return out_dir / f"{time_part}.mp4"
 
     def _build_ffmpeg_command(self) -> list[str]:
         if not self.file_path:
@@ -40,12 +41,18 @@ class RecordingWorker:
         return [
             "ffmpeg",
             "-y",
+            "-loglevel",
+            "warning",
             "-i",
             self.stream_url,
-            "-c",
-            "copy",
             "-t",
             str(self.max_duration_seconds),
+            "-c",
+            "copy",
+            "-f",
+            "mp4",
+            "-movflags",
+            "+faststart",
             self.file_path,
         ]
 

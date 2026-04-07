@@ -18,7 +18,8 @@ class Settings(BaseSettings):
     debug_tiktok: bool = False
     poll_interval_seconds: int = 30
     max_concurrent_recordings: int = 5
-    max_duration_hours: int = 4
+    # Max length of one live recording when the API does not pass max_duration_seconds (Settings → minutes).
+    max_duration_minutes: int = 5
     max_file_size_gb: int = 4
     # Set by desktop app from Settings → max storage (GB); enforcement TBD.
     storage_quota_gb: float | None = None

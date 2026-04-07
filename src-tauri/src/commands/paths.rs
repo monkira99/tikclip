@@ -12,7 +12,7 @@ pub struct AppDataPaths {
     pub data_dir: String,
     /// `{root}/clips/{username}/{date}/*.mp4`
     pub clips_dir: String,
-    /// `{root}/records/{username}/{date}/*` (raw recordings).
+    /// `{root}/records/{username}/{date}/*.mp4` (raw recordings, stream copy).
     pub records_dir: String,
 }
 

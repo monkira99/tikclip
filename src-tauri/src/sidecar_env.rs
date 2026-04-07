@@ -72,6 +72,24 @@ pub fn build_sidecar_env(conn: &Connection, storage_path: &Path) -> Result<Vec<(
         "max_concurrent",
         "TIKCLIP_MAX_CONCURRENT_RECORDINGS",
     )?;
+    if let Some(t) = get_setting_trimmed(conn, "recording_max_minutes").map_err(|e| e.to_string())? {
+        if t.parse::<i64>().is_err() {
+            return Err(format!("recording_max_minutes must be an integer, got {t:?}"));
+        }
+        env.push(("TIKCLIP_MAX_DURATION_MINUTES".to_string(), t));
+    } else if let Some(h) = get_setting_trimmed(conn, "recording_max_hours").map_err(|e| e.to_string())? {
+        // Legacy Settings key (hours) → minutes for sidecar env.
+        if let Ok(hours) = h.parse::<i64>() {
+            if hours > 0 {
+                env.push((
+                    "TIKCLIP_MAX_DURATION_MINUTES".to_string(),
+                    (hours * 60).to_string(),
+                ));
+            }
+        } else {
+            return Err(format!("recording_max_hours must be an integer, got {h:?}"));
+        }
+    }
     push_int_if_valid(
         &mut env,
         conn,
