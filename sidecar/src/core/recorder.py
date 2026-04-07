@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 
 from config import settings
 from core.worker import RecordingWorker
 from ws.manager import ws_manager
+
+logger = logging.getLogger("tikclip.recorder")
 
 
 class RecordingManager:
@@ -19,6 +22,15 @@ class RecordingManager:
     @property
     def active_count(self) -> int:
         return sum(1 for w in self._workers.values() if w.status in ("pending", "recording"))
+
+    async def has_active_recording_for_account(self, account_id: int) -> bool:
+        """True while a worker for this account is pending or actively recording."""
+        async with self._lock:
+            return any(
+                self._account_ids.get(rid) == account_id
+                and w.status in ("pending", "recording")
+                for rid, w in self._workers.items()
+            )
 
     def _effective_max_duration(self, max_duration_seconds: int | None) -> int:
         if max_duration_seconds is not None:
@@ -94,6 +106,17 @@ class RecordingManager:
                 **worker.to_dict(),
             },
         )
+        # Hit max duration (-t) while the host may still be live: poll once and start next segment.
+        if worker.status == "completed":
+            try:
+                from core.watcher import account_watcher
+
+                await account_watcher.on_autorecord_segment_end(account_id)
+            except Exception:
+                logger.exception(
+                    "autorecord segment chain failed for account_id=%s",
+                    account_id,
+                )
 
     async def stop_recording(self, recording_id: str) -> bool:
         async with self._lock:

@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from core.recorder import recording_manager
 from core.watcher import AccountWatcher
 from tiktok.api import LiveStatus
 from ws.manager import ws_manager
@@ -75,3 +76,95 @@ async def test_poll_once_emits_account_live_on_transition_only():
         st = broadcast.call_args[0][1]
         assert st["account_id"] == 7
         assert st["is_live"] is True
+
+
+@pytest.mark.asyncio
+async def test_on_autorecord_segment_end_starts_next_when_still_live():
+    watcher = AccountWatcher()
+    watcher.add_account(42, "host", auto_record=True)
+
+    live = LiveStatus(
+        username="host",
+        is_live=True,
+        room_id="r1",
+        stream_url="https://cdn/next.flv",
+        viewer_count=1,
+    )
+
+    with (
+        patch("core.watcher.TikTokAPI") as MockAPI,
+        patch("core.watcher.recording_manager") as rec_mgr,
+    ):
+        inst = MockAPI.return_value
+        inst.check_live_status = AsyncMock(return_value=live)
+        inst.aclose = AsyncMock()
+        rec_mgr.start_recording = AsyncMock(return_value="new-rec-id")
+
+        await watcher.on_autorecord_segment_end(42)
+
+    rec_mgr.start_recording.assert_awaited_once()
+    kwargs = rec_mgr.start_recording.call_args.kwargs
+    assert kwargs["account_id"] == 42
+    assert kwargs["username"] == "host"
+    assert kwargs["stream_url"] == "https://cdn/next.flv"
+
+
+@pytest.mark.asyncio
+async def test_on_autorecord_segment_end_skips_when_not_auto_record():
+    watcher = AccountWatcher()
+    watcher.add_account(1, "x", auto_record=False)
+
+    with patch("core.watcher.recording_manager") as rec_mgr:
+        await watcher.on_autorecord_segment_end(1)
+
+    rec_mgr.start_recording.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_on_autorecord_segment_end_skips_when_stream_offline():
+    watcher = AccountWatcher()
+    watcher.add_account(2, "y", auto_record=True)
+
+    offline = LiveStatus(
+        username="y",
+        is_live=False,
+        room_id=None,
+        stream_url=None,
+        viewer_count=None,
+    )
+
+    with (
+        patch("core.watcher.TikTokAPI") as MockAPI,
+        patch("core.watcher.recording_manager") as rec_mgr,
+    ):
+        inst = MockAPI.return_value
+        inst.check_live_status = AsyncMock(return_value=offline)
+        inst.aclose = AsyncMock()
+
+        await watcher.on_autorecord_segment_end(2)
+
+    rec_mgr.start_recording.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_poll_once_skips_tiktok_api_when_account_has_active_recording():
+    watcher = AccountWatcher()
+    watcher.add_account(99, "recuser", auto_record=False)
+
+    with (
+        patch.object(
+            recording_manager,
+            "has_active_recording_for_account",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch("core.watcher.TikTokAPI") as MockAPI,
+        patch.object(ws_manager, "broadcast", new_callable=AsyncMock) as broadcast,
+    ):
+        await watcher._poll_once()
+
+    MockAPI.assert_not_called()
+    assert watcher._accounts[99].was_live is True
+    status_calls = [c for c in broadcast.call_args_list if c.args[0] == "account_status"]
+    assert status_calls
+    assert status_calls[-1].args[1]["is_live"] is True

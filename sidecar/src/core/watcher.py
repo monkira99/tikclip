@@ -24,6 +24,9 @@ class WatchedAccount:
     proxy_url: str | None = None
     auto_record: bool = False
     was_live: bool = False
+    # Filled on real TikTok polls while live; reused when we skip API during an active recording.
+    last_room_id: str | None = None
+    last_stream_url: str | None = None
 
 
 def _parse_cookies_json(cookies_json: str | None) -> dict | None:
@@ -59,6 +62,8 @@ class AccountWatcher:
             proxy_url=proxy_url,
             auto_record=auto_record,
             was_live=existing.was_live if existing is not None else False,
+            last_room_id=existing.last_room_id if existing is not None else None,
+            last_stream_url=existing.last_stream_url if existing is not None else None,
         )
         if existing is not None:
             logger.debug(
@@ -147,6 +152,71 @@ class AccountWatcher:
         """Run one poll immediately (called from HTTP trigger, skips interval wait)."""
         await self._poll_once()
 
+    async def _start_autorecord_from_result(
+        self,
+        account_id: int,
+        acc: WatchedAccount,
+        result: dict,
+        cookies: dict | None,
+    ) -> None:
+        """Start a recording when auto_record is on and result has live + room_id."""
+        room_id = result.get("room_id")
+        if not acc.auto_record or not room_id:
+            return
+        stream_url = result.get("stream_url")
+        if not stream_url:
+            resolver = StreamResolver(
+                cookies=cookies,
+                proxy=acc.proxy_url,
+            )
+            stream_url = await resolver.get_stream_url(str(room_id))
+        if stream_url:
+            try:
+                await recording_manager.start_recording(
+                    account_id=account_id,
+                    username=acc.username,
+                    stream_url=stream_url,
+                )
+            except RuntimeError:
+                pass
+
+    async def on_autorecord_segment_end(self, account_id: int) -> None:
+        """After a segment ends on max duration (`completed`), immediately re-check and record if still live."""
+        acc = self._accounts.get(account_id)
+        if acc is None or not acc.auto_record:
+            return
+        try:
+            cookies = _parse_cookies_json(acc.cookies_json)
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning(
+                "on_autorecord_segment_end account_id=%s invalid cookies_json: %s",
+                account_id,
+                e,
+            )
+            cookies = None
+        result = await self.check_account(acc.username, cookies, acc.proxy_url)
+        is_live = bool(result.get("is_live"))
+        logger.info(
+            "autorecord segment end account_id=%s username=%s still_live=%s",
+            account_id,
+            acc.username,
+            is_live,
+        )
+        if not is_live:
+            acc = replace(acc, was_live=False, last_room_id=None, last_stream_url=None)
+            self._accounts[account_id] = acc
+            return
+        rid = result.get("room_id")
+        surl = result.get("stream_url")
+        acc = replace(
+            acc,
+            was_live=True,
+            last_room_id=rid if rid else acc.last_room_id,
+            last_stream_url=surl if surl else acc.last_stream_url,
+        )
+        self._accounts[account_id] = acc
+        await self._start_autorecord_from_result(account_id, acc, result, cookies)
+
     async def _poll_loop(self) -> None:
         try:
             while self._running:
@@ -168,16 +238,40 @@ class AccountWatcher:
                     e,
                 )
                 cookies = None
-            result = await self.check_account(acc.username, cookies, acc.proxy_url)
-            is_live = bool(result.get("is_live"))
-            logger.info(
-                "poll account_id=%s username=%s is_live=%s room_id=%s cookies=%s",
-                account_id,
-                acc.username,
-                is_live,
-                result.get("room_id"),
-                cookie_key_summary(cookies),
+            recording_active = await recording_manager.has_active_recording_for_account(
+                account_id
             )
+            if recording_active:
+                # Active recording ⇒ host was live when we started; skip TikTok until the worker ends.
+                # Reuse last known room/stream for logs and edge broadcasts (not required for normal flow).
+                is_live = True
+                result = {
+                    "username": acc.username,
+                    "is_live": True,
+                    "room_id": acc.last_room_id,
+                    "stream_url": acc.last_stream_url,
+                    "viewer_count": None,
+                }
+                logger.info(
+                    "poll account_id=%s username=%s is_live=%s room_id=%s (skip API: recording active; "
+                    "room_id=last_seen_if_any) cookies=%s",
+                    account_id,
+                    acc.username,
+                    is_live,
+                    acc.last_room_id,
+                    cookie_key_summary(cookies),
+                )
+            else:
+                result = await self.check_account(acc.username, cookies, acc.proxy_url)
+                is_live = bool(result.get("is_live"))
+                logger.info(
+                    "poll account_id=%s username=%s is_live=%s room_id=%s cookies=%s",
+                    account_id,
+                    acc.username,
+                    is_live,
+                    result.get("room_id"),
+                    cookie_key_summary(cookies),
+                )
             room_id = result.get("room_id")
             if is_live and not acc.was_live:
                 await ws_manager.broadcast(
@@ -191,23 +285,27 @@ class AccountWatcher:
                     },
                 )
                 if acc.auto_record and room_id:
-                    stream_url = result.get("stream_url")
-                    if not stream_url:
-                        resolver = StreamResolver(
-                            cookies=cookies,
-                            proxy=acc.proxy_url,
-                        )
-                        stream_url = await resolver.get_stream_url(str(room_id))
-                    if stream_url:
-                        try:
-                            await recording_manager.start_recording(
-                                account_id=account_id,
-                                username=acc.username,
-                                stream_url=stream_url,
-                            )
-                        except RuntimeError:
-                            pass
-            acc = replace(acc, was_live=is_live)
+                    await self._start_autorecord_from_result(
+                        account_id, acc, result, cookies
+                    )
+            if recording_active:
+                acc = replace(acc, was_live=is_live)
+            elif is_live:
+                rid = result.get("room_id")
+                surl = result.get("stream_url")
+                acc = replace(
+                    acc,
+                    was_live=is_live,
+                    last_room_id=rid if rid else acc.last_room_id,
+                    last_stream_url=surl if surl else acc.last_stream_url,
+                )
+            else:
+                acc = replace(
+                    acc,
+                    was_live=False,
+                    last_room_id=None,
+                    last_stream_url=None,
+                )
             self._accounts[account_id] = acc
             logger.info(
                 "ws broadcast account_status account_id=%s is_live=%s ws_clients=%s",
