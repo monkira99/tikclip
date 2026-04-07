@@ -5,16 +5,51 @@ type StatCardsProps = {
   activeRecordings: number;
   accountCount: number;
   clipsToday: number;
-  storageUsedGb: number;
-  storageTotalGb: number;
+  /** Bytes used: max(DB totals, paths in DB, recursive scan of `clips/` + `records/` under storage root). */
+  storageUsedBytes: number;
+  /** Max storage (GB) from Settings when set; `null` if quota disabled. */
+  storageQuotaGb: number | null;
 };
+
+/** Human-readable used size; avoids showing "0.00 GB" for hundreds of MB. */
+function formatUsedBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0";
+  }
+  const gb = bytes / (1024 * 1024 * 1024);
+  if (gb >= 1) {
+    if (gb >= 100) return `${gb.toFixed(0)} GB`;
+    if (gb >= 10) return `${gb.toFixed(1)} GB`;
+    return `${gb.toFixed(2)} GB`;
+  }
+  const mb = bytes / (1024 * 1024);
+  if (mb >= 1) {
+    return mb >= 100 ? `${mb.toFixed(0)} MB` : `${mb.toFixed(1)} MB`;
+  }
+  const kb = bytes / 1024;
+  return kb >= 1 ? `${Math.round(kb)} KB` : `${bytes} B`;
+}
+
+function storageLabel(usedBytes: number, quotaGb: number | null): string {
+  const used = formatUsedBytes(usedBytes);
+  if (quotaGb != null && quotaGb > 0) {
+    const q =
+      quotaGb >= 100
+        ? quotaGb.toFixed(0)
+        : quotaGb >= 10
+          ? quotaGb.toFixed(1)
+          : quotaGb.toFixed(2);
+    return `${used} / ${q} GB`;
+  }
+  return used;
+}
 
 export function StatCards({
   activeRecordings,
   accountCount,
   clipsToday,
-  storageUsedGb,
-  storageTotalGb,
+  storageUsedBytes,
+  storageQuotaGb,
 }: StatCardsProps) {
   const cards = [
     {
@@ -34,7 +69,7 @@ export function StatCards({
     },
     {
       title: "Storage",
-      value: `${storageUsedGb} / ${storageTotalGb} GB`,
+      value: storageLabel(storageUsedBytes, storageQuotaGb),
       icon: HardDrive,
     },
   ] as const;

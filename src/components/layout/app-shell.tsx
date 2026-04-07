@@ -7,9 +7,14 @@ import { ClipsPage } from "@/pages/clips";
 import { DashboardPage } from "@/pages/dashboard";
 import { RecordingsPage } from "@/pages/recordings";
 import { SettingsPage } from "@/pages/settings";
+import {
+  insertClipFromSidecarWsPayload,
+  syncRecordingFromSidecarWsPayload,
+} from "@/lib/sidecar-db-sync";
 import { dispatchSidecarNotification } from "@/lib/sidecar-notifications";
 import { useAccountStore } from "@/stores/account-store";
 import { useAppStore } from "@/stores/app-store";
+import { useClipStore } from "@/stores/clip-store";
 import {
   applyRecordingWsPayload,
   countActiveRecordings,
@@ -50,6 +55,12 @@ const FINISHED_CLEANUP_MS = 8000;
 /** HTTP backup for live flags; sidecar poll is ~30s, sync often enough for UI without hammering. */
 const LIVE_HTTP_SYNC_MS = 5000;
 
+function logSidecarDbSyncError(context: string, err: unknown): void {
+  if (import.meta.env.DEV) {
+    console.warn(`[TikClip] ${context}`, err);
+  }
+}
+
 async function syncLiveFromSidecarHttp(): Promise<void> {
   try {
     const rows = await api.getLiveOverview();
@@ -88,10 +99,16 @@ export function AppShell() {
 
     const onRecordingEvent = (data: Record<string, unknown>) => {
       applyRecordingWsPayload(data);
+      void syncRecordingFromSidecarWsPayload(data).catch((err) =>
+        logSidecarDbSyncError("recording → SQLite sync failed", err),
+      );
     };
 
     const onFinished = (data: Record<string, unknown>) => {
       applyRecordingWsPayload(data);
+      void syncRecordingFromSidecarWsPayload(data).catch((err) =>
+        logSidecarDbSyncError("recording_finished → SQLite sync failed", err),
+      );
       dispatchSidecarNotification("recording_finished", data);
       const id = data.recording_id;
       if (typeof id === "string") {
@@ -142,6 +159,14 @@ export function AppShell() {
     });
     const unsubClip = wsClient.on("clip_ready", (data) => {
       dispatchSidecarNotification("clip_ready", data);
+      void (async () => {
+        try {
+          await insertClipFromSidecarWsPayload(data);
+          useClipStore.getState().bumpClipsRevision();
+        } catch (err) {
+          logSidecarDbSyncError("clip_ready → SQLite insert failed", err);
+        }
+      })();
     });
 
     wsClient.connect(sidecarPort);
@@ -166,6 +191,19 @@ export function AppShell() {
       .then((list) => {
         if (!cancelled) {
           useRecordingStore.getState().hydrateFromSidecar(list);
+          for (const r of list) {
+            void syncRecordingFromSidecarWsPayload({
+              recording_id: r.recording_id,
+              account_id: r.account_id,
+              status: r.status,
+              duration_seconds: r.duration_seconds,
+              file_size_bytes: r.file_size_bytes,
+              file_path: r.file_path,
+              error_message: r.error_message,
+            }).catch((err) =>
+              logSidecarDbSyncError("recording status poll → SQLite sync failed", err),
+            );
+          }
         }
       })
       .catch(() => {});

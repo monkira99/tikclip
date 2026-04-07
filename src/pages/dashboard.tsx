@@ -1,9 +1,11 @@
-import { useEffect } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { StatCards } from "@/components/dashboard/stat-cards";
 import { RecordingProgress } from "@/components/recordings/recording-progress";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { getDashboardStats, type DashboardStats } from "@/lib/api";
 import { useAppStore } from "@/stores/app-store";
 import { useAccountStore } from "@/stores/account-store";
+import { useClipStore } from "@/stores/clip-store";
 import { countActiveRecordings, useRecordingStore } from "@/stores/recording-store";
 
 export function DashboardPage() {
@@ -12,10 +14,58 @@ export function DashboardPage() {
   const accounts = useAccountStore((s) => s.accounts);
   const fetchAccounts = useAccountStore((s) => s.fetchAccounts);
   const accountsLoading = useAccountStore((s) => s.loading);
+  const clipsRevision = useClipStore((s) => s.clipsRevision);
+  const [dashStats, setDashStats] = useState<DashboardStats | null>(null);
+
+  const loadDashboardStats = useCallback(async () => {
+    try {
+      const s = await getDashboardStats();
+      setDashStats(s);
+    } catch (e) {
+      if (import.meta.env.DEV) {
+        console.warn("[TikClip] getDashboardStats failed", e);
+      }
+      setDashStats(null);
+    }
+  }, []);
+
+  /** Refetch stats when sidecar updates recording progress / finish (not only clip_revision). */
+  const recordingsSnapshot = useMemo(
+    () =>
+      JSON.stringify(
+        Object.values(recordings)
+          .sort((a, b) => a.recording_id.localeCompare(b.recording_id))
+          .map((r) => [
+            r.recording_id,
+            r.status,
+            r.duration_seconds,
+            r.file_size_bytes,
+            r.file_path,
+          ]),
+      ),
+    [recordings],
+  );
 
   useEffect(() => {
     void fetchAccounts();
   }, [fetchAccounts]);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      void loadDashboardStats();
+    }, 500);
+    return () => window.clearTimeout(t);
+  }, [loadDashboardStats, clipsRevision, sidecarConnected, recordingsSnapshot]);
+
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        void loadDashboardStats();
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [loadDashboardStats]);
 
   const activeList = Object.values(recordings).filter(
     (r) => r.status === "pending" || r.status === "recording",
@@ -28,9 +78,9 @@ export function DashboardPage() {
       <StatCards
         activeRecordings={activeCount}
         accountCount={accounts.length}
-        clipsToday={0}
-        storageUsedGb={0}
-        storageTotalGb={100}
+        clipsToday={dashStats?.clipsToday ?? 0}
+        storageUsedBytes={dashStats?.storageUsedBytes ?? 0}
+        storageQuotaGb={dashStats?.storageQuotaGb ?? null}
       />
 
       <div className="grid gap-6 lg:grid-cols-2">

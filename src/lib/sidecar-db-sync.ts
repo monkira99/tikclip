@@ -1,0 +1,97 @@
+import { invoke, isTauri } from "@tauri-apps/api/core";
+
+function coerceFiniteNumber(v: unknown, fallback = 0): number {
+  if (typeof v === "number" && Number.isFinite(v)) {
+    return v;
+  }
+  if (typeof v === "string") {
+    const n = Number(v);
+    if (Number.isFinite(n)) {
+      return n;
+    }
+  }
+  return fallback;
+}
+
+/**
+ * Upsert `recordings` from sidecar WebSocket payloads (`recording_*` events).
+ * Partial payloads (e.g. missing `file_path`) keep existing DB values via SQL COALESCE.
+ */
+export async function syncRecordingFromSidecarWsPayload(
+  data: Record<string, unknown>,
+): Promise<void> {
+  if (!isTauri()) {
+    return;
+  }
+  const sidecar_recording_id =
+    typeof data.recording_id === "string" ? data.recording_id : null;
+  if (!sidecar_recording_id) {
+    return;
+  }
+
+  const account_id = coerceFiniteNumber(data.account_id, 0);
+  if (account_id <= 0) {
+    return;
+  }
+
+  const status = typeof data.status === "string" ? data.status : "pending";
+  const duration_seconds = Math.trunc(coerceFiniteNumber(data.duration_seconds, 0));
+  const file_size_bytes = Math.trunc(coerceFiniteNumber(data.file_size_bytes, 0));
+  const file_path = typeof data.file_path === "string" ? data.file_path : null;
+  const error_message =
+    typeof data.error_message === "string" ? data.error_message : null;
+
+  await invoke("sync_recording_from_sidecar", {
+    input: {
+      sidecar_recording_id,
+      account_id,
+      status,
+      duration_seconds,
+      file_size_bytes,
+      file_path,
+      error_message,
+    },
+  });
+}
+
+/** Insert a clip row from a `clip_ready` WebSocket payload. */
+export async function insertClipFromSidecarWsPayload(
+  data: Record<string, unknown>,
+): Promise<void> {
+  if (!isTauri()) {
+    return;
+  }
+  const sidecar_recording_id =
+    typeof data.recording_id === "string" ? data.recording_id : null;
+  if (!sidecar_recording_id) {
+    return;
+  }
+
+  const account_id = coerceFiniteNumber(data.account_id, 0);
+  if (account_id <= 0) {
+    return;
+  }
+
+  const file_path = typeof data.path === "string" ? data.path : "";
+  if (!file_path) {
+    return;
+  }
+
+  const thumbnail_path =
+    typeof data.thumbnail_path === "string" ? data.thumbnail_path : "";
+  const duration_sec = coerceFiniteNumber(data.duration_sec, 0);
+  const start_sec = coerceFiniteNumber(data.start_sec, 0);
+  const end_sec = coerceFiniteNumber(data.end_sec, 0);
+
+  await invoke("insert_clip_from_sidecar", {
+    input: {
+      sidecar_recording_id,
+      account_id,
+      file_path,
+      thumbnail_path,
+      duration_sec,
+      start_sec,
+      end_sec,
+    },
+  });
+}

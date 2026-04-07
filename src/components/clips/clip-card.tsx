@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
@@ -25,8 +25,17 @@ interface ClipCardProps {
 }
 
 export function ClipCard({ clip }: ClipCardProps) {
+  const [thumbFailed, setThumbFailed] = useState(false);
+
+  useEffect(() => {
+    setThumbFailed(false);
+  }, [clip.id, clip.thumbnail_path]);
+
   const thumbSrc = useMemo(() => {
-    const path = clip.thumbnail_path;
+    if (thumbFailed) {
+      return null;
+    }
+    const path = clip.thumbnail_path?.trim();
     if (!path) {
       return null;
     }
@@ -38,19 +47,46 @@ export function ClipCard({ clip }: ClipCardProps) {
     } catch {
       return null;
     }
-  }, [clip.thumbnail_path]);
+  }, [clip.thumbnail_path, thumbFailed]);
+
+  const videoSrc = useMemo(() => {
+    if (!isTauri() || !clip.file_path?.trim()) {
+      return null;
+    }
+    try {
+      return convertFileSrc(clip.file_path.trim());
+    } catch {
+      return null;
+    }
+  }, [clip.file_path]);
+
+  const showVideoPoster = thumbFailed || !thumbSrc;
 
   return (
     <Card className="overflow-hidden border-[var(--color-border)] bg-[var(--color-surface)]">
       <div className="relative aspect-video w-full bg-black/40">
-        {thumbSrc ? (
-          <img src={thumbSrc} alt="" className="h-full w-full object-cover" />
+        {thumbSrc && !thumbFailed ? (
+          <img
+            src={thumbSrc}
+            alt=""
+            className="h-full w-full object-cover"
+            onError={() => setThumbFailed(true)}
+          />
+        ) : showVideoPoster && videoSrc ? (
+          <video
+            src={videoSrc}
+            muted
+            playsInline
+            preload="metadata"
+            className="h-full w-full object-cover"
+            aria-label="Xem trước clip"
+          />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-4xl opacity-40">
             🎞️
           </div>
         )}
-        <div className="absolute bottom-2 right-2 rounded bg-black/60 px-2 py-0.5 font-mono text-[10px] text-white">
+        <div className="pointer-events-none absolute bottom-2 right-2 rounded bg-black/60 px-2 py-0.5 font-mono text-[10px] text-white">
           {formatDuration(clip.duration_seconds)}
         </div>
       </div>
@@ -63,9 +99,9 @@ export function ClipCard({ clip }: ClipCardProps) {
         )}
       </CardHeader>
       <CardContent className="pb-2">
-        <Badge variant="outline" className="text-[10px]">
+        {/* <Badge variant="outline" className="text-[10px]">
           {clip.status}
-        </Badge>
+        </Badge> */}
         {clip.scene_type && (
           <Badge variant="secondary" className="ml-2 text-[10px]">
             {clip.scene_type}

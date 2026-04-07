@@ -273,6 +273,27 @@ export async function getAppDataPaths(): Promise<AppDataPaths> {
   return invoke<AppDataPaths>("get_app_data_paths");
 }
 
+/** Local calendar date `YYYY-MM-DD` (matches clip grouping / dashboard “today”). */
+export function localDateYmd(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+export type DashboardStats = {
+  clipsToday: number;
+  storageUsedBytes: number;
+  storageQuotaGb: number | null;
+};
+
+export async function getDashboardStats(): Promise<DashboardStats> {
+  return invoke<DashboardStats>("get_dashboard_stats", {
+    today_ymd: localDateYmd(),
+  });
+}
+
 /** Open a folder or file in Finder / Explorer / file manager (native backend). */
 export async function openPathInSystem(path: string): Promise<void> {
   await invoke("open_path", { path });
