@@ -30,7 +30,7 @@ class RecordingWorker:
         now = datetime.now()
         date_part = now.strftime("%Y-%m-%d")
         time_part = now.strftime("%H%M%S")
-        out_dir = self.output_dir / self.username / date_part
+        out_dir = self.output_dir / "records" / self.username / date_part
         out_dir.mkdir(parents=True, exist_ok=True)
         return out_dir / f"{time_part}.flv"
 

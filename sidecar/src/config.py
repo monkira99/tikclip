@@ -11,7 +11,8 @@ class Settings(BaseSettings):
     port: int = 18321
     port_fallback_range_start: int = 18322
     port_fallback_range_end: int = 18330
-    storage_path: Path = Path.home() / "TikTokApp"
+    # Desktop app uses ~/.tikclip by default; CLI / standalone may set TIKCLIP_STORAGE_PATH or .env.
+    storage_path: Path = Path.home() / ".tikclip"
     log_level: str = "info"
     # TIKCLIP_DEBUG_TIKTOK=1 — log short HTML snippet when room_id parse fails (no secrets).
     debug_tiktok: bool = False
@@ -19,6 +20,8 @@ class Settings(BaseSettings):
     max_concurrent_recordings: int = 5
     max_duration_hours: int = 4
     max_file_size_gb: int = 4
+    # Set by desktop app from Settings → max storage (GB); enforcement TBD.
+    storage_quota_gb: float | None = None
     retry_attempts: int = 3
     clip_min_duration: int = 15
     clip_max_duration: int = 90
