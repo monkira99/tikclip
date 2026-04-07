@@ -10,7 +10,8 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 18321
     port_fallback_range_start: int = 18322
-    port_fallback_range_end: int = 18330
+    # Wide range so another instance or many restarts can still bind.
+    port_fallback_range_end: int = 18999
     # Desktop app uses ~/.tikclip by default; CLI / standalone may set TIKCLIP_STORAGE_PATH or .env.
     storage_path: Path = Path.home() / ".tikclip"
     log_level: str = "info"
@@ -18,7 +19,7 @@ class Settings(BaseSettings):
     debug_tiktok: bool = False
     poll_interval_seconds: int = 30
     max_concurrent_recordings: int = 5
-    # Max length of one live recording when the API does not pass max_duration_seconds (Settings → minutes).
+    # Max length of one live recording if API omits max_duration_seconds (Settings, minutes).
     max_duration_minutes: int = 5
     max_file_size_gb: int = 4
     # Set by desktop app from Settings → max storage (GB); enforcement TBD.
