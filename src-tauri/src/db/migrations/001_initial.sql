@@ -14,8 +14,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     last_live_at TEXT,
     last_checked_at TEXT,
     notes TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now', '+7 hours')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now', '+7 hours'))
 );
 
 CREATE TABLE IF NOT EXISTS recordings (
@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS recordings (
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     room_id TEXT,
     status TEXT NOT NULL DEFAULT 'recording' CHECK (status IN ('recording', 'done', 'error', 'processing')),
-    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    started_at TEXT NOT NULL DEFAULT (datetime('now', '+7 hours')),
     ended_at TEXT,
     duration_seconds INTEGER NOT NULL DEFAULT 0,
     file_path TEXT,
@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS recordings (
     bitrate TEXT,
     error_message TEXT,
     auto_process INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now', '+7 hours'))
 );
 
 CREATE TABLE IF NOT EXISTS clips (
@@ -51,8 +51,8 @@ CREATE TABLE IF NOT EXISTS clips (
     scene_type TEXT CHECK (scene_type IN ('product_intro', 'highlight', 'general')),
     ai_tags_json TEXT,
     notes TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now', '+7 hours')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now', '+7 hours'))
 );
 
 CREATE TABLE IF NOT EXISTS products (
@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS products (
     tiktok_shop_id TEXT,
     price REAL,
     category TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now', '+7 hours'))
 );
 
 CREATE TABLE IF NOT EXISTS clip_products (
@@ -82,13 +82,13 @@ CREATE TABLE IF NOT EXISTS notifications (
     recording_id INTEGER REFERENCES recordings(id) ON DELETE SET NULL,
     clip_id INTEGER REFERENCES clips(id) ON DELETE SET NULL,
     is_read INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now', '+7 hours'))
 );
 
 CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    updated_at TEXT NOT NULL DEFAULT (datetime('now', '+7 hours'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_recordings_account ON recordings(account_id);
