@@ -1,3 +1,5 @@
+use crate::sidecar_env;
+use crate::AppState;
 use serde::Serialize;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -36,7 +38,8 @@ impl SidecarManager {
     /// Starts the sidecar with `python -m main`, cwd = `sidecar/`, `PYTHONPATH=src`.
     /// Uses `sidecar/.venv/bin/python3` when present (from `uv sync` / `python -m venv`), else `python3` on PATH.
     /// Returns bound port from first stdout line `SIDECAR_PORT=<n>`.
-    pub fn start(&self) -> Result<u16, String> {
+    /// `tikclip_env` are `TIKCLIP_*` pairs from app DB (override `sidecar/.env`).
+    pub fn start(&self, tikclip_env: &[(String, String)]) -> Result<u16, String> {
         let mut guard = self
             .inner
             .lock()
@@ -50,8 +53,12 @@ impl SidecarManager {
         let pythonpath = sidecar_dir.join("src");
         let python = resolve_python_executable(&sidecar_dir);
 
-        let mut child = Command::new(&python)
-            .env("PYTHONPATH", &pythonpath)
+        let mut cmd = Command::new(&python);
+        cmd.env("PYTHONPATH", &pythonpath);
+        for (k, v) in tikclip_env {
+            cmd.env(k, v);
+        }
+        let mut child = cmd
             .args(["-m", "main"])
             .current_dir(&sidecar_dir)
             .stdout(Stdio::piped())
@@ -219,4 +226,18 @@ pub fn get_sidecar_status(manager: State<'_, SidecarManager>) -> SidecarStatus {
     let port = manager.port();
     let connected = port.map(port_tcp_reachable).unwrap_or(false);
     SidecarStatus { connected, port }
+}
+
+/// Stops the sidecar and starts it again with settings from SQLite (same as cold start).
+#[tauri::command]
+pub fn restart_sidecar(
+    manager: State<'_, SidecarManager>,
+    state: State<'_, AppState>,
+) -> Result<u16, String> {
+    manager.stop()?;
+    let env = {
+        let conn = state.db.lock().map_err(|e| e.to_string())?;
+        sidecar_env::build_sidecar_env(&conn, &state.storage_path)?
+    };
+    manager.start(&env)
 }
