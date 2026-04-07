@@ -1,8 +1,11 @@
 use crate::db::models::Clip;
 use crate::AppState;
 use rusqlite::Result as SqlResult;
-use rusqlite::Row;
+use rusqlite::{params, OptionalExtension, Row};
+use serde::Deserialize;
 use tauri::State;
+
+use super::recordings::{sync_recording_from_sidecar_conn, SyncRecordingFromSidecarInput};
 
 fn map_clip_row(row: &Row) -> SqlResult<Clip> {
     Ok(Clip {
@@ -55,3 +58,107 @@ pub fn list_clips(state: State<'_, AppState>) -> Result<Vec<Clip>, String> {
     }
     Ok(out)
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct InsertClipFromSidecarInput {
+    pub sidecar_recording_id: String,
+    pub account_id: i64,
+    pub file_path: String,
+    pub thumbnail_path: String,
+    pub duration_sec: f64,
+    pub start_sec: f64,
+    pub end_sec: f64,
+}
+
+/// Persist one generated clip when the sidecar emits `clip_ready` over WebSocket.
+#[tauri::command]
+pub fn insert_clip_from_sidecar(
+    state: State<'_, AppState>,
+    input: InsertClipFromSidecarInput,
+) -> Result<i64, String> {
+    if input.sidecar_recording_id.trim().is_empty() {
+        return Err("sidecar_recording_id is required".to_string());
+    }
+    if input.file_path.trim().is_empty() {
+        return Err("file_path is required".to_string());
+    }
+
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+
+    let mut rec_id: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM recordings WHERE sidecar_recording_id = ?1",
+            [&input.sidecar_recording_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+
+    if rec_id.is_none() {
+        sync_recording_from_sidecar_conn(
+            &conn,
+            &SyncRecordingFromSidecarInput {
+                sidecar_recording_id: input.sidecar_recording_id.clone(),
+                account_id: input.account_id,
+                status: "done".to_string(),
+                duration_seconds: 0,
+                file_size_bytes: 0,
+                file_path: None,
+                error_message: None,
+            },
+        )?;
+        rec_id = Some(
+            conn.query_row(
+                "SELECT id FROM recordings WHERE sidecar_recording_id = ?1",
+                [&input.sidecar_recording_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?,
+        );
+    }
+
+    let recording_id = rec_id.expect("recording row must exist after upsert");
+
+    let existing: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM clips WHERE recording_id = ?1 AND file_path = ?2",
+            params![recording_id, &input.file_path],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    if let Some(id) = existing {
+        return Ok(id);
+    }
+
+    let file_size_bytes: i64 = std::fs::metadata(&input.file_path)
+        .map(|m| m.len() as i64)
+        .unwrap_or(0);
+
+    let duration_seconds = input.duration_sec.round().max(0.0) as i64;
+
+    let thumb = input.thumbnail_path.trim();
+    let thumb_opt = if thumb.is_empty() { None } else { Some(thumb) };
+
+    conn.execute(
+        "INSERT INTO clips (\
+           recording_id, account_id, title, file_path, thumbnail_path, \
+           duration_seconds, file_size_bytes, start_time, end_time, status\
+         ) VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, ?7, ?8, 'ready')",
+        params![
+            recording_id,
+            input.account_id,
+            &input.file_path,
+            thumb_opt,
+            duration_seconds,
+            file_size_bytes,
+            input.start_sec,
+            input.end_sec,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(conn.last_insert_rowid())
+}
+

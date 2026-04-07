@@ -27,7 +27,10 @@ fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         )
         .unwrap_or(0);
 
-    let migrations: Vec<(i64, &str)> = vec![(1, include_str!("migrations/001_initial.sql"))];
+    let migrations: Vec<(i64, &str)> = vec![
+        (1, include_str!("migrations/001_initial.sql")),
+        (2, include_str!("migrations/002_sidecar_recording_id.sql")),
+    ];
 
     for (version, sql) in migrations {
         if version > current_version {
