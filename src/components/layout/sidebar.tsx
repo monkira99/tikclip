@@ -32,7 +32,7 @@ export function Sidebar({
         </div>
         <div>
           <div className="text-sm font-bold text-white">TikClip</div>
-          <div className="text-[10px] text-[var(--color-text-muted)]">Live Recorder</div>
+          <div className="text-[10px] text-[var(--color-text-muted)]">Reup Livestream</div>
         </div>
       </div>
 

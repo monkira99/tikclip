@@ -1,4 +1,9 @@
-import { useEffect, useState, type ComponentType } from "react";
+import { useEffect, useRef, useState, type ComponentType } from "react";
+import { isTauri } from "@tauri-apps/api/core";
+import {
+  isPermissionGranted,
+  requestPermission,
+} from "@tauri-apps/plugin-notification";
 import { useSidecar } from "@/hooks/use-sidecar";
 import * as api from "@/lib/api";
 import { wsClient } from "@/lib/ws";
@@ -11,6 +16,7 @@ import {
   insertClipFromSidecarWsPayload,
   syncRecordingFromSidecarWsPayload,
 } from "@/lib/sidecar-db-sync";
+import { hydrateNotificationsFromDb } from "@/lib/notifications-sync";
 import { dispatchSidecarNotification } from "@/lib/sidecar-notifications";
 import { useAccountStore } from "@/stores/account-store";
 import { useAppStore } from "@/stores/app-store";
@@ -85,10 +91,33 @@ export function AppShell() {
   const activeRecordings = useAppStore((s) => s.activeRecordings);
   const setActiveRecordings = useAppStore((s) => s.setActiveRecordings);
   const activeRecordingCount = useRecordingStore((s) => countActiveRecordings(s.recordings));
+  const notifyWarmupDone = useRef(false);
 
   useEffect(() => {
     setActiveRecordings(activeRecordingCount);
   }, [activeRecordingCount, setActiveRecordings]);
+
+  useEffect(() => {
+    void hydrateNotificationsFromDb();
+  }, []);
+
+  /** macOS / Windows: prompt once when sidecar is up so OS alerts work before the first event. */
+  useEffect(() => {
+    if (!sidecarConnected || notifyWarmupDone.current || !isTauri()) {
+      return;
+    }
+    notifyWarmupDone.current = true;
+    void (async () => {
+      try {
+        const granted = await isPermissionGranted();
+        if (!granted) {
+          await requestPermission();
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, [sidecarConnected]);
 
   useEffect(() => {
     if (sidecarPort == null) {

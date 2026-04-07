@@ -1,9 +1,27 @@
 import { isTauri } from "@tauri-apps/api/core";
-import { sendNotification } from "@tauri-apps/plugin-notification";
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from "@tauri-apps/plugin-notification";
+import { toast } from "sonner";
+import { insertNotificationDb } from "@/lib/api";
 import {
   type NotificationKind,
   useNotificationStore,
 } from "@/stores/notification-store";
+
+function pickAccountId(data: Record<string, unknown>): number | null {
+  const raw = data.account_id;
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return raw;
+  }
+  if (typeof raw === "string") {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
 
 function formatSidecarMessage(
   eventType: string,
@@ -59,22 +77,75 @@ function formatSidecarMessage(
   }
 }
 
+async function trySendOsNotification(title: string, body: string): Promise<void> {
+  if (!isTauri()) {
+    return;
+  }
+  let granted = await isPermissionGranted();
+  if (!granted) {
+    const perm = await requestPermission();
+    granted = perm === "granted";
+  }
+  if (!granted) {
+    if (import.meta.env.DEV) {
+      console.warn("[TikClip] OS notifications: permission not granted");
+    }
+    return;
+  }
+  try {
+    sendNotification({ title, body: body || undefined });
+  } catch (e) {
+    if (import.meta.env.DEV) {
+      console.warn("[TikClip] sendNotification failed", e);
+    }
+  }
+}
+
 /**
- * Queue in the notification store and show an OS notification when running inside Tauri.
+ * Persist to SQLite, in-app store + toast, and OS notification (Tauri) after permission check.
  */
 export function dispatchSidecarNotification(
   eventType: string,
   data: Record<string, unknown>,
 ): void {
-  const { kind, title, body } = formatSidecarMessage(eventType, data);
-  useNotificationStore.getState().addNotification({ kind, title, body });
+  void (async () => {
+    const { kind, title, body } = formatSidecarMessage(eventType, data);
+    const accountId = pickAccountId(data);
+    let idStr: string | undefined;
+    let createdAt = Date.now();
 
-  if (!isTauri()) {
-    return;
-  }
-  try {
-    void sendNotification({ title, body: body || undefined });
-  } catch {
-    /* OS notification unavailable or permission denied */
-  }
+    if (isTauri()) {
+      try {
+        const rowId = await insertNotificationDb({
+          notificationType: kind,
+          title,
+          message: body,
+          accountId,
+          recordingId: null,
+          clipId: null,
+        });
+        idStr = String(rowId);
+      } catch (e) {
+        if (import.meta.env.DEV) {
+          console.warn("[TikClip] insertNotificationDb failed", e);
+        }
+      }
+    }
+
+    useNotificationStore.getState().addNotification({
+      kind,
+      title,
+      body,
+      id: idStr,
+      createdAt,
+    });
+
+    const description = body || undefined;
+    toast(title, {
+      description,
+      duration: 6500,
+    });
+
+    await trySendOsNotification(title, body);
+  })();
 }

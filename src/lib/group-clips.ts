@@ -11,7 +11,10 @@ export type DateClipGroup = {
   users: UserClipGroup[];
 };
 
-/** `created_at` from SQLite → `YYYY-MM-DD` for grouping. */
+/**
+ * `created_at` from SQLite (GMT+7 wall clock, `YYYY-MM-DD HH:MM:SS`) → date key for grouping.
+ * Prefer the first 10 chars so we do not depend on the browser's local timezone.
+ */
 export function clipDateKey(createdAt: string): string {
   const s = createdAt.trim();
   if (s.length >= 10) {

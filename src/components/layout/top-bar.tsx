@@ -1,5 +1,5 @@
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NotificationMenu } from "@/components/layout/notification-menu";
 import { cn } from "@/lib/utils";
 
 interface TopBarProps {
@@ -26,15 +26,7 @@ export function TopBar({ title, subtitle }: TopBarProps) {
           )}
           aria-label="Search (coming soon)"
         />
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          className="h-8 w-8 border-[var(--color-border)] bg-[var(--color-surface)]"
-          aria-label="Notifications"
-        >
-          🔔
-        </Button>
+        <NotificationMenu />
       </div>
     </div>
   );

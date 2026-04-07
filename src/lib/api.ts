@@ -273,14 +273,31 @@ export async function getAppDataPaths(): Promise<AppDataPaths> {
   return invoke<AppDataPaths>("get_app_data_paths");
 }
 
-/** Local calendar date `YYYY-MM-DD` (matches clip grouping / dashboard “today”). */
-export function localDateYmd(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+const HCM_TIMEZONE = "Asia/Ho_Chi_Minh";
+
+/** Calendar date in GMT+7 (Vietnam), `YYYY-MM-DD` — matches DB wall clock and clip paths. */
+export function hcmDateYmd(): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: HCM_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const y = parts.find((p) => p.type === "year")?.value;
+  const m = parts.find((p) => p.type === "month")?.value;
+  const d = parts.find((p) => p.type === "day")?.value;
+  if (y && m && d) {
+    return `${y}-${m}-${d}`;
+  }
+  const d0 = new Date();
+  const yy = d0.getFullYear();
+  const mm = String(d0.getMonth() + 1).padStart(2, "0");
+  const dd = String(d0.getDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
 }
+
+/** @deprecated Use `hcmDateYmd` — kept for any external imports. */
+export const localDateYmd = hcmDateYmd;
 
 export type DashboardStats = {
   clipsToday: number;
@@ -290,8 +307,57 @@ export type DashboardStats = {
 
 export async function getDashboardStats(): Promise<DashboardStats> {
   return invoke<DashboardStats>("get_dashboard_stats", {
-    today_ymd: localDateYmd(),
+    today_ymd: hcmDateYmd(),
   });
+}
+
+/** Row from `notifications` table (camelCase from Tauri). */
+export type DbNotificationRow = {
+  id: number;
+  kind: string;
+  title: string;
+  body: string;
+  read: boolean;
+  createdAt: string;
+};
+
+export async function insertNotificationDb(input: {
+  notificationType: string;
+  title: string;
+  message: string;
+  accountId?: number | null;
+  recordingId?: number | null;
+  clipId?: number | null;
+}): Promise<number> {
+  return invoke<number>("insert_notification", {
+    input: {
+      notificationType: input.notificationType,
+      title: input.title,
+      message: input.message,
+      accountId: input.accountId ?? null,
+      recordingId: input.recordingId ?? null,
+      clipId: input.clipId ?? null,
+    },
+  });
+}
+
+export async function listNotificationsDb(limit = 200): Promise<DbNotificationRow[]> {
+  return invoke<DbNotificationRow[]>("list_notifications", { limit });
+}
+
+export async function markNotificationReadDb(id: number): Promise<void> {
+  await invoke("mark_notification_read", { id });
+}
+
+export async function markAllNotificationsReadDb(): Promise<void> {
+  await invoke("mark_all_notifications_read");
+}
+
+/** Parse SQLite `YYYY-MM-DD HH:MM:SS` stored as GMT+7 wall clock. */
+export function dbNotificationCreatedAtToMs(createdAt: string): number {
+  const t = createdAt.trim().replace(" ", "T");
+  const d = new Date(`${t}+07:00`);
+  return Number.isNaN(d.getTime()) ? Date.now() : d.getTime();
 }
 
 /** Open a folder or file in Finder / Explorer / file manager (native backend). */

@@ -19,10 +19,16 @@ function newId(): string {
 
 type NotificationStoreState = {
   items: AppNotification[];
+  /** Replace list (e.g. after loading from SQLite). */
+  setNotifications: (items: AppNotification[]) => void;
   addNotification: (input: {
     kind: NotificationKind;
     title: string;
     body?: string;
+    /** When set (e.g. DB `notifications.id`), avoids duplicate rows in UI. */
+    id?: string;
+    createdAt?: number;
+    read?: boolean;
   }) => string;
   markRead: (id: string) => void;
   markAllRead: () => void;
@@ -35,18 +41,24 @@ export const useNotificationStore = create<NotificationStoreState>((set, get) =>
 
   getUnreadCount: () => selectUnreadCount(get().items),
 
+  setNotifications: (items) =>
+    set({
+      items: items.length > MAX_QUEUE ? items.slice(0, MAX_QUEUE) : items,
+    }),
+
   addNotification: (input) => {
-    const id = newId();
+    const id = input.id ?? newId();
     const row: AppNotification = {
       id,
       kind: input.kind,
       title: input.title,
       body: input.body ?? "",
-      read: false,
-      createdAt: Date.now(),
+      read: input.read ?? false,
+      createdAt: input.createdAt ?? Date.now(),
     };
     set((s) => {
-      const next = [row, ...s.items];
+      const rest = s.items.filter((x) => x.id !== id);
+      const next = [row, ...rest];
       if (next.length > MAX_QUEUE) {
         next.length = MAX_QUEUE;
       }
