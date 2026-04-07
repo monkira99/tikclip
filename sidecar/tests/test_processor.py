@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from core.processor import VideoProcessor
+from core.processor import VideoProcessor, next_clip_file_index
 
 
 def test_processor_initializes():
@@ -25,3 +25,24 @@ def test_build_clip_path():
     root = Path("/storage")
     path = VideoProcessor.build_clip_path(root, "user", "2026-04-05", 7)
     assert path == Path("/storage/clips/user/2026-04-05/clip_007.mp4")
+
+
+def test_next_clip_file_index_empty(tmp_path: Path):
+    d = tmp_path / "clips" / "u" / "2026-04-08"
+    d.mkdir(parents=True)
+    assert next_clip_file_index(d) == 1
+
+
+def test_next_clip_file_index_after_existing(tmp_path: Path):
+    d = tmp_path / "day"
+    d.mkdir()
+    (d / "clip_001.mp4").write_bytes(b"x")
+    (d / "clip_002.jpg").write_bytes(b"x")
+    assert next_clip_file_index(d) == 3
+
+
+def test_next_clip_file_index_gaps(tmp_path: Path):
+    d = tmp_path / "day"
+    d.mkdir()
+    (d / "clip_005.mp4").touch()
+    assert next_clip_file_index(d) == 6

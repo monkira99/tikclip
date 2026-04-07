@@ -4,14 +4,34 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 
 from config import settings
+from core.time_hcm import today_ymd_hcm
 from ws.manager import ws_manager
 
 logger = logging.getLogger(__name__)
+
+_CLIP_MP4 = re.compile(r"^clip_(\d{3})\.mp4$", re.IGNORECASE)
+_CLIP_JPG = re.compile(r"^clip_(\d{3})\.jpg$", re.IGNORECASE)
+
+
+def next_clip_file_index(out_dir: Path) -> int:
+    """Next unused 1-based clip_NNN index for this folder (no overwrite across runs)."""
+    max_n = 0
+    if not out_dir.is_dir():
+        return 1
+    for p in out_dir.iterdir():
+        if not p.is_file():
+            continue
+        for pat in (_CLIP_MP4, _CLIP_JPG):
+            m = pat.match(p.name)
+            if m:
+                max_n = max(max_n, int(m.group(1)))
+                break
+    return max_n + 1
 
 
 @dataclass
@@ -33,7 +53,7 @@ class VideoProcessor:
     clip_min_duration: int
     clip_max_duration: int
     scene_threshold: float
-    date_str: str = field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d"))
+    date_str: str = field(default_factory=today_ymd_hcm)
     status: str = "pending"
     progress_percent: float = 0.0
     clips: list[ClipInfo] = field(default_factory=list)
@@ -69,11 +89,13 @@ class VideoProcessor:
 
             out_dir = settings.storage_path / "clips" / self.username / self.date_str
             out_dir.mkdir(parents=True, exist_ok=True)
+            start_idx = next_clip_file_index(out_dir)
 
             for i, (start_sec, end_sec) in enumerate(grouped):
                 duration = max(0.0, end_sec - start_sec)
+                file_index = start_idx + i
                 clip_path = self.build_clip_path(
-                    settings.storage_path, self.username, self.date_str, i + 1
+                    settings.storage_path, self.username, self.date_str, file_index
                 )
                 thumb_path = clip_path.with_suffix(".jpg")
 
@@ -92,7 +114,7 @@ class VideoProcessor:
                 )
 
                 info = ClipInfo(
-                    index=i + 1,
+                    index=file_index,
                     path=clip_path,
                     thumbnail_path=thumb_path,
                     start_sec=start_sec,

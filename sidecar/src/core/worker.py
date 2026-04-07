@@ -6,8 +6,9 @@ import asyncio
 import os
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
+
+from core.time_hcm import now_hcm
 
 
 @dataclass
@@ -27,7 +28,7 @@ class RecordingWorker:
     _stop_requested: bool = field(default=False, repr=False)
 
     def _output_file_path(self) -> Path:
-        now = datetime.now()
+        now = now_hcm()
         date_part = now.strftime("%Y-%m-%d")
         time_part = now.strftime("%H%M%S")
         out_dir = self.output_dir / "records" / self.username / date_part
