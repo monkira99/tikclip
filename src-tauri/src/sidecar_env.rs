@@ -50,6 +50,26 @@ fn push_float_if_valid(
     Ok(())
 }
 
+fn push_bool_setting(
+    env: &mut Vec<(String, String)>,
+    conn: &Connection,
+    db_key: &str,
+    tikclip_key: &str,
+) -> Result<(), String> {
+    if let Some(t) = get_setting_trimmed(conn, db_key).map_err(|e| e.to_string())? {
+        let lower = t.to_ascii_lowercase();
+        let enabled = matches!(
+            lower.as_str(),
+            "1" | "true" | "yes" | "on"
+        );
+        env.push((
+            tikclip_key.to_string(),
+            if enabled { "true".to_string() } else { "false".to_string() },
+        ));
+    }
+    Ok(())
+}
+
 /// Environment variables passed to the Python sidecar. Always includes `TIKCLIP_STORAGE_PATH`.
 pub fn build_sidecar_env(conn: &Connection, storage_path: &Path) -> Result<Vec<(String, String)>, String> {
     let resolved = storage_path
@@ -107,6 +127,12 @@ pub fn build_sidecar_env(conn: &Connection, storage_path: &Path) -> Result<Vec<(
         conn,
         "max_storage_gb",
         "TIKCLIP_STORAGE_QUOTA_GB",
+    )?;
+    push_bool_setting(
+        &mut env,
+        conn,
+        "auto_process_after_record",
+        "TIKCLIP_AUTO_PROCESS_AFTER_RECORD",
     )?;
 
     Ok(env)

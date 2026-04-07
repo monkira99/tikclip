@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardFooter,
@@ -11,6 +12,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   applyStorageRoot,
   getAppDataPaths,
@@ -43,6 +45,16 @@ function valueFromDb(db: string | null, fallback: string): string {
     return fallback;
   }
   return db;
+}
+
+const AUTO_PROCESS_AFTER_RECORD_KEY = "auto_process_after_record";
+
+function parseAutoProcessAfterRecord(raw: string | null): boolean {
+  if (raw === null || raw.trim() === "") {
+    return true;
+  }
+  const t = raw.trim().toLowerCase();
+  return t === "1" || t === "true" || t === "yes" || t === "on";
 }
 
 function PathRow({
@@ -102,22 +114,27 @@ export function SettingsPage() {
   const [openingPath, setOpeningPath] = useState<string | null>(null);
   const [storageIsCustom, setStorageIsCustom] = useState(false);
   const [pickingRoot, setPickingRoot] = useState(false);
+  const [autoProcessAfterRecord, setAutoProcessAfterRecord] = useState(true);
+  const [autoProcessToggleBusy, setAutoProcessToggleBusy] = useState(false);
+  const autoProcessSwitchId = useId();
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const [pathInfo, isCustom, mc, pi, rmin, rhLegacy, cmin, cmax, sg] = await Promise.all([
-          getAppDataPaths(),
-          storageRootIsCustom(),
-          getSetting("max_concurrent"),
-          getSetting("poll_interval"),
-          getSetting("recording_max_minutes"),
-          getSetting("recording_max_hours"),
-          getSetting("clip_min_duration"),
-          getSetting("clip_max_duration"),
-          getSetting("max_storage_gb"),
-        ]);
+        const [pathInfo, isCustom, mc, pi, rmin, rhLegacy, cmin, cmax, sg, autoProc] =
+          await Promise.all([
+            getAppDataPaths(),
+            storageRootIsCustom(),
+            getSetting("max_concurrent"),
+            getSetting("poll_interval"),
+            getSetting("recording_max_minutes"),
+            getSetting("recording_max_hours"),
+            getSetting("clip_min_duration"),
+            getSetting("clip_max_duration"),
+            getSetting("max_storage_gb"),
+            getSetting(AUTO_PROCESS_AFTER_RECORD_KEY),
+          ]);
         if (cancelled) return;
         setPaths(pathInfo);
         setStorageIsCustom(isCustom);
@@ -134,6 +151,7 @@ export function SettingsPage() {
         setClipMinDuration(valueFromDb(cmin, DEFAULTS.clipMin));
         setClipMaxDuration(valueFromDb(cmax, DEFAULTS.clipMax));
         setMaxStorageGb(sg === null ? "" : sg);
+        setAutoProcessAfterRecord(parseAutoProcessAfterRecord(autoProc));
       } catch (e) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : "Failed to load settings");
@@ -236,6 +254,31 @@ export function SettingsPage() {
       setSaving(null);
     }
   }, [clearFeedback, maxConcurrent, pollInterval, recordingMaxMinutes]);
+
+  const onAutoProcessAfterRecordChange = useCallback(
+    async (checked: boolean) => {
+      clearFeedback();
+      const previous = autoProcessAfterRecord;
+      setAutoProcessAfterRecord(checked);
+      setAutoProcessToggleBusy(true);
+      try {
+        await setSetting(AUTO_PROCESS_AFTER_RECORD_KEY, checked ? "1" : "0");
+        await restartSidecar();
+        await resyncSidecarWatchers();
+        setMessage(
+          checked
+            ? "Đã bật tự xử lý clip sau khi ghi. Sidecar đã khởi động lại."
+            : "Đã tắt tự xử lý clip sau khi ghi. Sidecar đã khởi động lại.",
+        );
+      } catch (e) {
+        setAutoProcessAfterRecord(previous);
+        setError(e instanceof Error ? e.message : "Không lưu được cài đặt");
+      } finally {
+        setAutoProcessToggleBusy(false);
+      }
+    },
+    [autoProcessAfterRecord, clearFeedback],
+  );
 
   const saveClips = useCallback(async () => {
     clearFeedback();
@@ -407,8 +450,27 @@ export function SettingsPage() {
         <CardHeader>
           <CardTitle>Clip processing</CardTitle>
           <CardDescription>
-            Cấu hình xử lý clip sau khi record.
+            Cấu hình xử lý clip sau khi ghi hình.
           </CardDescription>
+          <CardAction>
+            <div className="flex items-center gap-2">
+              <Label
+                htmlFor={autoProcessSwitchId}
+                className="cursor-pointer text-xs whitespace-nowrap text-[var(--color-text-muted)]"
+              >
+                Tự động tạo clip sau khi ghi hình
+              </Label>
+              <Switch
+                id={autoProcessSwitchId}
+                checked={autoProcessAfterRecord}
+                onCheckedChange={(v) => {
+                  void onAutoProcessAfterRecordChange(v);
+                }}
+                disabled={loading || autoProcessToggleBusy}
+                aria-label="Tự xử lý clip sau khi ghi hình"
+              />
+            </div>
+          </CardAction>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
