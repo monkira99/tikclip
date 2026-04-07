@@ -106,6 +106,31 @@ class RecordingManager:
                 **worker.to_dict(),
             },
         )
+        if (
+            worker.status == "completed"
+            and settings.auto_process_after_record
+            and worker.file_path
+        ):
+            try:
+                from routes.clips import try_schedule_video_processing
+
+                err = await try_schedule_video_processing(
+                    recording_id=recording_id,
+                    username=worker.username,
+                    file_path=worker.file_path,
+                    account_id=account_id,
+                )
+                if err:
+                    logger.warning(
+                        "auto clip processing skipped recording_id=%s reason=%s",
+                        recording_id,
+                        err,
+                    )
+            except Exception:
+                logger.exception(
+                    "auto clip processing failed recording_id=%s",
+                    recording_id,
+                )
         # Hit max duration (-t) while the host may still be live: poll once and start next segment.
         if worker.status == "completed":
             try:
