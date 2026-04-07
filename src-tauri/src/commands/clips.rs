@@ -1,4 +1,5 @@
 use crate::db::models::Clip;
+use crate::time_hcm::SQL_NOW_HCM;
 use crate::AppState;
 use rusqlite::Result as SqlResult;
 use rusqlite::{params, OptionalExtension, Row};
@@ -142,10 +143,13 @@ pub fn insert_clip_from_sidecar(
     let thumb_opt = if thumb.is_empty() { None } else { Some(thumb) };
 
     conn.execute(
-        "INSERT INTO clips (\
-           recording_id, account_id, title, file_path, thumbnail_path, \
-           duration_seconds, file_size_bytes, start_time, end_time, status\
-         ) VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, ?7, ?8, 'ready')",
+        &format!(
+            "INSERT INTO clips (\
+               recording_id, account_id, title, file_path, thumbnail_path, \
+               duration_seconds, file_size_bytes, start_time, end_time, status, created_at, updated_at\
+             ) VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, ?7, ?8, 'ready', {}, {})",
+            SQL_NOW_HCM, SQL_NOW_HCM
+        ),
         params![
             recording_id,
             input.account_id,

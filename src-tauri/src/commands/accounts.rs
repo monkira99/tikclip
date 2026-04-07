@@ -1,4 +1,5 @@
 use crate::db::models::Account;
+use crate::time_hcm::{now_timestamp_hcm, SQL_NOW_HCM};
 use crate::AppState;
 use log::{debug, info, warn};
 use rusqlite::params;
@@ -83,9 +84,10 @@ pub fn create_account(
     }
 
     let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let ts = now_timestamp_hcm();
     conn.execute(
-        "INSERT INTO accounts (username, display_name, type, cookies_json, proxy_url, auto_record, priority, notes) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO accounts (username, display_name, type, cookies_json, proxy_url, auto_record, priority, notes, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             username,
             input.display_name,
@@ -95,6 +97,8 @@ pub fn create_account(
             if input.auto_record { 1i64 } else { 0i64 },
             input.priority,
             input.notes,
+            ts.clone(),
+            ts,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -135,12 +139,15 @@ pub fn sync_accounts_live_status(
         let flag = if row.is_live { 1i64 } else { 0i64 };
         let n = tx
             .execute(
-                "UPDATE accounts SET \
-                 is_live = ?1, \
-                 last_checked_at = datetime('now'), \
-                 last_live_at = CASE WHEN ?1 != 0 THEN datetime('now') ELSE last_live_at END, \
-                 updated_at = datetime('now') \
-                 WHERE id = ?2",
+                &format!(
+                    "UPDATE accounts SET \
+                     is_live = ?1, \
+                     last_checked_at = {}, \
+                     last_live_at = CASE WHEN ?1 != 0 THEN {} ELSE last_live_at END, \
+                     updated_at = {} \
+                     WHERE id = ?2",
+                    SQL_NOW_HCM, SQL_NOW_HCM, SQL_NOW_HCM
+                ),
                 params![flag, row.account_id],
             )
             .map_err(|e| e.to_string())?;
@@ -170,12 +177,15 @@ pub fn update_account_live_status(
     let flag = if is_live { 1i64 } else { 0i64 };
     let n = conn
         .execute(
-            "UPDATE accounts SET \
-             is_live = ?1, \
-             last_checked_at = datetime('now'), \
-             last_live_at = CASE WHEN ?1 != 0 THEN datetime('now') ELSE last_live_at END, \
-             updated_at = datetime('now') \
-             WHERE id = ?2",
+            &format!(
+                "UPDATE accounts SET \
+                 is_live = ?1, \
+                 last_checked_at = {}, \
+                 last_live_at = CASE WHEN ?1 != 0 THEN {} ELSE last_live_at END, \
+                 updated_at = {} \
+                 WHERE id = ?2",
+                SQL_NOW_HCM, SQL_NOW_HCM, SQL_NOW_HCM
+            ),
             params![flag, id],
         )
         .map_err(|e| e.to_string())?;
@@ -193,6 +203,7 @@ pub fn update_account_live_status(
 mod tests {
     use super::*;
     use crate::db::init::initialize_database;
+    use crate::time_hcm::SQL_NOW_HCM;
     use rusqlite::Connection;
     use std::path::PathBuf;
 
@@ -221,12 +232,15 @@ mod tests {
         let flag = 1i64;
         let n = conn
             .execute(
-                "UPDATE accounts SET \
-                 is_live = ?1, \
-                 last_checked_at = datetime('now'), \
-                 last_live_at = CASE WHEN ?1 != 0 THEN datetime('now') ELSE last_live_at END, \
-                 updated_at = datetime('now') \
-                 WHERE id = ?2",
+                &format!(
+                    "UPDATE accounts SET \
+                     is_live = ?1, \
+                     last_checked_at = {}, \
+                     last_live_at = CASE WHEN ?1 != 0 THEN {} ELSE last_live_at END, \
+                     updated_at = {} \
+                     WHERE id = ?2",
+                    SQL_NOW_HCM, SQL_NOW_HCM, SQL_NOW_HCM
+                ),
                 params![flag, id],
             )
             .expect("update");
@@ -261,9 +275,12 @@ mod tests {
         let tx = conn.transaction().expect("tx");
         for (id, flag) in [(id1, 1i64), (id2, 1i64)] {
             tx.execute(
-                "UPDATE accounts SET is_live = ?1, last_checked_at = datetime('now'), \
-                 last_live_at = CASE WHEN ?1 != 0 THEN datetime('now') ELSE last_live_at END, \
-                 updated_at = datetime('now') WHERE id = ?2",
+                &format!(
+                    "UPDATE accounts SET is_live = ?1, last_checked_at = {}, \
+                     last_live_at = CASE WHEN ?1 != 0 THEN {} ELSE last_live_at END, \
+                     updated_at = {} WHERE id = ?2",
+                    SQL_NOW_HCM, SQL_NOW_HCM, SQL_NOW_HCM
+                ),
                 params![flag, id],
             )
             .expect("upd");

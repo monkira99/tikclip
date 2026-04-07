@@ -2,6 +2,7 @@ mod app_paths;
 mod commands;
 mod db;
 mod sidecar;
+mod time_hcm;
 mod sidecar_env;
 mod tray;
 
@@ -47,6 +48,10 @@ pub fn run() {
             commands::clips::insert_clip_from_sidecar,
             commands::clips::list_clips,
             commands::dashboard::get_dashboard_stats,
+            commands::notifications::insert_notification,
+            commands::notifications::list_notifications,
+            commands::notifications::mark_notification_read,
+            commands::notifications::mark_all_notifications_read,
             commands::recordings::sync_recording_from_sidecar,
             commands::settings::get_setting,
             commands::settings::set_setting,

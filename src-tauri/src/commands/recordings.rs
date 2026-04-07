@@ -1,3 +1,4 @@
+use crate::time_hcm::SQL_NOW_HCM;
 use crate::AppState;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Deserialize;
@@ -59,15 +60,18 @@ pub(super) fn sync_recording_from_sidecar_conn(
 
     if let Some(id) = existing_id {
         conn.execute(
-            "UPDATE recordings SET \
-             status = ?1, duration_seconds = ?2, \
-             file_size_bytes = CASE WHEN ?3 > 0 THEN ?3 ELSE file_size_bytes END, \
-             file_path = COALESCE(?4, file_path), \
-             error_message = COALESCE(?5, error_message), \
-             ended_at = CASE \
-               WHEN ?1 IN ('done', 'error', 'processing') AND ended_at IS NULL \
-               THEN datetime('now') ELSE ended_at END \
-             WHERE id = ?6",
+            &format!(
+                "UPDATE recordings SET \
+                 status = ?1, duration_seconds = ?2, \
+                 file_size_bytes = CASE WHEN ?3 > 0 THEN ?3 ELSE file_size_bytes END, \
+                 file_path = COALESCE(?4, file_path), \
+                 error_message = COALESCE(?5, error_message), \
+                 ended_at = CASE \
+                   WHEN ?1 IN ('done', 'error', 'processing') AND ended_at IS NULL \
+                   THEN {} ELSE ended_at END \
+                 WHERE id = ?6",
+                SQL_NOW_HCM
+            ),
             params![mapped, input.duration_seconds, input.file_size_bytes, path, err, id],
         )
         .map_err(|e| e.to_string())?;
@@ -79,11 +83,14 @@ pub(super) fn sync_recording_from_sidecar_conn(
             0
         };
         conn.execute(
-            "INSERT INTO recordings (\
-               account_id, room_id, status, duration_seconds, file_size_bytes, \
-               file_path, error_message, sidecar_recording_id, ended_at\
-             ) VALUES (?1, NULL, ?2, ?3, ?4, ?5, ?6, ?7, \
-               CASE WHEN ?8 != 0 THEN datetime('now') ELSE NULL END)",
+            &format!(
+                "INSERT INTO recordings (\
+                   account_id, room_id, status, duration_seconds, file_size_bytes, \
+                   file_path, error_message, sidecar_recording_id, started_at, created_at, ended_at\
+                 ) VALUES (?1, NULL, ?2, ?3, ?4, ?5, ?6, ?7, {}, {}, \
+                   CASE WHEN ?8 != 0 THEN {} ELSE NULL END)",
+                SQL_NOW_HCM, SQL_NOW_HCM, SQL_NOW_HCM
+            ),
             params![
                 input.account_id,
                 mapped,
