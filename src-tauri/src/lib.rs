@@ -1,6 +1,8 @@
+mod app_paths;
 mod commands;
 mod db;
 mod sidecar;
+mod sidecar_env;
 mod tray;
 
 use db::init::initialize_database;
@@ -32,11 +34,11 @@ pub fn run() {
     init_rust_logging();
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             sidecar::get_sidecar_status,
+            sidecar::restart_sidecar,
             commands::accounts::list_accounts,
             commands::accounts::create_account,
             commands::accounts::delete_account,
@@ -45,25 +47,39 @@ pub fn run() {
             commands::clips::list_clips,
             commands::settings::get_setting,
             commands::settings::set_setting,
+            commands::paths::get_app_data_paths,
+            commands::paths::open_path,
+            commands::paths::storage_root_is_custom,
+            commands::paths::pick_storage_root_folder,
+            commands::paths::apply_storage_root,
+            commands::paths::reset_storage_root_default,
         ])
         .setup(|app| {
-            let app_data = app
+            let home_dir = app.path().home_dir().expect("failed to get home dir");
+            let app_data_dir = app
                 .path()
                 .app_data_dir()
                 .expect("failed to get app data dir");
-            let storage_path = app_data.join("TikTokApp");
+            let app_config_dir = app
+                .path()
+                .app_config_dir()
+                .expect("failed to get app config dir");
+            let storage_path = app_paths::resolve_storage_root(home_dir, app_data_dir, app_config_dir)
+                .expect("failed to resolve storage path");
             std::fs::create_dir_all(&storage_path).ok();
 
             let db_path = storage_path.join("data").join("app.db");
             let conn = initialize_database(&db_path).expect("failed to initialize database");
+            let tikclip_env = sidecar_env::build_sidecar_env(&conn, &storage_path)
+                .expect("failed to build sidecar env from settings");
 
             app.manage(AppState {
                 db: Mutex::new(conn),
-                storage_path,
+                storage_path: storage_path.clone(),
             });
 
             let sidecar = SidecarManager::new();
-            if let Err(e) = sidecar.start() {
+            if let Err(e) = sidecar.start(&tikclip_env) {
                 eprintln!("sidecar start failed: {e}");
             }
             app.manage(sidecar);
