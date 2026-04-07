@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -10,13 +11,88 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { getSetting, setSetting } from "@/lib/api";
+import {
+  applyStorageRoot,
+  getAppDataPaths,
+  getSetting,
+  openPathInSystem,
+  pickStorageRootFolder,
+  resetStorageRootDefault,
+  restartSidecar,
+  setSetting,
+  storageRootIsCustom,
+  type AppDataPaths,
+} from "@/lib/api";
+import { resyncSidecarWatchers } from "@/lib/resync-sidecar-watchers";
 
 const fieldSurface =
   "border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)]";
 
+/** Mirrors `sidecar/src/config.py` defaults when SQLite has no row. */
+const DEFAULTS = {
+  maxConcurrent: "5",
+  pollInterval: "30",
+  clipMin: "15",
+  clipMax: "90",
+} as const;
+
+function valueFromDb(db: string | null, fallback: string): string {
+  if (db === null) {
+    return fallback;
+  }
+  return db;
+}
+
+function effectiveTrimmed(raw: string, fallback: string): string {
+  const t = raw.trim();
+  return t === "" ? fallback : t;
+}
+
+function PathRow({
+  label,
+  description,
+  path,
+  onOpen,
+  opening,
+}: {
+  label: string;
+  description?: string;
+  path: string;
+  onOpen: () => void;
+  opening: boolean;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between">
+        <Label className="text-[var(--color-text)]">{label}</Label>
+        {description ? (
+          <span className="text-xs text-[var(--color-text-muted)]">{description}</span>
+        ) : null}
+      </div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+        <div
+          className={`min-h-10 flex-1 rounded-md border px-3 py-2 font-mono text-xs break-all ${fieldSurface}`}
+        >
+          {path}
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          className="shrink-0 border-[var(--color-border)]"
+          disabled={opening || !path}
+          onClick={() => onOpen()}
+        >
+          <FolderOpen className="mr-2 size-4 opacity-80" aria-hidden />
+          Mở thư mục
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function SettingsPage() {
   const [loading, setLoading] = useState(true);
+  const [paths, setPaths] = useState<AppDataPaths | null>(null);
   const [maxConcurrent, setMaxConcurrent] = useState("");
   const [pollInterval, setPollInterval] = useState("");
   const [clipMinDuration, setClipMinDuration] = useState("");
@@ -25,18 +101,17 @@ export function SettingsPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
+  const [openingPath, setOpeningPath] = useState<string | null>(null);
+  const [storageIsCustom, setStorageIsCustom] = useState(false);
+  const [pickingRoot, setPickingRoot] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const [
-          mc,
-          pi,
-          cmin,
-          cmax,
-          sg,
-        ] = await Promise.all([
+        const [pathInfo, isCustom, mc, pi, cmin, cmax, sg] = await Promise.all([
+          getAppDataPaths(),
+          storageRootIsCustom(),
           getSetting("max_concurrent"),
           getSetting("poll_interval"),
           getSetting("clip_min_duration"),
@@ -44,11 +119,13 @@ export function SettingsPage() {
           getSetting("max_storage_gb"),
         ]);
         if (cancelled) return;
-        setMaxConcurrent(mc ?? "");
-        setPollInterval(pi ?? "");
-        setClipMinDuration(cmin ?? "");
-        setClipMaxDuration(cmax ?? "");
-        setMaxStorageGb(sg ?? "");
+        setPaths(pathInfo);
+        setStorageIsCustom(isCustom);
+        setMaxConcurrent(valueFromDb(mc, DEFAULTS.maxConcurrent));
+        setPollInterval(valueFromDb(pi, DEFAULTS.pollInterval));
+        setClipMinDuration(valueFromDb(cmin, DEFAULTS.clipMin));
+        setClipMaxDuration(valueFromDb(cmax, DEFAULTS.clipMax));
+        setMaxStorageGb(sg === null ? "" : sg);
       } catch (e) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : "Failed to load settings");
@@ -62,10 +139,53 @@ export function SettingsPage() {
     };
   }, []);
 
+  const openPath = useCallback(async (dir: string) => {
+    setOpeningPath(dir);
+    setError(null);
+    try {
+      await openPathInSystem(dir);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Không mở được thư mục");
+    } finally {
+      setOpeningPath(null);
+    }
+  }, []);
+
   const clearFeedback = useCallback(() => {
     setMessage(null);
     setError(null);
   }, []);
+
+  const chooseStorageRoot = useCallback(async () => {
+    clearFeedback();
+    setPickingRoot(true);
+    try {
+      const picked = await pickStorageRootFolder();
+      if (!picked) return;
+      const ok = window.confirm(
+        "Ứng dụng sẽ khởi động lại để dùng thư mục gốc mới. CSDL và file sẽ đọc từ đường dẫn đã chọn (thư mục/data/app.db). Tiếp tục?",
+      );
+      if (!ok) return;
+      await applyStorageRoot(picked);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Không chọn được thư mục");
+    } finally {
+      setPickingRoot(false);
+    }
+  }, [clearFeedback]);
+
+  const restoreDefaultStorageRoot = useCallback(async () => {
+    clearFeedback();
+    const ok = window.confirm(
+      "Xóa thư mục gốc tùy chỉnh và khởi động lại? Lần sau app dùng lại quy tắc mặc định (~/.tikclip hoặc bản đã migrate).",
+    );
+    if (!ok) return;
+    try {
+      await resetStorageRootDefault();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Không đặt lại được");
+    }
+  }, [clearFeedback]);
 
   const saveRecording = useCallback(async () => {
     clearFeedback();
@@ -83,7 +203,11 @@ export function SettingsPage() {
     try {
       await setSetting("max_concurrent", mc);
       await setSetting("poll_interval", pi);
-      setMessage("Recording settings saved.");
+      await restartSidecar();
+      await resyncSidecarWatchers();
+      const fresh = await getAppDataPaths();
+      setPaths(fresh);
+      setMessage("Recording settings saved. Sidecar restarted to apply.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
     } finally {
@@ -111,7 +235,11 @@ export function SettingsPage() {
     try {
       await setSetting("clip_min_duration", mn);
       await setSetting("clip_max_duration", mx);
-      setMessage("Clip processing settings saved.");
+      await restartSidecar();
+      await resyncSidecarWatchers();
+      const fresh = await getAppDataPaths();
+      setPaths(fresh);
+      setMessage("Clip processing settings saved. Sidecar restarted to apply.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
     } finally {
@@ -129,7 +257,11 @@ export function SettingsPage() {
     setSaving("storage");
     try {
       await setSetting("max_storage_gb", sg);
-      setMessage("Storage settings saved.");
+      await restartSidecar();
+      await resyncSidecarWatchers();
+      const fresh = await getAppDataPaths();
+      setPaths(fresh);
+      setMessage("Storage settings saved. Sidecar restarted to apply.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
     } finally {
@@ -153,17 +285,56 @@ export function SettingsPage() {
           {error ?? message}
         </p>
       )}
+      {paths ? (
+        <Card className="bg-[var(--color-bg-elevated)]">
+          <CardHeader>
+            <CardTitle>Thư mục gốc dữ liệu</CardTitle>
+            <CardDescription>
+              Nơi lưu trư dữ liệu của ứng dụng và các video đã quay.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <PathRow
+              label="Thư mục gốc hiện tại"
+              path={paths.storage_root}
+              opening={openingPath === paths.storage_root}
+              onOpen={() => void openPath(paths.storage_root)}
+            />
+          </CardContent>
+          <CardFooter className="flex flex-wrap justify-end gap-2 border-t-0 bg-transparent pt-0">
+            <Button
+              type="button"
+              variant="outline"
+              className="border-[var(--color-border)]"
+              disabled={pickingRoot}
+              onClick={() => void chooseStorageRoot()}
+            >
+              {pickingRoot ? "Đang chọn…" : "Chọn thư mục gốc…"}
+            </Button>
+            {storageIsCustom ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="border-[var(--color-border)]"
+                onClick={() => void restoreDefaultStorageRoot()}
+              >
+                Về mặc định (~/.tikclip)
+              </Button>
+            ) : null}
+          </CardFooter>
+        </Card>
+      ) : null}
 
       <Card className="bg-[var(--color-bg-elevated)]">
         <CardHeader>
           <CardTitle>Recording</CardTitle>
           <CardDescription>
-            Concurrency and how often the app polls for live status (sidecar / workers).
+            Thông tin cấu hình quá trình quay video.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor="max_concurrent">Max concurrent recordings</Label>
+            <Label htmlFor="max_concurrent">Sô luồng record đồng thời tối đa</Label>
             <Input
               id="max_concurrent"
               type="text"
@@ -171,11 +342,11 @@ export function SettingsPage() {
               className={fieldSurface}
               value={maxConcurrent}
               onChange={(e) => setMaxConcurrent(e.target.value)}
-              placeholder="e.g. 3"
+              placeholder={DEFAULTS.maxConcurrent}
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="poll_interval">Poll interval (seconds)</Label>
+            <Label htmlFor="poll_interval">Thời gian poll (giây)</Label>
             <Input
               id="poll_interval"
               type="text"
@@ -183,7 +354,7 @@ export function SettingsPage() {
               className={fieldSurface}
               value={pollInterval}
               onChange={(e) => setPollInterval(e.target.value)}
-              placeholder="e.g. 60"
+              placeholder={DEFAULTS.pollInterval}
             />
           </div>
         </CardContent>
@@ -201,11 +372,13 @@ export function SettingsPage() {
       <Card className="bg-[var(--color-bg-elevated)]">
         <CardHeader>
           <CardTitle>Clip processing</CardTitle>
-          <CardDescription>Minimum and maximum clip length (seconds).</CardDescription>
+          <CardDescription>
+            Cấu hình xử lý clip sau khi record.
+          </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor="clip_min">Min duration (seconds)</Label>
+            <Label htmlFor="clip_min">Thời lượng tối thiểu (giây)</Label>
             <Input
               id="clip_min"
               type="text"
@@ -213,11 +386,11 @@ export function SettingsPage() {
               className={fieldSurface}
               value={clipMinDuration}
               onChange={(e) => setClipMinDuration(e.target.value)}
-              placeholder="e.g. 15"
+              placeholder={DEFAULTS.clipMin}
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="clip_max">Max duration (seconds)</Label>
+            <Label htmlFor="clip_max">Thời lượng tối đa (giây)</Label>
             <Input
               id="clip_max"
               type="text"
@@ -225,7 +398,7 @@ export function SettingsPage() {
               className={fieldSurface}
               value={clipMaxDuration}
               onChange={(e) => setClipMaxDuration(e.target.value)}
-              placeholder="e.g. 300"
+              placeholder={DEFAULTS.clipMax}
             />
           </div>
         </CardContent>
@@ -239,7 +412,9 @@ export function SettingsPage() {
       <Card className="bg-[var(--color-bg-elevated)]">
         <CardHeader>
           <CardTitle>Storage</CardTitle>
-          <CardDescription>Upper bound for local clip / recording storage.</CardDescription>
+          <CardDescription>
+            Cấu hình giới hạn lưu trữ video và dữ liệu. Lưu ý: nếu bạn đã thiết lập thư mục gốc tùy chỉnh, hãy đảm bảo rằng thư mục đó có đủ dung lượng cho giới hạn mới. Nếu không, ứng dụng có thể gặp lỗi khi quay video mới hoặc xử lý clip.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-2 sm:max-w-xs">
@@ -251,7 +426,7 @@ export function SettingsPage() {
               className={fieldSurface}
               value={maxStorageGb}
               onChange={(e) => setMaxStorageGb(e.target.value)}
-              placeholder="e.g. 100"
+              placeholder="Để trống nếu không dùng quota"
             />
           </div>
         </CardContent>
