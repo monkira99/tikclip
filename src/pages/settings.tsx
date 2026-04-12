@@ -41,6 +41,10 @@ const DEFAULTS = {
   clipMax: "90",
   /** Minutes per recording when auto-record does not override (maps to TIKCLIP_MAX_DURATION_MINUTES). */
   recordingMaxMinutes: "5",
+  geminiEmbeddingModel: "gemini-embedding-2-preview",
+  geminiEmbeddingDim: "1536",
+  autoTagClipFrames: "4",
+  autoTagClipMaxScore: "0.35",
 } as const;
 
 function valueFromDb(db: string | null, fallback: string): string {
@@ -51,6 +55,14 @@ function valueFromDb(db: string | null, fallback: string): string {
 }
 
 const AUTO_PROCESS_AFTER_RECORD_KEY = "auto_process_after_record";
+
+const KEY_PRODUCT_VECTOR = "product_vector_enabled";
+const KEY_GEMINI_API_KEY = "gemini_api_key";
+const KEY_GEMINI_EMBEDDING_MODEL = "gemini_embedding_model";
+const KEY_GEMINI_EMBEDDING_DIM = "gemini_embedding_dimensions";
+const KEY_AUTO_TAG_CLIP = "auto_tag_clip_product_enabled";
+const KEY_AUTO_TAG_FRAMES = "auto_tag_clip_frame_count";
+const KEY_AUTO_TAG_MAX_SCORE = "auto_tag_clip_max_score";
 
 const KEY_RAW_RETENTION = "TIKCLIP_RAW_RETENTION_DAYS";
 const KEY_ARCHIVE_RETENTION = "TIKCLIP_ARCHIVE_RETENTION_DAYS";
@@ -78,6 +90,18 @@ function parseAutoProcessAfterRecord(raw: string | null): boolean {
   }
   const t = raw.trim().toLowerCase();
   return t === "1" || t === "true" || t === "yes" || t === "on";
+}
+
+function parseProductVectorEnabled(raw: string | null): boolean {
+  if (raw === null || raw.trim() === "") {
+    return false;
+  }
+  const t = raw.trim().toLowerCase();
+  return t === "1" || t === "true" || t === "yes" || t === "on";
+}
+
+function parseAutoTagClipProductEnabled(raw: string | null): boolean {
+  return parseProductVectorEnabled(raw);
 }
 
 function PathRow({
@@ -148,6 +172,14 @@ export function SettingsPage() {
   const [storageScanBusy, setStorageScanBusy] = useState(false);
   const [storageStatsError, setStorageStatsError] = useState<string | null>(null);
   const [storageCleanupBusy, setStorageCleanupBusy] = useState(false);
+  const [productVectorEnabled, setProductVectorEnabled] = useState(false);
+  const [geminiApiKey, setGeminiApiKey] = useState("");
+  const [geminiEmbeddingModel, setGeminiEmbeddingModel] = useState("");
+  const [geminiEmbeddingDim, setGeminiEmbeddingDim] = useState("");
+  const [autoTagClipProductEnabled, setAutoTagClipProductEnabled] = useState(false);
+  const [autoTagClipFrameCount, setAutoTagClipFrameCount] = useState("");
+  const [autoTagClipMaxScore, setAutoTagClipMaxScore] = useState("");
+  const autoTagClipSwitchId = useId();
 
   useEffect(() => {
     let cancelled = false;
@@ -168,6 +200,13 @@ export function SettingsPage() {
           archR,
           sw,
           sc,
+          pvEn,
+          gKey,
+          gModel,
+          gDim,
+          atEn,
+          atFrames,
+          atScore,
         ] = await Promise.all([
           getAppDataPaths(),
           storageRootIsCustom(),
@@ -183,6 +222,13 @@ export function SettingsPage() {
           getSetting(KEY_ARCHIVE_RETENTION),
           getSetting(KEY_STORAGE_WARN),
           getSetting(KEY_STORAGE_CLEANUP),
+          getSetting(KEY_PRODUCT_VECTOR),
+          getSetting(KEY_GEMINI_API_KEY),
+          getSetting(KEY_GEMINI_EMBEDDING_MODEL),
+          getSetting(KEY_GEMINI_EMBEDDING_DIM),
+          getSetting(KEY_AUTO_TAG_CLIP),
+          getSetting(KEY_AUTO_TAG_FRAMES),
+          getSetting(KEY_AUTO_TAG_MAX_SCORE),
         ]);
         if (cancelled) return;
         setPaths(pathInfo);
@@ -205,6 +251,13 @@ export function SettingsPage() {
         setArchiveRetentionDays(valueFromDb(archR, "0"));
         setStorageWarnPercent(valueFromDb(sw, "80"));
         setStorageCleanupPercent(valueFromDb(sc, "95"));
+        setProductVectorEnabled(parseProductVectorEnabled(pvEn));
+        setGeminiApiKey(gKey ?? "");
+        setGeminiEmbeddingModel(valueFromDb(gModel, DEFAULTS.geminiEmbeddingModel));
+        setGeminiEmbeddingDim(valueFromDb(gDim, DEFAULTS.geminiEmbeddingDim));
+        setAutoTagClipProductEnabled(parseAutoTagClipProductEnabled(atEn));
+        setAutoTagClipFrameCount(valueFromDb(atFrames, DEFAULTS.autoTagClipFrames));
+        setAutoTagClipMaxScore(valueFromDb(atScore, DEFAULTS.autoTagClipMaxScore));
       } catch (e) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : "Failed to load settings");
@@ -382,6 +435,64 @@ export function SettingsPage() {
     },
     [autoProcessAfterRecord, clearFeedback],
   );
+
+  const saveProductVector = useCallback(async () => {
+    clearFeedback();
+    const dimStr = geminiEmbeddingDim.trim();
+    if (dimStr) {
+      const n = Number(dimStr);
+      if (!Number.isInteger(n) || n < 1 || n > 8192) {
+        setError("Chiều vector (outputDimensionality) phải là số nguyên từ 1 đến 8192.");
+        return;
+      }
+    }
+    const framesStr = autoTagClipFrameCount.trim();
+    if (framesStr) {
+      const fn = Number(framesStr);
+      if (!Number.isInteger(fn) || fn < 1 || fn > 12) {
+        setError("Số frame trích từ mỗi clip phải là số nguyên từ 1 đến 12.");
+        return;
+      }
+    }
+    const scoreStr = autoTagClipMaxScore.trim();
+    if (scoreStr) {
+      const sn = Number(scoreStr);
+      if (!Number.isFinite(sn) || sn <= 0 || sn > 2) {
+        setError("Ngưỡng khoảng cách vector phải là số dương (ví dụ 0.35, tối đa 2).");
+        return;
+      }
+    }
+    setSaving("product_vector");
+    try {
+      await setSetting(KEY_PRODUCT_VECTOR, productVectorEnabled ? "1" : "0");
+      await setSetting(KEY_GEMINI_API_KEY, geminiApiKey.trim());
+      await setSetting(KEY_GEMINI_EMBEDDING_MODEL, geminiEmbeddingModel.trim());
+      await setSetting(KEY_GEMINI_EMBEDDING_DIM, dimStr);
+      await setSetting(KEY_AUTO_TAG_CLIP, autoTagClipProductEnabled ? "1" : "0");
+      await setSetting(KEY_AUTO_TAG_FRAMES, framesStr);
+      await setSetting(KEY_AUTO_TAG_MAX_SCORE, scoreStr);
+      await restartSidecar();
+      await resyncSidecarWatchers();
+      const fresh = await getAppDataPaths();
+      setPaths(fresh);
+      setMessage(
+        "Đã lưu cài đặt vector sản phẩm và gắn clip tự động. Sidecar đã khởi động lại để áp dụng biến môi trường.",
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(null);
+    }
+  }, [
+    clearFeedback,
+    productVectorEnabled,
+    geminiApiKey,
+    geminiEmbeddingModel,
+    geminiEmbeddingDim,
+    autoTagClipProductEnabled,
+    autoTagClipFrameCount,
+    autoTagClipMaxScore,
+  ]);
 
   const saveClips = useCallback(async () => {
     clearFeedback();
@@ -670,6 +781,127 @@ export function SettingsPage() {
         <CardFooter className="justify-end border-t-0 bg-transparent pt-0">
           <Button type="button" disabled={saving === "clips"} onClick={() => void saveClips()}>
             {saving === "clips" ? "Đang lưu…" : "Lưu cài đặt xử lý clip"}
+          </Button>
+        </CardFooter>
+      </Card>
+
+      <Card className="bg-[var(--color-bg-elevated)]">
+        <CardHeader>
+          <CardTitle>Vector sản phẩm (tìm kiếm ảnh / video / text)</CardTitle>
+          <CardDescription>
+            Lưu embedding media sản phẩm bằng thư viện zvec và Gemini Embedding API. Index chạy sau khi
+            bạn lưu sản phẩm có file ảnh/video đã tải về.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <div className="flex items-center justify-between gap-3 rounded-md border border-[var(--color-border)] px-3 py-2">
+            <div className="space-y-0.5">
+              <Label htmlFor="product_vector_switch" className="text-[var(--color-text)]">
+                Bật index &amp; tìm kiếm vector
+              </Label>
+              <p className="text-xs text-[var(--color-text-muted)]">
+                Cần API key Gemini. Dữ liệu vector nằm trong thư mục dữ liệu:{" "}
+                <span className="font-mono">vector/product_media</span>.
+              </p>
+            </div>
+            <Switch
+              id="product_vector_switch"
+              checked={productVectorEnabled}
+              onCheckedChange={setProductVectorEnabled}
+              aria-label="Bật index vector sản phẩm"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="gemini_api_key">Gemini API key</Label>
+            <Input
+              id="gemini_api_key"
+              type="password"
+              autoComplete="off"
+              className={fieldSurface}
+              value={geminiApiKey}
+              onChange={(e) => setGeminiApiKey(e.target.value)}
+              placeholder="AIza…"
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="gemini_embed_model">Model embedding</Label>
+              <Input
+                id="gemini_embed_model"
+                type="text"
+                className={fieldSurface}
+                value={geminiEmbeddingModel}
+                onChange={(e) => setGeminiEmbeddingModel(e.target.value)}
+                placeholder={DEFAULTS.geminiEmbeddingModel}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="gemini_embed_dim">Chiều vector (outputDimensionality)</Label>
+              <Input
+                id="gemini_embed_dim"
+                type="text"
+                inputMode="numeric"
+                className={fieldSurface}
+                value={geminiEmbeddingDim}
+                onChange={(e) => setGeminiEmbeddingDim(e.target.value)}
+                placeholder={DEFAULTS.geminiEmbeddingDim}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-3 border-t border-[var(--color-border)] pt-4">
+            <div className="flex items-center justify-between gap-3 rounded-md border border-[var(--color-border)] px-3 py-2">
+              <div className="space-y-0.5">
+                <Label htmlFor={autoTagClipSwitchId} className="text-[var(--color-text)]">
+                  Tự gắn sản phẩm cho clip mới
+                </Label>
+                <p className="text-xs text-[var(--color-text-muted)]">
+                  Sau mỗi clip được tạo: trích vài frame (và thumbnail), embed ảnh, tìm trong zvec; nếu khớp
+                  đủ chặt thì gắn sản phẩm vào clip. Cần đã bật vector + index sản phẩm.
+                </p>
+              </div>
+              <Switch
+                id={autoTagClipSwitchId}
+                checked={autoTagClipProductEnabled}
+                onCheckedChange={setAutoTagClipProductEnabled}
+                aria-label="Tự gắn sản phẩm cho clip mới"
+              />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="auto_tag_frames">Số frame trích từ video clip (1–12)</Label>
+                <Input
+                  id="auto_tag_frames"
+                  type="text"
+                  inputMode="numeric"
+                  className={fieldSurface}
+                  value={autoTagClipFrameCount}
+                  onChange={(e) => setAutoTagClipFrameCount(e.target.value)}
+                  placeholder={DEFAULTS.autoTagClipFrames}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="auto_tag_score">Ngưỡng khoảng cách tối đa (nhỏ hơn = chặt hơn)</Label>
+                <Input
+                  id="auto_tag_score"
+                  type="text"
+                  inputMode="decimal"
+                  className={fieldSurface}
+                  value={autoTagClipMaxScore}
+                  onChange={(e) => setAutoTagClipMaxScore(e.target.value)}
+                  placeholder={DEFAULTS.autoTagClipMaxScore}
+                />
+              </div>
+            </div>
+          </div>
+        </CardContent>
+        <CardFooter className="justify-end border-t-0 bg-transparent pt-0">
+          <Button
+            type="button"
+            disabled={saving === "product_vector"}
+            onClick={() => void saveProductVector()}
+          >
+            {saving === "product_vector" ? "Đang lưu…" : "Lưu cài đặt vector"}
           </Button>
         </CardFooter>
       </Card>
