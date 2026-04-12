@@ -579,7 +579,7 @@ export function SettingsPage() {
             disabled={saving === "recording"}
             onClick={() => void saveRecording()}
           >
-            {saving === "recording" ? "Saving…" : "Save recording settings"}
+            {saving === "recording" ? "Đang lưu…" : "Lưu cài đặt ghi hình"}
           </Button>
         </CardFooter>
       </Card>
@@ -638,7 +638,7 @@ export function SettingsPage() {
         </CardContent>
         <CardFooter className="justify-end border-t-0 bg-transparent pt-0">
           <Button type="button" disabled={saving === "clips"} onClick={() => void saveClips()}>
-            {saving === "clips" ? "Saving…" : "Save clip settings"}
+            {saving === "clips" ? "Đang lưu…" : "Lưu cài đặt xử lý clip"}
           </Button>
         </CardFooter>
       </Card>
