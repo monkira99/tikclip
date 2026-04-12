@@ -1,17 +1,23 @@
 import asyncio
+import logging
 from pathlib import Path
 
+import httpx
 from fastapi import APIRouter, HTTPException
 
 from config import settings
 from core.processor import VideoProcessor
+from embeddings.clip_product_suggest import suggest_product_for_clip
 from models.schemas import (
     ClipOutput,
+    ClipSuggestProductRequest,
+    ClipSuggestProductResponse,
     ProcessingStatusResponse,
     ProcessVideoAcceptedResponse,
     ProcessVideoRequest,
 )
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _active_processors: dict[str, VideoProcessor] = {}
@@ -113,3 +119,40 @@ async def processing_status(recording_id: str):
     if processor is None:
         raise HTTPException(status_code=404, detail="Unknown recording_id")
     return _to_status_response(processor)
+
+
+@router.post(
+    "/api/clips/suggest-product",
+    response_model=ClipSuggestProductResponse,
+)
+async def suggest_product_for_clip_route(body: ClipSuggestProductRequest):
+    video = body.video_path.strip()
+    if not video:
+        raise HTTPException(status_code=400, detail="video_path is required")
+    thumb_raw = body.thumbnail_path
+    thumb_s = thumb_raw.strip() if thumb_raw else ""
+    logger.debug(
+        "suggest-product start video=%s thumb=%s",
+        video[:120],
+        (thumb_s[:120] if thumb_s else ""),
+    )
+    async with httpx.AsyncClient() as client:
+        result = await suggest_product_for_clip(
+            video_path=video,
+            thumbnail_path=(thumb_s if thumb_s else None),
+            http=client,
+        )
+    logger.debug(
+        "suggest-product done product_id=%s score=%s frames=%s skip=%r",
+        result.product_id,
+        result.best_score,
+        result.frames_used,
+        result.skipped_reason,
+    )
+    return ClipSuggestProductResponse(
+        product_id=result.product_id,
+        product_name=result.product_name,
+        best_score=result.best_score,
+        frames_used=result.frames_used,
+        skipped_reason=result.skipped_reason,
+    )

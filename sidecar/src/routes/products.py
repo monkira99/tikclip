@@ -1,11 +1,30 @@
+import asyncio
 import logging
 
-from fastapi import APIRouter
+import httpx
+from fastapi import APIRouter, HTTPException
+from pydantic import ValidationError
 
+from embeddings.product_vector import (
+    MediaIndexItem,
+    delete_vectors_for_product_sync,
+    index_product_media,
+    search_by_media_path,
+    search_by_text,
+)
 from models.schemas import (
+    DeleteProductEmbeddingsRequest,
+    DeleteProductEmbeddingsResponse,
     FetchedProductData,
+    FetchedProductMediaFile,
     FetchProductRequest,
     FetchProductResponse,
+    IndexProductEmbeddingsRequest,
+    IndexProductEmbeddingsResponse,
+    ProductEmbeddingSearchByMediaRequest,
+    ProductEmbeddingSearchHit,
+    ProductEmbeddingSearchRequest,
+    ProductEmbeddingSearchResponse,
 )
 from tiktok.product_scraper import fetch_product_from_url
 
@@ -19,11 +38,28 @@ async def fetch_product(body: FetchProductRequest):
     if not url:
         return FetchProductResponse(success=False, error="URL is required")
 
+    logger.debug(
+        "fetch-from-url start url=%s download_media=%s cookies=%s",
+        url[:200],
+        body.download_media,
+        "yes" if (body.cookies_json and body.cookies_json.strip()) else "no",
+    )
     try:
-        result = await fetch_product_from_url(url, cookies_json=body.cookies_json)
+        result = await fetch_product_from_url(
+            url,
+            cookies_json=body.cookies_json,
+            download_media=body.download_media,
+        )
     except Exception as exc:
         logger.exception("Product fetch failed for %s", url)
         return FetchProductResponse(success=False, error=str(exc))
+
+    media_out: list[FetchedProductMediaFile] = []
+    for m in result.media_files:
+        try:
+            media_out.append(FetchedProductMediaFile.model_validate(m))
+        except ValidationError:
+            logger.debug("skip invalid media entry %s", m)
 
     data = FetchedProductData(
         name=result.name,
@@ -32,10 +68,140 @@ async def fetch_product(body: FetchProductRequest):
         image_url=result.image_url,
         category=result.category,
         tiktok_shop_id=result.tiktok_shop_id,
+        image_urls=result.image_urls,
+        video_urls=result.video_urls,
+        media_files=media_out,
     )
 
+    ok = result.name is not None
+    logger.debug(
+        "fetch-from-url done success=%s incomplete=%s name=%r "
+        "media_files=%s images=%s videos=%s err=%r",
+        ok,
+        result.incomplete,
+        (result.name or "")[:80],
+        len(media_out),
+        len(result.image_urls),
+        len(result.video_urls),
+        result.error,
+    )
     return FetchProductResponse(
-        success=result.name is not None,
+        success=ok,
         incomplete=result.incomplete,
         data=data,
+        error=None if ok else (result.error or "Could not read product from this page."),
+    )
+
+
+@router.post(
+    "/api/products/embeddings/index",
+    response_model=IndexProductEmbeddingsResponse,
+)
+async def index_product_embeddings(body: IndexProductEmbeddingsRequest):
+    logger.debug(
+        "embeddings/index product_id=%s items=%s",
+        body.product_id,
+        len(body.items),
+    )
+    items = [MediaIndexItem.model_validate(x.model_dump()) for x in body.items]
+    async with httpx.AsyncClient() as client:
+        summary = await index_product_media(
+            product_id=body.product_id,
+            product_name=body.product_name,
+            items=items,
+            http=client,
+        )
+    logger.debug(
+        "embeddings/index done product_id=%s indexed=%s skipped=%s errors=%s msg=%r",
+        body.product_id,
+        summary.indexed,
+        summary.skipped,
+        len(summary.errors),
+        summary.message,
+    )
+    return IndexProductEmbeddingsResponse(
+        indexed=summary.indexed,
+        skipped=summary.skipped,
+        errors=summary.errors,
+        message=summary.message,
+    )
+
+
+@router.post(
+    "/api/products/embeddings/delete",
+    response_model=DeleteProductEmbeddingsResponse,
+)
+async def delete_product_embeddings(body: DeleteProductEmbeddingsRequest):
+    logger.debug("embeddings/delete product_id=%s", body.product_id)
+    await asyncio.to_thread(delete_vectors_for_product_sync, body.product_id)
+    return DeleteProductEmbeddingsResponse(ok=True)
+
+
+@router.post(
+    "/api/products/embeddings/search",
+    response_model=ProductEmbeddingSearchResponse,
+)
+async def search_product_embeddings_text(body: ProductEmbeddingSearchRequest):
+    if not body.query:
+        raise HTTPException(status_code=400, detail="query is required")
+    logger.debug(
+        "embeddings/search text top_k=%s query=%r",
+        body.top_k,
+        body.query[:200],
+    )
+    try:
+        async with httpx.AsyncClient() as client:
+            hits = await search_by_text(query=body.query, top_k=body.top_k, http=client)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    logger.debug("embeddings/search text hits=%s", len(hits))
+    return ProductEmbeddingSearchResponse(
+        hits=[
+            ProductEmbeddingSearchHit(
+                product_id=h.product_id,
+                score=h.score,
+                image_path=h.image_path,
+                source_url=h.source_url,
+                product_name=h.product_name,
+                modality=h.modality,
+            )
+            for h in hits
+        ],
+    )
+
+
+@router.post(
+    "/api/products/embeddings/search-media",
+    response_model=ProductEmbeddingSearchResponse,
+)
+async def search_product_embeddings_media(body: ProductEmbeddingSearchByMediaRequest):
+    logger.debug(
+        "embeddings/search-media kind=%s top_k=%s path=%s",
+        body.kind,
+        body.top_k,
+        body.path[:120],
+    )
+    try:
+        async with httpx.AsyncClient() as client:
+            hits = await search_by_media_path(
+                media_path=body.path,
+                kind=body.kind,
+                top_k=body.top_k,
+                http=client,
+            )
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    logger.debug("embeddings/search-media hits=%s", len(hits))
+    return ProductEmbeddingSearchResponse(
+        hits=[
+            ProductEmbeddingSearchHit(
+                product_id=h.product_id,
+                score=h.score,
+                image_path=h.image_path,
+                source_url=h.source_url,
+                product_name=h.product_name,
+                modality=h.modality,
+            )
+            for h in hits
+        ],
     )
