@@ -92,6 +92,7 @@ export function AppShell() {
   const [currentPage, setCurrentPage] = useState<PageId>("dashboard");
   const sidecarPort = useAppStore((s) => s.sidecarPort);
   const sidecarConnected = useAppStore((s) => s.sidecarConnected);
+  const navigationTarget = useAppStore((s) => s.navigationTarget);
   const activeRecordings = useAppStore((s) => s.activeRecordings);
   const setActiveRecordings = useAppStore((s) => s.setActiveRecordings);
   const activeRecordingCount = useRecordingStore((s) => countActiveRecordings(s.recordings));
@@ -100,6 +101,28 @@ export function AppShell() {
   useEffect(() => {
     setActiveRecordings(activeRecordingCount);
   }, [activeRecordingCount, setActiveRecordings]);
+
+  useEffect(() => {
+    if (!navigationTarget) {
+      return;
+    }
+    const p = navigationTarget.page;
+    if (
+      p === "dashboard" ||
+      p === "accounts" ||
+      p === "recordings" ||
+      p === "clips" ||
+      p === "products" ||
+      p === "statistics" ||
+      p === "settings"
+    ) {
+      setCurrentPage(p);
+    }
+    if (navigationTarget.clipId != null) {
+      useClipStore.getState().setActiveClipId(navigationTarget.clipId);
+    }
+    useAppStore.getState().clearNavigationTarget();
+  }, [navigationTarget]);
 
   useEffect(() => {
     void hydrateNotificationsFromDb();
@@ -143,6 +166,7 @@ export function AppShell() {
         logSidecarDbSyncError("recording_finished → SQLite sync failed", err),
       );
       dispatchSidecarNotification("recording_finished", data);
+      useAppStore.getState().bumpDashboardRevision();
       const id = data.recording_id;
       if (typeof id === "string") {
         window.setTimeout(() => {
@@ -171,6 +195,7 @@ export function AppShell() {
 
     const unsubLive = wsClient.on("account_live", (data) => {
       dispatchSidecarNotification("account_live", data);
+      useAppStore.getState().bumpDashboardRevision();
       const rawId = data.account_id;
       const id = typeof rawId === "number" ? rawId : Number(rawId);
       if (Number.isFinite(id)) {
@@ -189,9 +214,11 @@ export function AppShell() {
         return;
       }
       persistLive(id, isLive, "account_status");
+      useAppStore.getState().bumpDashboardRevision();
     });
     const unsubClip = wsClient.on("clip_ready", (data) => {
       dispatchSidecarNotification("clip_ready", data);
+      useAppStore.getState().bumpDashboardRevision();
       void (async () => {
         try {
           await insertClipFromSidecarWsPayload(data);
@@ -200,6 +227,15 @@ export function AppShell() {
           logSidecarDbSyncError("clip_ready → SQLite insert failed", err);
         }
       })();
+    });
+
+    const unsubCleanup = wsClient.on("cleanup_completed", (data) => {
+      dispatchSidecarNotification("cleanup_completed", data);
+      useAppStore.getState().bumpDashboardRevision();
+    });
+    const unsubStorageWarn = wsClient.on("storage_warning", (data) => {
+      dispatchSidecarNotification("storage_warning", data);
+      useAppStore.getState().bumpDashboardRevision();
     });
 
     wsClient.connect(sidecarPort);
@@ -211,6 +247,8 @@ export function AppShell() {
       unsubLive();
       unsubAccountStatus();
       unsubClip();
+      unsubCleanup();
+      unsubStorageWarn();
       wsClient.disconnect();
     };
   }, [sidecarPort]);

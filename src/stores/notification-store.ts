@@ -1,6 +1,12 @@
 import { create } from "zustand";
 
-export type NotificationKind = "account_live" | "recording_finished" | "clip_ready" | "info";
+export type NotificationKind =
+  | "account_live"
+  | "recording_finished"
+  | "clip_ready"
+  | "cleanup_completed"
+  | "storage_warning"
+  | "info";
 
 export interface AppNotification {
   id: string;

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityFeed } from "@/components/dashboard/activity-feed";
 import { StatCards } from "@/components/dashboard/stat-cards";
 import { RecordingProgress } from "@/components/recordings/recording-progress";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getDashboardStats, type DashboardStats } from "@/lib/api";
+import { getDashboardStats, getStorageStats, type DashboardStats } from "@/lib/api";
 import { useAppStore } from "@/stores/app-store";
 import { useAccountStore } from "@/stores/account-store";
 import { useClipStore } from "@/stores/clip-store";
@@ -10,12 +11,14 @@ import { countActiveRecordings, useRecordingStore } from "@/stores/recording-sto
 
 export function DashboardPage() {
   const sidecarConnected = useAppStore((s) => s.sidecarConnected);
+  const dashboardRevision = useAppStore((s) => s.dashboardRevision);
   const recordings = useRecordingStore((s) => s.recordings);
   const accounts = useAccountStore((s) => s.accounts);
   const fetchAccounts = useAccountStore((s) => s.fetchAccounts);
   const accountsLoading = useAccountStore((s) => s.loading);
   const clipsRevision = useClipStore((s) => s.clipsRevision);
   const [dashStats, setDashStats] = useState<DashboardStats | null>(null);
+  const [sidecarUsagePct, setSidecarUsagePct] = useState<number | null>(null);
 
   const loadDashboardStats = useCallback(async () => {
     try {
@@ -53,9 +56,30 @@ export function DashboardPage() {
   useEffect(() => {
     const t = window.setTimeout(() => {
       void loadDashboardStats();
+      void (async () => {
+        if (!sidecarConnected) {
+          setSidecarUsagePct(null);
+          return;
+        }
+        try {
+          const s = await getStorageStats();
+          setSidecarUsagePct(s.usage_percent);
+        } catch (e) {
+          if (import.meta.env.DEV) {
+            console.warn("[TikClip] getStorageStats failed", e);
+          }
+          setSidecarUsagePct(null);
+        }
+      })();
     }, 500);
     return () => window.clearTimeout(t);
-  }, [loadDashboardStats, clipsRevision, sidecarConnected, recordingsSnapshot]);
+  }, [
+    loadDashboardStats,
+    clipsRevision,
+    dashboardRevision,
+    sidecarConnected,
+    recordingsSnapshot,
+  ]);
 
   useEffect(() => {
     const onVis = () => {
@@ -81,7 +105,10 @@ export function DashboardPage() {
         clipsToday={dashStats?.clipsToday ?? 0}
         storageUsedBytes={dashStats?.storageUsedBytes ?? 0}
         storageQuotaGb={dashStats?.storageQuotaGb ?? null}
+        storageSidecarUsagePercent={sidecarUsagePct}
       />
+
+      <ActivityFeed dashboardRevision={dashboardRevision} />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="bg-[var(--color-bg-elevated)]">

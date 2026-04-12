@@ -68,6 +68,43 @@ function formatSidecarMessage(
         body: username ? `${title} (${username})` : title,
       };
     }
+    case "cleanup_completed": {
+      const freed = data.freed_bytes;
+      const n =
+        typeof freed === "number" && Number.isFinite(freed)
+          ? freed
+          : typeof freed === "string"
+            ? Number(freed)
+            : 0;
+      const mb = n > 0 ? (n / (1024 * 1024)).toFixed(1) : "0";
+      const rec = data.deleted_recordings;
+      const clips = data.deleted_clips;
+      const recN = typeof rec === "number" ? rec : Number(rec) || 0;
+      const clipN = typeof clips === "number" ? clips : Number(clips) || 0;
+      return {
+        kind: "cleanup_completed",
+        title: "Dọn dẹp hoàn tất",
+        body: `Đã xóa ${recN} file ghi, ${clipN} clip; giải phóng ~${mb} MB`,
+      };
+    }
+    case "storage_warning": {
+      const pct = data.usage_percent;
+      const p =
+        typeof pct === "number" && Number.isFinite(pct)
+          ? pct
+          : typeof pct === "string"
+            ? Number(pct)
+            : 0;
+      const critical = data.critical === true;
+      return {
+        kind: "storage_warning",
+        title: critical ? "Dung lượng gần đầy" : "Cảnh báo dung lượng",
+        body:
+          Number.isFinite(p) && p > 0
+            ? `Đang dùng khoảng ${p.toFixed(1)}% quota cấu hình`
+            : "Kiểm tra mục Cài đặt → Storage",
+      };
+    }
     default:
       return {
         kind: "info",

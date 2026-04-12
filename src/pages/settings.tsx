@@ -17,13 +17,16 @@ import {
   applyStorageRoot,
   getAppDataPaths,
   getSetting,
+  getStorageStats,
   openPathInSystem,
   pickStorageRootFolder,
   resetStorageRootDefault,
   restartSidecar,
+  runStorageCleanupNow,
   setSetting,
   storageRootIsCustom,
   type AppDataPaths,
+  type StorageStats,
 } from "@/lib/api";
 import { resyncSidecarWatchers } from "@/lib/resync-sidecar-watchers";
 
@@ -48,6 +51,26 @@ function valueFromDb(db: string | null, fallback: string): string {
 }
 
 const AUTO_PROCESS_AFTER_RECORD_KEY = "auto_process_after_record";
+
+const KEY_RAW_RETENTION = "TIKCLIP_RAW_RETENTION_DAYS";
+const KEY_ARCHIVE_RETENTION = "TIKCLIP_ARCHIVE_RETENTION_DAYS";
+const KEY_STORAGE_WARN = "TIKCLIP_STORAGE_WARN_PERCENT";
+const KEY_STORAGE_CLEANUP = "TIKCLIP_STORAGE_CLEANUP_PERCENT";
+
+function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) {
+    return "0 B";
+  }
+  const gb = n / (1024 * 1024 * 1024);
+  if (gb >= 1) {
+    return gb >= 10 ? `${gb.toFixed(1)} GB` : `${gb.toFixed(2)} GB`;
+  }
+  const mb = n / (1024 * 1024);
+  if (mb >= 1) {
+    return mb >= 100 ? `${mb.toFixed(0)} MB` : `${mb.toFixed(1)} MB`;
+  }
+  return `${Math.round(n / 1024)} KB`;
+}
 
 function parseAutoProcessAfterRecord(raw: string | null): boolean {
   if (raw === null || raw.trim() === "") {
@@ -117,24 +140,49 @@ export function SettingsPage() {
   const [autoProcessAfterRecord, setAutoProcessAfterRecord] = useState(true);
   const [autoProcessToggleBusy, setAutoProcessToggleBusy] = useState(false);
   const autoProcessSwitchId = useId();
+  const [rawRetentionDays, setRawRetentionDays] = useState("7");
+  const [archiveRetentionDays, setArchiveRetentionDays] = useState("0");
+  const [storageWarnPercent, setStorageWarnPercent] = useState("80");
+  const [storageCleanupPercent, setStorageCleanupPercent] = useState("95");
+  const [storageStats, setStorageStats] = useState<StorageStats | null>(null);
+  const [storageScanBusy, setStorageScanBusy] = useState(false);
+  const [storageCleanupBusy, setStorageCleanupBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const [pathInfo, isCustom, mc, pi, rmin, rhLegacy, cmin, cmax, sg, autoProc] =
-          await Promise.all([
-            getAppDataPaths(),
-            storageRootIsCustom(),
-            getSetting("max_concurrent"),
-            getSetting("poll_interval"),
-            getSetting("recording_max_minutes"),
-            getSetting("recording_max_hours"),
-            getSetting("clip_min_duration"),
-            getSetting("clip_max_duration"),
-            getSetting("max_storage_gb"),
-            getSetting(AUTO_PROCESS_AFTER_RECORD_KEY),
-          ]);
+        const [
+          pathInfo,
+          isCustom,
+          mc,
+          pi,
+          rmin,
+          rhLegacy,
+          cmin,
+          cmax,
+          sg,
+          autoProc,
+          rawR,
+          archR,
+          sw,
+          sc,
+        ] = await Promise.all([
+          getAppDataPaths(),
+          storageRootIsCustom(),
+          getSetting("max_concurrent"),
+          getSetting("poll_interval"),
+          getSetting("recording_max_minutes"),
+          getSetting("recording_max_hours"),
+          getSetting("clip_min_duration"),
+          getSetting("clip_max_duration"),
+          getSetting("max_storage_gb"),
+          getSetting(AUTO_PROCESS_AFTER_RECORD_KEY),
+          getSetting(KEY_RAW_RETENTION),
+          getSetting(KEY_ARCHIVE_RETENTION),
+          getSetting(KEY_STORAGE_WARN),
+          getSetting(KEY_STORAGE_CLEANUP),
+        ]);
         if (cancelled) return;
         setPaths(pathInfo);
         setStorageIsCustom(isCustom);
@@ -152,6 +200,10 @@ export function SettingsPage() {
         setClipMaxDuration(valueFromDb(cmax, DEFAULTS.clipMax));
         setMaxStorageGb(sg === null ? "" : sg);
         setAutoProcessAfterRecord(parseAutoProcessAfterRecord(autoProc));
+        setRawRetentionDays(valueFromDb(rawR, "7"));
+        setArchiveRetentionDays(valueFromDb(archR, "0"));
+        setStorageWarnPercent(valueFromDb(sw, "80"));
+        setStorageCleanupPercent(valueFromDb(sc, "95"));
       } catch (e) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : "Failed to load settings");
@@ -334,6 +386,89 @@ export function SettingsPage() {
     }
   }, [clearFeedback, maxStorageGb]);
 
+  const scanStorageStats = useCallback(async () => {
+    clearFeedback();
+    setStorageScanBusy(true);
+    try {
+      const s = await getStorageStats();
+      setStorageStats(s);
+      setMessage("Đã cập nhật số liệu lưu trữ từ sidecar.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Không lấy được stats");
+      setStorageStats(null);
+    } finally {
+      setStorageScanBusy(false);
+    }
+  }, [clearFeedback]);
+
+  const saveStorageRetention = useCallback(async () => {
+    clearFeedback();
+    const raw = rawRetentionDays.trim();
+    const arch = archiveRetentionDays.trim();
+    const w = storageWarnPercent.trim();
+    const c = storageCleanupPercent.trim();
+    for (const [label, v] of [
+      ["Raw retention", raw],
+      ["Archive retention", arch],
+      ["Warning %", w],
+      ["Cleanup %", c],
+    ] as const) {
+      if (v && Number.isNaN(Number(v))) {
+        setError(`${label} phải là số.`);
+        return;
+      }
+    }
+    const wn = w ? Number(w) : 80;
+    const cn = c ? Number(c) : 95;
+    if (wn < 1 || wn > 100 || cn < 1 || cn > 100) {
+      setError("Ngưỡng % phải từ 1 đến 100.");
+      return;
+    }
+    if (cn < wn) {
+      setError("Cleanup % nên ≥ cảnh báo % (ví dụ 95 và 80).");
+      return;
+    }
+    setSaving("storage_retention");
+    try {
+      await setSetting(KEY_RAW_RETENTION, raw || "7");
+      await setSetting(KEY_ARCHIVE_RETENTION, arch || "0");
+      await setSetting(KEY_STORAGE_WARN, w || "80");
+      await setSetting(KEY_STORAGE_CLEANUP, c || "95");
+      await restartSidecar();
+      await resyncSidecarWatchers();
+      const fresh = await getAppDataPaths();
+      setPaths(fresh);
+      setMessage("Đã lưu retention / ngưỡng. Sidecar đã khởi động lại.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(null);
+    }
+  }, [
+    clearFeedback,
+    rawRetentionDays,
+    archiveRetentionDays,
+    storageWarnPercent,
+    storageCleanupPercent,
+  ]);
+
+  const runCleanupManual = useCallback(async () => {
+    clearFeedback();
+    setStorageCleanupBusy(true);
+    try {
+      const summary = await runStorageCleanupNow();
+      const mb = summary.freed_bytes / (1024 * 1024);
+      setMessage(
+        `Cleanup xong: ${summary.deleted_recordings} recording(s), ${summary.deleted_clips} clip(s), ~${mb.toFixed(1)} MB.`,
+      );
+      await scanStorageStats();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Cleanup thất bại");
+    } finally {
+      setStorageCleanupBusy(false);
+    }
+  }, [clearFeedback, scanStorageStats]);
+
   if (loading) {
     return (
       <p className="text-sm text-[var(--color-text-muted)]">Loading settings…</p>
@@ -512,7 +647,7 @@ export function SettingsPage() {
             Cấu hình giới hạn lưu trữ video và dữ liệu. Lưu ý: nếu bạn đã thiết lập thư mục gốc tùy chỉnh, hãy đảm bảo rằng thư mục đó có đủ dung lượng cho giới hạn mới. Nếu không, ứng dụng có thể gặp lỗi khi quay video mới hoặc xử lý clip.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex flex-col gap-6">
           <div className="space-y-2 sm:max-w-xs">
             <Label htmlFor="max_storage_gb">Max storage (GB)</Label>
             <Input
@@ -525,11 +660,152 @@ export function SettingsPage() {
               placeholder="Để trống nếu không dùng quota"
             />
           </div>
+
+          <div className="space-y-3 border-t border-[var(--color-border)] pt-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Label className="text-[var(--color-text)]">Tổng quan (sidecar)</Label>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-[var(--color-border)]"
+                disabled={storageScanBusy}
+                onClick={() => void scanStorageStats()}
+              >
+                {storageScanBusy ? "Đang quét…" : "Quét ngay"}
+              </Button>
+            </div>
+            {storageStats ? (
+              <div className="space-y-2 text-sm text-[var(--color-text-muted)]">
+                <p>
+                  Tổng:{" "}
+                  <span className="font-medium text-[var(--color-text)]">
+                    {formatBytes(storageStats.total_bytes)}
+                  </span>
+                  {storageStats.quota_bytes != null && storageStats.quota_bytes > 0 ? (
+                    <span className="tabular-nums">
+                      {" "}
+                      (~{storageStats.usage_percent}% quota)
+                    </span>
+                  ) : null}
+                </p>
+                <ul className="list-inside list-disc space-y-1">
+                  <li>
+                    Recordings: {formatBytes(storageStats.recordings_bytes)} (
+                    {storageStats.recordings_count} files)
+                  </li>
+                  <li>
+                    Clips: {formatBytes(storageStats.clips_bytes)} ({storageStats.clips_count} files)
+                  </li>
+                  <li>Products: {formatBytes(storageStats.products_bytes)}</li>
+                </ul>
+                {storageStats.quota_bytes != null && storageStats.quota_bytes > 0 ? (
+                  <div className="pt-1">
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-[var(--color-border)]">
+                      <div
+                        className={`h-full rounded-full transition-all ${
+                          storageStats.usage_percent > 95
+                            ? "bg-red-500"
+                            : storageStats.usage_percent >= 80
+                              ? "bg-amber-500"
+                              : "bg-emerald-500"
+                        }`}
+                        style={{
+                          width: `${Math.min(100, Math.max(0, storageStats.usage_percent))}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <p className="text-xs text-[var(--color-text-muted)]">
+                Bấm &quot;Quét ngay&quot; khi sidecar đang chạy để xem dung lượng theo thư mục.
+              </p>
+            )}
+          </div>
+
+          <div className="grid gap-4 border-t border-[var(--color-border)] pt-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="raw_ret">{KEY_RAW_RETENTION}</Label>
+              <Input
+                id="raw_ret"
+                type="text"
+                inputMode="numeric"
+                className={fieldSurface}
+                value={rawRetentionDays}
+                onChange={(e) => setRawRetentionDays(e.target.value)}
+                placeholder="7"
+              />
+              <p className="text-xs text-[var(--color-text-muted)]">
+                Xóa file raw trong <code className="text-[var(--color-text)]">recordings/</code> sau
+                số ngày này (sidecar).
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="arch_ret">{KEY_ARCHIVE_RETENTION}</Label>
+              <Input
+                id="arch_ret"
+                type="text"
+                inputMode="numeric"
+                className={fieldSurface}
+                value={archiveRetentionDays}
+                onChange={(e) => setArchiveRetentionDays(e.target.value)}
+                placeholder="0"
+              />
+              <p className="text-xs text-[var(--color-text-muted)]">
+                Mặc định 0: sidecar không xóa clip theo tuổi file (cần khớp DB ở bản desktop).
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="st_warn">{KEY_STORAGE_WARN}</Label>
+              <Input
+                id="st_warn"
+                type="text"
+                inputMode="numeric"
+                className={fieldSurface}
+                value={storageWarnPercent}
+                onChange={(e) => setStorageWarnPercent(e.target.value)}
+                placeholder="80"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="st_clean">{KEY_STORAGE_CLEANUP}</Label>
+              <Input
+                id="st_clean"
+                type="text"
+                inputMode="numeric"
+                className={fieldSurface}
+                value={storageCleanupPercent}
+                onChange={(e) => setStorageCleanupPercent(e.target.value)}
+                placeholder="95"
+              />
+            </div>
+          </div>
         </CardContent>
-        <CardFooter className="justify-end border-t-0 bg-transparent pt-0">
+        <CardFooter className="flex flex-col gap-3 border-t-0 bg-transparent pt-0 sm:flex-row sm:flex-wrap sm:justify-end">
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full border-[var(--color-border)] sm:w-auto"
+            disabled={storageCleanupBusy}
+            onClick={() => void runCleanupManual()}
+          >
+            {storageCleanupBusy ? "Đang chạy…" : "Chạy cleanup ngay"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full border-[var(--color-border)] sm:w-auto"
+            disabled={saving === "storage_retention"}
+            onClick={() => void saveStorageRetention()}
+          >
+            {saving === "storage_retention" ? "Saving…" : "Lưu retention / ngưỡng"}
+          </Button>
           <Button
             type="button"
             disabled={saving === "storage"}
+            className="w-full sm:w-auto"
             onClick={() => void saveStorage()}
           >
             {saving === "storage" ? "Saving…" : "Save storage settings"}

@@ -13,6 +13,8 @@ function coerceKind(s: string): NotificationKind {
     s === "account_live" ||
     s === "recording_finished" ||
     s === "clip_ready" ||
+    s === "cleanup_completed" ||
+    s === "storage_warning" ||
     s === "info"
   ) {
     return s;

@@ -439,6 +439,56 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   });
 }
 
+export type StorageStats = {
+  recordings_bytes: number;
+  recordings_count: number;
+  clips_bytes: number;
+  clips_count: number;
+  products_bytes: number;
+  total_bytes: number;
+  quota_bytes: number | null;
+  usage_percent: number;
+};
+
+export async function getStorageStats(): Promise<StorageStats> {
+  return sidecarJson<StorageStats>("/api/storage/stats");
+}
+
+export type StorageCleanupSummary = {
+  deleted_recordings: number;
+  deleted_clips: number;
+  freed_bytes: number;
+};
+
+export async function runStorageCleanupNow(): Promise<StorageCleanupSummary> {
+  return sidecarJson<StorageCleanupSummary>("/api/storage/cleanup-run", {
+    method: "POST",
+  });
+}
+
+export async function deleteRecordingFiles(recordingId: number): Promise<void> {
+  await invoke("delete_recording_files", { recording_id: recordingId });
+}
+
+export async function listRecordingsForCleanup(retentionDays: number): Promise<unknown[]> {
+  return invoke<unknown[]>("list_recordings_for_cleanup", { retention_days: retentionDays });
+}
+
+export type ActivityFeedItem = {
+  id: number;
+  type: string;
+  title: string;
+  message: string;
+  account_id: number | null;
+  recording_id: number | null;
+  clip_id: number | null;
+  created_at: string;
+};
+
+export async function listActivityFeed(limit = 10): Promise<ActivityFeedItem[]> {
+  return invoke<ActivityFeedItem[]>("list_activity_feed", { limit });
+}
+
 /** Row from `notifications` table (camelCase from Tauri). */
 export type DbNotificationRow = {
   id: number;
