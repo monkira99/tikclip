@@ -319,6 +319,56 @@ pub fn batch_delete_clips(state: State<'_, AppState>, clip_ids: Vec<i64>) -> Res
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub struct InsertTrimmedClipInput {
+    pub recording_id: i64,
+    pub account_id: i64,
+    pub file_path: String,
+    pub thumbnail_path: String,
+    pub duration_sec: f64,
+    pub start_sec: f64,
+    pub end_sec: f64,
+}
+
+#[tauri::command]
+pub fn insert_trimmed_clip(
+    state: State<'_, AppState>,
+    input: InsertTrimmedClipInput,
+) -> Result<i64, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+
+    let file_size: i64 = std::fs::metadata(&input.file_path)
+        .map(|m| m.len() as i64)
+        .unwrap_or(0);
+    let duration = input.duration_sec.round().max(0.0) as i64;
+    let thumb = input.thumbnail_path.trim();
+    let thumb_opt = if thumb.is_empty() { None } else { Some(thumb) };
+
+    conn.execute(
+        &format!(
+            "INSERT INTO clips (\
+               recording_id, account_id, title, file_path, thumbnail_path, \
+               duration_seconds, file_size_bytes, start_time, end_time, status, created_at, updated_at\
+             ) VALUES (?1, ?2, 'Trimmed clip', ?3, ?4, ?5, ?6, ?7, ?8, 'draft', {}, {})",
+            SQL_NOW_HCM, SQL_NOW_HCM
+        ),
+        params![
+            input.recording_id,
+            input.account_id,
+            &input.file_path,
+            thumb_opt,
+            duration,
+            file_size,
+            input.start_sec,
+            input.end_sec,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(conn.last_insert_rowid())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct InsertClipFromSidecarInput {
     pub sidecar_recording_id: String,
     pub account_id: i64,

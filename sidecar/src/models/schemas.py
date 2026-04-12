@@ -88,3 +88,17 @@ class ProcessVideoAcceptedResponse(BaseModel):
     recording_id: str
     status: str = "accepted"
     message: str = "Processing started"
+
+
+class TrimClipRequest(BaseModel):
+    source_path: str
+    start_sec: float
+    end_sec: float
+    account_id: int
+    recording_id: int
+
+
+class TrimClipResponse(BaseModel):
+    file_path: str
+    thumbnail_path: str
+    duration_sec: float

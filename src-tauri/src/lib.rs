@@ -54,6 +54,7 @@ pub fn run() {
             commands::clips::update_clip_notes,
             commands::clips::batch_update_clip_status,
             commands::clips::batch_delete_clips,
+            commands::clips::insert_trimmed_clip,
             commands::dashboard::get_dashboard_stats,
             commands::notifications::insert_notification,
             commands::notifications::list_notifications,
