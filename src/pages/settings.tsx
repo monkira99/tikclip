@@ -678,7 +678,7 @@ export function SettingsPage() {
         <CardHeader>
           <CardTitle>Storage</CardTitle>
           <CardDescription>
-            Cấu hình giới hạn lưu trữ video và dữ liệu. Lưu ý: nếu bạn đã thiết lập thư mục gốc tùy chỉnh, hãy đảm bảo rằng thư mục đó có đủ dung lượng cho giới hạn mới. Nếu không, ứng dụng có thể gặp lỗi khi quay video mới hoặc xử lý clip.
+            Giới hạn quota, xem dung lượng đang dùng và chính sách xóa bản ghi thô.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-6">
@@ -696,7 +696,7 @@ export function SettingsPage() {
           </div>
 
           <div className="space-y-3 border-t border-[var(--color-border)] pt-4">
-            <Label className="text-[var(--color-text)]">Tổng quan (sidecar)</Label>
+            <Label className="text-[var(--color-text)]">Dung lượng thư mục dữ liệu</Label>
             {storageScanBusy && !storageStats ? (
               <p className="text-xs text-[var(--color-text-muted)]">Đang tải số liệu lưu trữ…</p>
             ) : null}
@@ -756,9 +756,7 @@ export function SettingsPage() {
                 Dọn dữ liệu &amp; cảnh báo dung lượng
               </p>
               <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                Sidecar dùng các giá trị này khi quét và dọn file. Không cần nhập mã cấu hình kỹ thuật. Nút
-                &quot;Chạy cleanup ngay&quot; áp dụng đúng số ngày đang nhập; &quot;Lưu cài đặt lưu trữ&quot;
-                ghi quota GB, retention và ngưỡng cảnh báo vào cơ sở dữ liệu và khởi động lại sidecar một lần.
+                Cleanup ngay chỉ chạy một lần với số đang nhập. Lưu để ghi vào app và khởi động lại sidecar.
               </p>
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
@@ -774,11 +772,10 @@ export function SettingsPage() {
                   placeholder="7"
                 />
                 <p className="text-xs text-[var(--color-text-muted)]">
-                  File ghi gốc trong <code className="text-[var(--color-text)]">records/</code> (và bản cũ{" "}
-                  <code className="text-[var(--color-text)]">recordings/</code> nếu còn): nếu{" "}
-                  <span className="text-[var(--color-text)]">ngày sửa (mtime)</span> theo lịch địa phương
-                  (múi giờ hệ thống) cách hôm nay ít nhất số ngày này thì có thể bị xóa khi sidecar dọn — khác
-                  với đủ 24 giờ liên tục kể từ lúc ghi file.
+                  Bản ghi thô trong <code className="text-[var(--color-text)]">records/</code> (và{" "}
+                  <code className="text-[var(--color-text)]">recordings/</code> cũ): xóa khi{" "}
+                  <span className="text-[var(--color-text)]">ngày sửa file</span> trên đĩa đã qua ít nhất số
+                  ngày này (theo lịch máy, không phải đủ 24 giờ liên tục).
                 </p>
               </div>
               <div className="space-y-2">
@@ -793,9 +790,8 @@ export function SettingsPage() {
                   placeholder="0"
                 />
                 <p className="text-xs text-[var(--color-text-muted)]">
-                  Đặt <span className="tabular-nums">0</span> để không tự xóa clip theo tuổi file (cần
-                  khớp trạng thái trong app). Giá trị &gt; 0 chỉ có hiệu lực khi sidecar hỗ trợ đồng bộ với
-                  dữ liệu clip.
+                  <span className="tabular-nums">0</span> = không tự xóa clip theo tuổi. Giá trị &gt;{" "}
+                  <span className="tabular-nums">0</span>: chưa dùng tự động từ sidecar.
                 </p>
               </div>
               <div className="space-y-2">
@@ -810,7 +806,7 @@ export function SettingsPage() {
                   placeholder="80"
                 />
                 <p className="text-xs text-[var(--color-text-muted)]">
-                  Khi dung lượng đạt mức này so với giới hạn (GB) ở trên, app có thể hiện cảnh báo.
+                  So với giới hạn GB phía trên — ngưỡng bắt đầu cảnh báo.
                 </p>
               </div>
               <div className="space-y-2">
@@ -825,8 +821,7 @@ export function SettingsPage() {
                   placeholder="95"
                 />
                 <p className="text-xs text-[var(--color-text-muted)]">
-                  Nên cao hơn mức cảnh báo (ví dụ 95 so với 80). Dùng cho thông báo và chính sách dọn dẹp
-                  tự động của sidecar.
+                  Nên lớn hơn mức cảnh báo — mức coi là nghiêm trọng (ví dụ 95 và 80).
                 </p>
               </div>
             </div>
