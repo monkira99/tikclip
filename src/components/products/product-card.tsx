@@ -1,10 +1,35 @@
 import { useState } from "react";
+import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { Pencil, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { deleteProduct } from "@/lib/api";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { deleteProduct, deleteProductEmbeddings, getSidecarBaseUrl } from "@/lib/api";
+import { formatInvokeError } from "@/lib/invoke-error";
 import { useProductStore } from "@/stores/product-store";
 import type { Product } from "@/types";
 import { cn } from "@/lib/utils";
+
+function productImageSrc(url: string | null): string | null {
+  const u = url?.trim();
+  if (!u) {
+    return null;
+  }
+  if (u.startsWith("http://") || u.startsWith("https://")) {
+    return u;
+  }
+  if (isTauri()) {
+    return convertFileSrc(u);
+  }
+  return u;
+}
 
 function formatPrice(price: number | null): string {
   if (price == null || Number.isNaN(price)) {
@@ -22,13 +47,26 @@ export function ProductCard({
 }) {
   const fetchProducts = useProductStore((s) => s.fetchProducts);
   const [imgOk, setImgOk] = useState(true);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const displaySrc = productImageSrc(product.image_url);
 
-  const onDelete = async () => {
-    if (!window.confirm(`Delete “${product.name}”? This cannot be undone.`)) {
-      return;
+  const runDelete = async () => {
+    setDeleting(true);
+    try {
+      await deleteProduct(product.id);
+      if (getSidecarBaseUrl()) {
+        void deleteProductEmbeddings(product.id).catch(() => {
+          /* vector store optional */
+        });
+      }
+      setConfirmOpen(false);
+      void fetchProducts();
+    } catch (e) {
+      toast.error(formatInvokeError(e));
+    } finally {
+      setDeleting(false);
     }
-    await deleteProduct(product.id);
-    void fetchProducts();
   };
 
   return (
@@ -39,9 +77,9 @@ export function ProductCard({
       )}
     >
       <div className="relative aspect-square bg-muted/40">
-        {product.image_url && imgOk ? (
+        {displaySrc && imgOk ? (
           <img
-            src={product.image_url}
+            src={displaySrc}
             alt=""
             className="h-full w-full object-cover"
             onError={() => setImgOk(false)}
@@ -69,11 +107,30 @@ export function ProductCard({
             <Pencil className="mr-1 h-3.5 w-3.5" />
             Edit
           </Button>
-          <Button type="button" variant="destructive" size="sm" onClick={() => void onDelete()}>
+          <Button type="button" variant="destructive" size="sm" onClick={() => setConfirmOpen(true)}>
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>
+
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent showCloseButton className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete product?</DialogTitle>
+            <DialogDescription>
+              “{product.name}” will be removed permanently. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="border-0 bg-transparent p-0 sm:justify-end">
+            <Button type="button" variant="outline" disabled={deleting} onClick={() => setConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" variant="destructive" disabled={deleting} onClick={() => void runDelete()}>
+              {deleting ? "Deleting…" : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
