@@ -114,6 +114,8 @@ export interface Product {
   tiktok_url: string | null;
   price: number | null;
   category: string | null;
+  /** JSON array: { kind, path, source_url }[] for downloaded gallery / videos */
+  media_files_json: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -127,6 +129,7 @@ export interface CreateProductInput {
   tiktok_url?: string | null;
   price?: number | null;
   category?: string | null;
+  media_files_json?: string | null;
 }
 
 export interface UpdateProductInput {
@@ -138,6 +141,7 @@ export interface UpdateProductInput {
   tiktok_url?: string | null;
   price?: number | null;
   category?: string | null;
+  media_files_json?: string | null;
 }
 
 export interface ClipFilters {

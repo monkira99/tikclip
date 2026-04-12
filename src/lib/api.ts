@@ -1,4 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
+
+import { formatInvokeError } from "@/lib/invoke-error";
 import type {
   Account,
   AccountType,
@@ -145,7 +147,7 @@ export async function updateAccountLiveStatus(id: number, isLive: boolean): Prom
   if (import.meta.env.DEV) {
     console.debug("[TikClip] invoke update_account_live_status", { id, isLive });
   }
-  await invoke("update_account_live_status", { id, is_live: isLive });
+  await invoke("update_account_live_status", { id, isLive });
 }
 
 /** Single transaction — avoids N× invoke racing with list_accounts (StrictMode / duplicate fetches). */
@@ -226,27 +228,27 @@ export async function listClipsFiltered(filters: ClipFilters): Promise<Clip[]> {
 }
 
 export async function getClipById(clipId: number): Promise<Clip> {
-  return invoke<Clip>("get_clip_by_id", { clip_id: clipId });
+  return invoke<Clip>("get_clip_by_id", { clipId });
 }
 
 export async function updateClipStatus(clipId: number, newStatus: string): Promise<void> {
-  await invoke("update_clip_status", { clip_id: clipId, new_status: newStatus });
+  await invoke("update_clip_status", { clipId, newStatus });
 }
 
 export async function updateClipTitle(clipId: number, title: string): Promise<void> {
-  await invoke("update_clip_title", { clip_id: clipId, title });
+  await invoke("update_clip_title", { clipId, title });
 }
 
 export async function updateClipNotes(clipId: number, notes: string): Promise<void> {
-  await invoke("update_clip_notes", { clip_id: clipId, notes });
+  await invoke("update_clip_notes", { clipId, notes });
 }
 
 export async function batchUpdateClipStatus(clipIds: number[], newStatus: string): Promise<void> {
-  await invoke("batch_update_clip_status", { clip_ids: clipIds, new_status: newStatus });
+  await invoke("batch_update_clip_status", { clipIds, newStatus });
 }
 
 export async function batchDeleteClips(clipIds: number[]): Promise<void> {
-  await invoke("batch_delete_clips", { clip_ids: clipIds });
+  await invoke("batch_delete_clips", { clipIds });
 }
 
 export async function trimClip(body: {
@@ -279,7 +281,7 @@ export async function listProducts(): Promise<Product[]> {
 }
 
 export async function getProductById(productId: number): Promise<Product> {
-  return invoke<Product>("get_product_by_id", { product_id: productId });
+  return invoke<Product>("get_product_by_id", { productId });
 }
 
 export async function createProduct(input: CreateProductInput): Promise<number> {
@@ -287,28 +289,42 @@ export async function createProduct(input: CreateProductInput): Promise<number> 
 }
 
 export async function updateProduct(productId: number, input: UpdateProductInput): Promise<void> {
-  await invoke("update_product", { product_id: productId, input });
+  await invoke("update_product", { productId, input });
 }
 
 export async function deleteProduct(productId: number): Promise<void> {
-  await invoke("delete_product", { product_id: productId });
+  const id = Number(productId);
+  if (!Number.isInteger(id) || id < 1) {
+    throw new Error(`Invalid product id: ${String(productId)}`);
+  }
+  try {
+    await invoke("delete_product", { productId: id });
+  } catch (e) {
+    throw new Error(formatInvokeError(e));
+  }
 }
 
 export async function listClipProducts(clipId: number): Promise<Product[]> {
-  return invoke<Product[]>("list_clip_products", { clip_id: clipId });
+  return invoke<Product[]>("list_clip_products", { clipId });
 }
 
 export async function tagClipProduct(clipId: number, productId: number): Promise<void> {
-  await invoke("tag_clip_product", { clip_id: clipId, product_id: productId });
+  await invoke("tag_clip_product", { clipId, productId });
 }
 
 export async function untagClipProduct(clipId: number, productId: number): Promise<void> {
-  await invoke("untag_clip_product", { clip_id: clipId, product_id: productId });
+  await invoke("untag_clip_product", { clipId, productId });
 }
 
 export async function batchTagClipProducts(clipIds: number[], productId: number): Promise<void> {
-  await invoke("batch_tag_clip_products", { clip_ids: clipIds, product_id: productId });
+  await invoke("batch_tag_clip_products", { clipIds, productId });
 }
+
+export type FetchedProductMediaFile = {
+  kind: "image" | "video";
+  path: string;
+  source_url: string;
+};
 
 export type FetchProductFromUrlResult = {
   success: boolean;
@@ -320,6 +336,9 @@ export type FetchProductFromUrlResult = {
     image_url: string | null;
     category: string | null;
     tiktok_shop_id: string | null;
+    image_urls: string[];
+    video_urls: string[];
+    media_files: FetchedProductMediaFile[];
   } | null;
   error: string | null;
 };
@@ -327,10 +346,74 @@ export type FetchProductFromUrlResult = {
 export async function fetchProductFromUrl(
   url: string,
   cookiesJson?: string | null,
+  options?: { downloadMedia?: boolean },
 ): Promise<FetchProductFromUrlResult> {
   return sidecarJson<FetchProductFromUrlResult>("/api/products/fetch-from-url", {
     method: "POST",
-    body: JSON.stringify({ url, cookies_json: cookiesJson ?? null }),
+    body: JSON.stringify({
+      url,
+      cookies_json: cookiesJson ?? null,
+      download_media: options?.downloadMedia !== false,
+    }),
+  });
+}
+
+export type ProductEmbeddingMediaItem = {
+  kind: "image" | "video";
+  path: string;
+  source_url?: string;
+};
+
+export type IndexProductEmbeddingsResult = {
+  indexed: number;
+  skipped: number;
+  errors: string[];
+  message: string | null;
+};
+
+export async function indexProductEmbeddings(
+  productId: number,
+  body: { product_name: string; items: ProductEmbeddingMediaItem[] },
+): Promise<IndexProductEmbeddingsResult> {
+  return sidecarJson<IndexProductEmbeddingsResult>("/api/products/embeddings/index", {
+    method: "POST",
+    body: JSON.stringify({
+      product_id: productId,
+      product_name: body.product_name,
+      items: body.items.map((x) => ({
+        kind: x.kind,
+        path: x.path,
+        source_url: x.source_url ?? "",
+      })),
+    }),
+  });
+}
+
+export async function deleteProductEmbeddings(productId: number): Promise<void> {
+  await sidecarJson<{ ok: boolean }>("/api/products/embeddings/delete", {
+    method: "POST",
+    body: JSON.stringify({ product_id: productId }),
+  });
+}
+
+export type ClipSuggestProductResult = {
+  product_id: number | null;
+  product_name: string | null;
+  best_score: number | null;
+  frames_used: number;
+  skipped_reason: string | null;
+};
+
+export async function suggestProductForClip(body: {
+  video_path: string;
+  thumbnail_path?: string | null;
+}): Promise<ClipSuggestProductResult> {
+  return sidecarJson<ClipSuggestProductResult>("/api/clips/suggest-product", {
+    method: "POST",
+    body: JSON.stringify({
+      video_path: body.video_path,
+      thumbnail_path: body.thumbnail_path ?? null,
+    }),
   });
 }
 
@@ -435,7 +518,7 @@ export type DashboardStats = {
 
 export async function getDashboardStats(): Promise<DashboardStats> {
   return invoke<DashboardStats>("get_dashboard_stats", {
-    today_ymd: hcmDateYmd(),
+    todayYmd: hcmDateYmd(),
   });
 }
 
@@ -471,11 +554,11 @@ export async function runStorageCleanupNow(input: {
 }
 
 export async function deleteRecordingFiles(recordingId: number): Promise<void> {
-  await invoke("delete_recording_files", { recording_id: recordingId });
+  await invoke("delete_recording_files", { recordingId });
 }
 
 export async function listRecordingsForCleanup(retentionDays: number): Promise<unknown[]> {
-  return invoke<unknown[]>("list_recordings_for_cleanup", { retention_days: retentionDays });
+  return invoke<unknown[]>("list_recordings_for_cleanup", { retentionDays });
 }
 
 export type ActivityFeedItem = {
