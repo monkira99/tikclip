@@ -408,10 +408,10 @@ export function SettingsPage() {
     const w = storageWarnPercent.trim();
     const c = storageCleanupPercent.trim();
     for (const [label, v] of [
-      ["Raw retention", raw],
-      ["Archive retention", arch],
-      ["Warning %", w],
-      ["Cleanup %", c],
+      ["Số ngày giữ bản ghi thô", raw],
+      ["Số ngày với clip lưu trữ", arch],
+      ["Ngưỡng cảnh báo (%)", w],
+      ["Ngưỡng nghiêm trọng (%)", c],
     ] as const) {
       if (v && Number.isNaN(Number(v))) {
         setError(`${label} phải là số.`);
@@ -425,7 +425,7 @@ export function SettingsPage() {
       return;
     }
     if (cn < wn) {
-      setError("Cleanup % nên ≥ cảnh báo % (ví dụ 95 và 80).");
+      setError("Ngưỡng nghiêm trọng (%) nên lớn hơn hoặc bằng ngưỡng cảnh báo (%) — ví dụ 95 và 80.");
       return;
     }
     setSaving("storage_retention");
@@ -438,7 +438,7 @@ export function SettingsPage() {
       await resyncSidecarWatchers();
       const fresh = await getAppDataPaths();
       setPaths(fresh);
-      setMessage("Đã lưu retention / ngưỡng. Sidecar đã khởi động lại.");
+      setMessage("Đã lưu cài đặt dọn dữ liệu và cảnh báo. Sidecar đã khởi động lại.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
     } finally {
@@ -725,61 +725,80 @@ export function SettingsPage() {
             )}
           </div>
 
-          <div className="grid gap-4 border-t border-[var(--color-border)] pt-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="raw_ret">{KEY_RAW_RETENTION}</Label>
-              <Input
-                id="raw_ret"
-                type="text"
-                inputMode="numeric"
-                className={fieldSurface}
-                value={rawRetentionDays}
-                onChange={(e) => setRawRetentionDays(e.target.value)}
-                placeholder="7"
-              />
-              <p className="text-xs text-[var(--color-text-muted)]">
-                Xóa file raw trong <code className="text-[var(--color-text)]">recordings/</code> sau
-                số ngày này (sidecar).
+          <div className="space-y-3 border-t border-[var(--color-border)] pt-4">
+            <div>
+              <p className="text-sm font-medium text-[var(--color-text)]">
+                Dọn dữ liệu &amp; cảnh báo dung lượng
+              </p>
+              <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                Sidecar dùng các giá trị này khi quét và dọn file. Không cần nhập mã cấu hình kỹ thuật.
               </p>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="arch_ret">{KEY_ARCHIVE_RETENTION}</Label>
-              <Input
-                id="arch_ret"
-                type="text"
-                inputMode="numeric"
-                className={fieldSurface}
-                value={archiveRetentionDays}
-                onChange={(e) => setArchiveRetentionDays(e.target.value)}
-                placeholder="0"
-              />
-              <p className="text-xs text-[var(--color-text-muted)]">
-                Mặc định 0: sidecar không xóa clip theo tuổi file (cần khớp DB ở bản desktop).
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="st_warn">{KEY_STORAGE_WARN}</Label>
-              <Input
-                id="st_warn"
-                type="text"
-                inputMode="numeric"
-                className={fieldSurface}
-                value={storageWarnPercent}
-                onChange={(e) => setStorageWarnPercent(e.target.value)}
-                placeholder="80"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="st_clean">{KEY_STORAGE_CLEANUP}</Label>
-              <Input
-                id="st_clean"
-                type="text"
-                inputMode="numeric"
-                className={fieldSurface}
-                value={storageCleanupPercent}
-                onChange={(e) => setStorageCleanupPercent(e.target.value)}
-                placeholder="95"
-              />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="raw_ret">Xóa bản ghi thô sau (ngày)</Label>
+                <Input
+                  id="raw_ret"
+                  type="text"
+                  inputMode="numeric"
+                  className={fieldSurface}
+                  value={rawRetentionDays}
+                  onChange={(e) => setRawRetentionDays(e.target.value)}
+                  placeholder="7"
+                />
+                <p className="text-xs text-[var(--color-text-muted)]">
+                  File ghi gốc trong thư mục <code className="text-[var(--color-text)]">recordings/</code>{" "}
+                  cũ hơn số ngày này có thể bị xóa khi sidecar chạy dọn dẹp.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="arch_ret">Clip lưu trữ — tuổi tối đa (ngày)</Label>
+                <Input
+                  id="arch_ret"
+                  type="text"
+                  inputMode="numeric"
+                  className={fieldSurface}
+                  value={archiveRetentionDays}
+                  onChange={(e) => setArchiveRetentionDays(e.target.value)}
+                  placeholder="0"
+                />
+                <p className="text-xs text-[var(--color-text-muted)]">
+                  Đặt <span className="tabular-nums">0</span> để không tự xóa clip theo tuổi file (cần
+                  khớp trạng thái trong app). Giá trị &gt; 0 chỉ có hiệu lực khi sidecar hỗ trợ đồng bộ với
+                  dữ liệu clip.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="st_warn">Cảnh báo khi dùng quá (% quota)</Label>
+                <Input
+                  id="st_warn"
+                  type="text"
+                  inputMode="numeric"
+                  className={fieldSurface}
+                  value={storageWarnPercent}
+                  onChange={(e) => setStorageWarnPercent(e.target.value)}
+                  placeholder="80"
+                />
+                <p className="text-xs text-[var(--color-text-muted)]">
+                  Khi dung lượng đạt mức này so với giới hạn (GB) ở trên, app có thể hiện cảnh báo.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="st_clean">Mức nghiêm trọng / ưu tiên dọn (% quota)</Label>
+                <Input
+                  id="st_clean"
+                  type="text"
+                  inputMode="numeric"
+                  className={fieldSurface}
+                  value={storageCleanupPercent}
+                  onChange={(e) => setStorageCleanupPercent(e.target.value)}
+                  placeholder="95"
+                />
+                <p className="text-xs text-[var(--color-text-muted)]">
+                  Nên cao hơn mức cảnh báo (ví dụ 95 so với 80). Dùng cho thông báo và chính sách dọn dẹp
+                  tự động của sidecar.
+                </p>
+              </div>
             </div>
           </div>
         </CardContent>
@@ -800,7 +819,7 @@ export function SettingsPage() {
             disabled={saving === "storage_retention"}
             onClick={() => void saveStorageRetention()}
           >
-            {saving === "storage_retention" ? "Saving…" : "Lưu retention / ngưỡng"}
+            {saving === "storage_retention" ? "Saving…" : "Lưu dọn dữ liệu & cảnh báo"}
           </Button>
           <Button
             type="button"
