@@ -747,7 +747,9 @@ export function SettingsPage() {
                 Dọn dữ liệu &amp; cảnh báo dung lượng
               </p>
               <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                Sidecar dùng các giá trị này khi quét và dọn file. Không cần nhập mã cấu hình kỹ thuật.
+                Sidecar dùng các giá trị này khi quét và dọn file. Không cần nhập mã cấu hình kỹ thuật. Nút
+                &quot;Chạy cleanup ngay&quot; áp dụng đúng số ngày đang nhập; &quot;Lưu…&quot; ghi vào cơ sở
+                dữ liệu và khởi động lại sidecar để chu kỳ dọn tự động cũng khớp.
               </p>
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
