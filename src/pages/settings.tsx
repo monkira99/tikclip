@@ -753,8 +753,10 @@ export function SettingsPage() {
                 />
                 <p className="text-xs text-[var(--color-text-muted)]">
                   File ghi gốc trong <code className="text-[var(--color-text)]">records/</code> (và bản cũ{" "}
-                  <code className="text-[var(--color-text)]">recordings/</code> nếu còn) cũ hơn số ngày
-                  này có thể bị xóa khi sidecar chạy dọn dẹp.
+                  <code className="text-[var(--color-text)]">recordings/</code> nếu còn): nếu{" "}
+                  <span className="text-[var(--color-text)]">ngày sửa (mtime)</span> theo lịch địa phương
+                  (múi giờ hệ thống) cách hôm nay ít nhất số ngày này thì có thể bị xóa khi sidecar dọn — khác
+                  với đủ 24 giờ liên tục kể từ lúc ghi file.
                 </p>
               </div>
               <div className="space-y-2">

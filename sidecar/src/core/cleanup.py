@@ -1,6 +1,11 @@
 """Periodic storage cleanup: raw recordings by retention + quota warnings over WebSocket.
 
 We delete old raw media under ``records/`` (current worker output) and legacy ``recordings/``.
+``raw_retention_days`` is interpreted as **local calendar days** since the file's last
+modified date (``st_mtime`` → system local timezone), not a rolling 24h wall-clock window.
+Example: with retention ``1``, a file whose local modification **date** is yesterday or
+earlier is removed when cleanup runs today (even if the file is under 24h old in seconds).
+
 Automatic deletion of exported clips by age is not done here: the sidecar cannot
 correlate files on disk with clip rows (draft/ready/archived) in the Tauri DB.
 Use ``archive_retention_days > 0`` only as a future hook; until desktop-driven
@@ -12,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import time
+from datetime import datetime
 from pathlib import Path
 
 from config import settings
@@ -21,12 +26,14 @@ from ws.manager import ws_manager
 logger = logging.getLogger("tikclip.cleanup")
 
 
-def _file_age_days(path: Path) -> float:
+def _file_local_calendar_age_days(path: Path) -> int:
+    """Whole local calendar days between file mtime's date and today (system local TZ)."""
     try:
-        mtime = path.stat().st_mtime
-        return (time.time() - mtime) / 86400
+        mtime = datetime.fromtimestamp(path.stat().st_mtime)
     except OSError:
-        return 0.0
+        return 0
+    now = datetime.now()
+    return (now.date() - mtime.date()).days
 
 
 def _dir_total_bytes(path: Path) -> int:
@@ -55,8 +62,8 @@ def _delete_old_under_dir(rec_dir: Path, retention_days: int) -> tuple[int, int]
     freed = 0
     for f in rec_dir.rglob("*"):
         if f.is_file() and f.suffix.lower() in (".flv", ".mp4", ".ts", ".mkv", ".m4a", ".aac"):
-            age = _file_age_days(f)
-            if age > retention_days:
+            cal_days = _file_local_calendar_age_days(f)
+            if cal_days >= retention_days:
                 try:
                     size = f.stat().st_size
                     f.unlink()
@@ -65,7 +72,8 @@ def _delete_old_under_dir(rec_dir: Path, retention_days: int) -> tuple[int, int]
                 except OSError as e:
                     logger.warning("Failed to delete recording %s: %s", f, e)
     logger.debug(
-        "cleanup raw summary dir=%s deleted_files=%s freed_bytes=%s retention_days=%s",
+        "cleanup raw summary dir=%s deleted_files=%s freed_bytes=%s "
+        "retention_local_calendar_days=%s",
         rec_dir,
         count,
         freed,
