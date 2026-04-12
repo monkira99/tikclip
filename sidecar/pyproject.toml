@@ -7,6 +7,7 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.34",
     "websockets>=14.0",
+    "curl-cffi>=0.7",
     "httpx>=0.28",
     "pydantic>=2.10",
     "pydantic-settings>=2.7",
