@@ -102,3 +102,24 @@ class TrimClipResponse(BaseModel):
     file_path: str
     thumbnail_path: str
     duration_sec: float
+
+
+class FetchProductRequest(BaseModel):
+    url: str
+    cookies_json: str | None = None
+
+
+class FetchedProductData(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    price: float | None = None
+    image_url: str | None = None
+    category: str | None = None
+    tiktok_shop_id: str | None = None
+
+
+class FetchProductResponse(BaseModel):
+    success: bool
+    incomplete: bool = False
+    data: FetchedProductData | None = None
+    error: str | None = None
