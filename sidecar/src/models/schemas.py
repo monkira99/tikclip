@@ -1,4 +1,6 @@
-from pydantic import BaseModel, Field
+from typing import Literal
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class HealthResponse(BaseModel):
@@ -107,6 +109,13 @@ class TrimClipResponse(BaseModel):
 class FetchProductRequest(BaseModel):
     url: str
     cookies_json: str | None = None
+    download_media: bool = True
+
+
+class FetchedProductMediaFile(BaseModel):
+    kind: Literal["image", "video"]
+    path: str
+    source_url: str
 
 
 class FetchedProductData(BaseModel):
@@ -116,6 +125,9 @@ class FetchedProductData(BaseModel):
     image_url: str | None = None
     category: str | None = None
     tiktok_shop_id: str | None = None
+    image_urls: list[str] = Field(default_factory=list)
+    video_urls: list[str] = Field(default_factory=list)
+    media_files: list[FetchedProductMediaFile] = Field(default_factory=list)
 
 
 class FetchProductResponse(BaseModel):
@@ -147,3 +159,72 @@ class CleanupRunResponse(BaseModel):
     deleted_recordings: int = 0
     deleted_clips: int = 0
     freed_bytes: int = 0
+
+
+class ProductEmbeddingMediaItem(BaseModel):
+    kind: Literal["image", "video"]
+    path: str
+    source_url: str = ""
+
+
+class IndexProductEmbeddingsRequest(BaseModel):
+    product_id: int = Field(ge=1)
+    product_name: str = ""
+    items: list[ProductEmbeddingMediaItem] = Field(default_factory=list)
+
+
+class IndexProductEmbeddingsResponse(BaseModel):
+    indexed: int = 0
+    skipped: int = 0
+    errors: list[str] = Field(default_factory=list)
+    message: str | None = None
+
+
+class DeleteProductEmbeddingsRequest(BaseModel):
+    product_id: int = Field(ge=1)
+
+
+class DeleteProductEmbeddingsResponse(BaseModel):
+    ok: bool = True
+
+
+class ProductEmbeddingSearchRequest(BaseModel):
+    query: str = ""
+    top_k: int = Field(default=10, ge=1, le=100)
+
+    @field_validator("query")
+    @classmethod
+    def strip_query(cls, v: str) -> str:
+        return v.strip()
+
+
+class ProductEmbeddingSearchByMediaRequest(BaseModel):
+    path: str
+    kind: Literal["image", "video"] = "image"
+    top_k: int = Field(default=10, ge=1, le=100)
+
+
+class ProductEmbeddingSearchHit(BaseModel):
+    product_id: int
+    score: float
+    image_path: str
+    source_url: str | None = None
+    product_name: str | None = None
+    modality: str | None = None
+
+
+class ProductEmbeddingSearchResponse(BaseModel):
+    hits: list[ProductEmbeddingSearchHit] = Field(default_factory=list)
+
+
+class ClipSuggestProductRequest(BaseModel):
+    video_path: str
+    thumbnail_path: str | None = None
+
+
+class ClipSuggestProductResponse(BaseModel):
+    product_id: int | None = None
+    product_name: str | None = None
+    best_score: float | None = None
+    frames_used: int = 0
+    skipped_reason: str | None = None
