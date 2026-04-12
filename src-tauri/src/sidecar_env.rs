@@ -164,5 +164,45 @@ pub fn build_sidecar_env(
         "TIKCLIP_STORAGE_CLEANUP_PERCENT",
     )?;
 
+    push_bool_setting(
+        &mut env,
+        conn,
+        "product_vector_enabled",
+        "TIKCLIP_PRODUCT_VECTOR_ENABLED",
+    )?;
+    if let Some(t) = get_setting_trimmed(conn, "gemini_api_key").map_err(|e| e.to_string())? {
+        env.push(("TIKCLIP_GEMINI_API_KEY".to_string(), t));
+    }
+    if let Some(t) =
+        get_setting_trimmed(conn, "gemini_embedding_model").map_err(|e| e.to_string())?
+    {
+        env.push(("TIKCLIP_GEMINI_EMBEDDING_MODEL".to_string(), t));
+    }
+    push_int_if_valid(
+        &mut env,
+        conn,
+        "gemini_embedding_dimensions",
+        "TIKCLIP_GEMINI_EMBEDDING_DIMENSIONS",
+    )?;
+
+    push_bool_setting(
+        &mut env,
+        conn,
+        "auto_tag_clip_product_enabled",
+        "TIKCLIP_AUTO_TAG_CLIP_PRODUCT_ENABLED",
+    )?;
+    push_int_if_valid(
+        &mut env,
+        conn,
+        "auto_tag_clip_frame_count",
+        "TIKCLIP_AUTO_TAG_CLIP_FRAME_COUNT",
+    )?;
+    push_float_if_valid(
+        &mut env,
+        conn,
+        "auto_tag_clip_max_score",
+        "TIKCLIP_AUTO_TAG_CLIP_MAX_SCORE",
+    )?;
+
     Ok(env)
 }
