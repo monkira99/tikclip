@@ -246,6 +246,31 @@ export async function batchDeleteClips(clipIds: number[]): Promise<void> {
   await invoke("batch_delete_clips", { clip_ids: clipIds });
 }
 
+export async function trimClip(body: {
+  source_path: string;
+  start_sec: number;
+  end_sec: number;
+  account_id: number;
+  recording_id: number;
+}): Promise<{ file_path: string; thumbnail_path: string; duration_sec: number }> {
+  return sidecarJson("/api/clips/trim", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function insertTrimmedClip(input: {
+  recording_id: number;
+  account_id: number;
+  file_path: string;
+  thumbnail_path: string;
+  duration_sec: number;
+  start_sec: number;
+  end_sec: number;
+}): Promise<number> {
+  return invoke<number>("insert_trimmed_clip", { input });
+}
+
 function normalizeAccount(row: AccountInvokeRow): Account {
   const raw = row.auto_record_schedule;
   let auto_record_schedule: AutoRecordSchedule | null = null;
