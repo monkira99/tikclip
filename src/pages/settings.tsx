@@ -454,9 +454,20 @@ export function SettingsPage() {
 
   const runCleanupManual = useCallback(async () => {
     clearFeedback();
+    const rawStr = rawRetentionDays.trim();
+    const archStr = archiveRetentionDays.trim();
+    const rawN = rawStr === "" ? 7 : Number(rawStr);
+    const archN = archStr === "" ? 0 : Number(archStr);
+    if (!Number.isFinite(rawN) || rawN < 0 || !Number.isFinite(archN) || archN < 0) {
+      setError("Số ngày giữ bản ghi / clip phải là số không âm.");
+      return;
+    }
     setStorageCleanupBusy(true);
     try {
-      const summary = await runStorageCleanupNow();
+      const summary = await runStorageCleanupNow({
+        raw_retention_days: rawN,
+        archive_retention_days: archN,
+      });
       const mb = summary.freed_bytes / (1024 * 1024);
       setMessage(
         `Cleanup xong: ${summary.deleted_recordings} recording(s), ${summary.deleted_clips} clip(s), ~${mb.toFixed(1)} MB.`,
@@ -467,7 +478,12 @@ export function SettingsPage() {
     } finally {
       setStorageCleanupBusy(false);
     }
-  }, [clearFeedback, scanStorageStats]);
+  }, [
+    clearFeedback,
+    scanStorageStats,
+    rawRetentionDays,
+    archiveRetentionDays,
+  ]);
 
   if (loading) {
     return (

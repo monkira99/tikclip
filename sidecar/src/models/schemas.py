@@ -136,6 +136,13 @@ class StorageStatsResponse(BaseModel):
     usage_percent: float = 0.0
 
 
+class CleanupRunRequest(BaseModel):
+    """Optional overrides for a single cleanup run. Omitted fields use process settings."""
+
+    raw_retention_days: int | None = Field(default=None, ge=0)
+    archive_retention_days: int | None = Field(default=None, ge=0)
+
+
 class CleanupRunResponse(BaseModel):
     deleted_recordings: int = 0
     deleted_clips: int = 0

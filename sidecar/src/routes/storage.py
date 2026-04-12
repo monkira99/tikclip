@@ -5,7 +5,7 @@ from fastapi import APIRouter
 
 from config import settings
 from core.cleanup import cleanup_worker
-from models.schemas import CleanupRunResponse, StorageStatsResponse
+from models.schemas import CleanupRunRequest, CleanupRunResponse, StorageStatsResponse
 
 logger = logging.getLogger("tikclip.storage")
 router = APIRouter()
@@ -81,15 +81,33 @@ async def storage_stats():
 
 
 @router.post("/api/storage/cleanup-run", response_model=CleanupRunResponse)
-async def run_cleanup_now():
-    """Trigger one cleanup cycle (same logic as the background worker)."""
+async def run_cleanup_now(body: CleanupRunRequest):
+    """Trigger one cleanup cycle (same logic as the background worker).
+
+    JSON body may set ``raw_retention_days`` / ``archive_retention_days`` for this run only
+    (omitted or null → use process settings). Desktop UI sends current form values so cleanup
+    matches what the user sees without requiring save + restart.
+    """
+    eff_raw = (
+        body.raw_retention_days
+        if body.raw_retention_days is not None
+        else settings.raw_retention_days
+    )
+    eff_arch = (
+        body.archive_retention_days
+        if body.archive_retention_days is not None
+        else settings.archive_retention_days
+    )
     logger.debug(
         "POST /api/storage/cleanup-run root=%s raw_retention_days=%s archive_retention_days=%s",
         settings.storage_path.resolve(),
-        settings.raw_retention_days,
-        settings.archive_retention_days,
+        eff_raw,
+        eff_arch,
     )
-    summary = await cleanup_worker.run_once()
+    summary = await cleanup_worker.run_once(
+        raw_retention_days=body.raw_retention_days,
+        archive_retention_days=body.archive_retention_days,
+    )
     logger.debug(
         "cleanup-run done deleted_recordings=%s deleted_clips=%s freed_bytes=%s",
         summary.get("deleted_recordings"),

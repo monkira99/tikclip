@@ -460,9 +460,13 @@ export type StorageCleanupSummary = {
   freed_bytes: number;
 };
 
-export async function runStorageCleanupNow(): Promise<StorageCleanupSummary> {
+export async function runStorageCleanupNow(input: {
+  raw_retention_days: number;
+  archive_retention_days: number;
+}): Promise<StorageCleanupSummary> {
   return sidecarJson<StorageCleanupSummary>("/api/storage/cleanup-run", {
     method: "POST",
+    body: JSON.stringify(input),
   });
 }
 

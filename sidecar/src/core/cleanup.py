@@ -122,27 +122,43 @@ class StorageCleanupWorker:
             self._task = None
         logger.info("StorageCleanupWorker stopped")
 
-    async def run_once(self) -> dict:
-        """Run cleanup cycle once. Returns summary dict."""
+    async def run_once(
+        self,
+        *,
+        raw_retention_days: int | None = None,
+        archive_retention_days: int | None = None,
+    ) -> dict:
+        """Run cleanup cycle once. Returns summary dict.
+
+        Per-run overrides (e.g. from POST /api/storage/cleanup-run) take precedence over
+        loaded settings for raw/archive retention only; quota broadcast still uses settings.
+        """
         root = settings.storage_path.resolve()
         total_deleted_rec = 0
         total_deleted_clips = 0
         total_freed = 0
 
+        raw_days = (
+            raw_retention_days if raw_retention_days is not None else settings.raw_retention_days
+        )
+        arch_days = (
+            archive_retention_days
+            if archive_retention_days is not None
+            else settings.archive_retention_days
+        )
+
         logger.debug(
             "cleanup cycle start root=%s raw_retention_days=%s archive_retention_days=%s "
             "storage_quota_gb=%s warn_pct=%s cleanup_pct=%s",
             root,
-            settings.raw_retention_days,
-            settings.archive_retention_days,
+            raw_days,
+            arch_days,
             settings.storage_quota_gb,
             settings.storage_warn_percent,
             settings.storage_cleanup_percent,
         )
 
-        rec_count, rec_freed = await asyncio.to_thread(
-            _delete_old_recordings, root, settings.raw_retention_days
-        )
+        rec_count, rec_freed = await asyncio.to_thread(_delete_old_recordings, root, raw_days)
         total_deleted_rec += rec_count
         total_freed += rec_freed
         logger.debug(
@@ -152,7 +168,7 @@ class StorageCleanupWorker:
         )
 
         clip_count, clip_freed = await asyncio.to_thread(
-            _maybe_delete_archived_clips, root, settings.archive_retention_days
+            _maybe_delete_archived_clips, root, arch_days
         )
         total_deleted_clips += clip_count
         total_freed += clip_freed
