@@ -13,6 +13,7 @@ dependencies = [
     "pydantic-settings>=2.7",
     "scenedetect[opencv]>=0.6",
     "zvec>=0.3.0",
+    "google-genai>=1.0",
 ]
 
 [project.optional-dependencies]
