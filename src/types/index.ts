@@ -103,3 +103,52 @@ export interface WsEvent {
   data: Record<string, unknown>;
   timestamp: number;
 }
+
+export interface Product {
+  id: number;
+  name: string;
+  description: string | null;
+  sku: string | null;
+  image_url: string | null;
+  tiktok_shop_id: string | null;
+  tiktok_url: string | null;
+  price: number | null;
+  category: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateProductInput {
+  name: string;
+  description?: string | null;
+  sku?: string | null;
+  image_url?: string | null;
+  tiktok_shop_id?: string | null;
+  tiktok_url?: string | null;
+  price?: number | null;
+  category?: string | null;
+}
+
+export interface UpdateProductInput {
+  name?: string;
+  description?: string | null;
+  sku?: string | null;
+  image_url?: string | null;
+  tiktok_shop_id?: string | null;
+  tiktok_url?: string | null;
+  price?: number | null;
+  category?: string | null;
+}
+
+export interface ClipFilters {
+  status: ClipStatus | "all";
+  accountId: number | null;
+  sceneType: SceneType | "all";
+  dateFrom: string | null;
+  dateTo: string | null;
+  search: string;
+  sortBy: "created_at" | "duration" | "file_size" | "title";
+  sortOrder: "asc" | "desc";
+}
+
+export type ViewMode = "grid" | "list";

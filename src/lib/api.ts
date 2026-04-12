@@ -4,6 +4,7 @@ import type {
   AccountType,
   AutoRecordSchedule,
   Clip,
+  ClipFilters,
   CreateAccountInput,
   SidecarRecordingStatus,
 } from "@/types";
@@ -204,6 +205,45 @@ export async function syncWatcherForAccounts(
 
 export async function listClips(): Promise<Clip[]> {
   return invoke<Clip[]>("list_clips");
+}
+
+export async function listClipsFiltered(filters: ClipFilters): Promise<Clip[]> {
+  return invoke<Clip[]>("list_clips_filtered", {
+    input: {
+      status: filters.status === "all" ? null : filters.status,
+      account_id: filters.accountId,
+      scene_type: filters.sceneType === "all" ? null : filters.sceneType,
+      date_from: filters.dateFrom,
+      date_to: filters.dateTo,
+      search: filters.search || null,
+      sort_by: filters.sortBy,
+      sort_order: filters.sortOrder,
+    },
+  });
+}
+
+export async function getClipById(clipId: number): Promise<Clip> {
+  return invoke<Clip>("get_clip_by_id", { clip_id: clipId });
+}
+
+export async function updateClipStatus(clipId: number, newStatus: string): Promise<void> {
+  await invoke("update_clip_status", { clip_id: clipId, new_status: newStatus });
+}
+
+export async function updateClipTitle(clipId: number, title: string): Promise<void> {
+  await invoke("update_clip_title", { clip_id: clipId, title });
+}
+
+export async function updateClipNotes(clipId: number, notes: string): Promise<void> {
+  await invoke("update_clip_notes", { clip_id: clipId, notes });
+}
+
+export async function batchUpdateClipStatus(clipIds: number[], newStatus: string): Promise<void> {
+  await invoke("batch_update_clip_status", { clip_ids: clipIds, new_status: newStatus });
+}
+
+export async function batchDeleteClips(clipIds: number[]): Promise<void> {
+  await invoke("batch_delete_clips", { clip_ids: clipIds });
 }
 
 function normalizeAccount(row: AccountInvokeRow): Account {
