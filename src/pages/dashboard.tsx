@@ -108,8 +108,6 @@ export function DashboardPage() {
         storageSidecarUsagePercent={sidecarUsagePct}
       />
 
-      <ActivityFeed dashboardRevision={dashboardRevision} />
-
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="bg-[var(--color-bg-elevated)]">
           <CardHeader>
@@ -159,6 +157,8 @@ export function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      <ActivityFeed dashboardRevision={dashboardRevision} />
     </div>
   );
 }
