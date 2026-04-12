@@ -787,11 +787,8 @@ export function SettingsPage() {
                   placeholder="0"
                 />
                 <p className="text-xs text-[var(--color-text-muted)]">
-                  <span className="tabular-nums">0</span> (khuyến nghị): không tự xóa file trong{" "}
-                  <code className="text-[var(--color-text)]">clips/</code> theo tuổi. Số ngày &gt;{" "}
-                  <span className="tabular-nums">0</span> chỉ được lưu —{" "}
-                  <span className="text-[var(--color-text)]">chưa áp dụng</span> cho tới khi app có xóa clip
-                  theo tuổi kết nối CSDL.
+                  Nên để <span className="tabular-nums">0</span>: không tự xóa clip theo tuổi. Số khác được
+                  lưu nhưng hiện chưa có tác dụng.
                 </p>
               </div>
               <div className="space-y-2">
