@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     log_level: str = "info"
     # TIKCLIP_DEBUG_TIKTOK=1 — when room_id parse fails, save live HTML under
     # {TIKCLIP_STORAGE_PATH}/debug/tiktok_live_html/ (log path; no secrets in logs).
-    debug_tiktok: bool = False
+    debug_tiktok: bool = True
     poll_interval_seconds: int = 30
     max_concurrent_recordings: int = 5
     # Max length of one live recording if API omits max_duration_seconds (Settings, minutes).
