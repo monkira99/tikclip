@@ -41,8 +41,13 @@ export function ClipDetail({ clipId }: { clipId: number }) {
   const setActiveClipId = useClipStore((s) => s.setActiveClipId);
   const clipsRevision = useClipStore((s) => s.clipsRevision);
   const bumpClipsRevision = useClipStore((s) => s.bumpClipsRevision);
+  const clipFromList = useClipStore((s) => s.clips.find((c) => c.id === clipId) ?? null);
 
-  const [clip, setClip] = useState<Clip | null>(null);
+  const [remoteClip, setRemoteClip] = useState<Clip | null>(null);
+  const [fetchDone, setFetchDone] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  const clip = remoteClip ?? clipFromList;
   const [titleEdit, setTitleEdit] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const [notesDraft, setNotesDraft] = useState("");
@@ -65,20 +70,37 @@ export function ClipDetail({ clipId }: { clipId: number }) {
   }, [clipId]);
 
   useEffect(() => {
+    const cached = useClipStore.getState().clips.find((c) => c.id === clipId);
+    setTitleDraft(cached?.title?.trim() || `Clip #${clipId}`);
+    setNotesDraft(cached?.notes ?? "");
+    setTitleEdit(false);
+  }, [clipId]);
+
+  useEffect(() => {
     let cancelled = false;
+    setRemoteClip(null);
+    setFetchDone(false);
+    setFetchError(null);
+
     void getClipById(clipId)
       .then((row) => {
         if (!cancelled) {
-          setClip(row);
+          setRemoteClip(row);
           setTitleDraft(row.title?.trim() || `Clip #${clipId}`);
           setNotesDraft(row.notes ?? "");
         }
       })
-      .catch(() => {
+      .catch((e) => {
         if (!cancelled) {
-          setClip(null);
+          setFetchError(e instanceof Error ? e.message : String(e));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setFetchDone(true);
         }
       });
+
     return () => {
       cancelled = true;
     };
@@ -101,32 +123,45 @@ export function ClipDetail({ clipId }: { clipId: number }) {
 
   const durationForTrim = videoDuration ?? (clip ? Math.max(clip.duration_seconds, 0.001) : 0.001);
 
+  const patchLocalClip = useCallback(
+    (patch: Partial<Clip>) => {
+      setRemoteClip((c) => {
+        const base = c ?? useClipStore.getState().clips.find((x) => x.id === clipId) ?? null;
+        if (!base) {
+          return c;
+        }
+        return { ...base, ...patch };
+      });
+    },
+    [clipId],
+  );
+
   const saveTitle = useCallback(async () => {
     if (!clip) {
       return;
     }
     const next = titleDraft.trim() || `Clip #${clip.id}`;
     await updateClipTitle(clip.id, next);
-    setClip((c) => (c ? { ...c, title: next } : c));
+    patchLocalClip({ title: next });
     setTitleEdit(false);
     bumpClipsRevision();
-  }, [clip, titleDraft, bumpClipsRevision]);
+  }, [clip, titleDraft, bumpClipsRevision, patchLocalClip]);
 
   const saveNotes = useCallback(async () => {
     if (!clip) {
       return;
     }
     await updateClipNotes(clip.id, notesDraft);
-    setClip((c) => (c ? { ...c, notes: notesDraft } : c));
+    patchLocalClip({ notes: notesDraft });
     bumpClipsRevision();
-  }, [clip, notesDraft, bumpClipsRevision]);
+  }, [clip, notesDraft, bumpClipsRevision, patchLocalClip]);
 
   const onStatusChange = async (status: ClipStatus) => {
     if (!clip) {
       return;
     }
     await updateClipStatus(clip.id, status);
-    setClip((c) => (c ? { ...c, status } : c));
+    patchLocalClip({ status });
     bumpClipsRevision();
   };
 
@@ -153,7 +188,13 @@ export function ClipDetail({ clipId }: { clipId: number }) {
         <Button type="button" variant="outline" size="sm" onClick={() => setActiveClipId(null)}>
           Back
         </Button>
-        <p className="text-sm text-[var(--color-text-muted)]">Loading clip…</p>
+        {!fetchDone ? (
+          <p className="text-sm text-[var(--color-text-muted)]">Loading clip…</p>
+        ) : (
+          <p className="text-sm text-red-500" role="alert">
+            {fetchError ?? "Không tải được clip."}
+          </p>
+        )}
       </div>
     );
   }
