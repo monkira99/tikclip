@@ -32,6 +32,22 @@ export function DashboardPage() {
     }
   }, []);
 
+  const loadSidecarStorageStats = useCallback(async () => {
+    if (!sidecarConnected) {
+      setSidecarUsagePct(null);
+      return;
+    }
+    try {
+      const s = await getStorageStats();
+      setSidecarUsagePct(s.usage_percent);
+    } catch (e) {
+      if (import.meta.env.DEV) {
+        console.warn("[TikClip] getStorageStats failed", e);
+      }
+      setSidecarUsagePct(null);
+    }
+  }, [sidecarConnected]);
+
   /** Refetch stats when sidecar updates recording progress / finish (not only clip_revision). */
   const recordingsSnapshot = useMemo(
     () =>
@@ -56,40 +72,41 @@ export function DashboardPage() {
   useEffect(() => {
     const t = window.setTimeout(() => {
       void loadDashboardStats();
-      void (async () => {
-        if (!sidecarConnected) {
-          setSidecarUsagePct(null);
-          return;
-        }
-        try {
-          const s = await getStorageStats();
-          setSidecarUsagePct(s.usage_percent);
-        } catch (e) {
-          if (import.meta.env.DEV) {
-            console.warn("[TikClip] getStorageStats failed", e);
-          }
-          setSidecarUsagePct(null);
-        }
-      })();
+      void loadSidecarStorageStats();
     }, 500);
     return () => window.clearTimeout(t);
   }, [
     loadDashboardStats,
+    loadSidecarStorageStats,
     clipsRevision,
     dashboardRevision,
     sidecarConnected,
     recordingsSnapshot,
   ]);
 
+  /** Refresh storage card when user returns to the app (sidecar totals change while away). */
   useEffect(() => {
     const onVis = () => {
       if (document.visibilityState === "visible") {
         void loadDashboardStats();
+        void loadSidecarStorageStats();
       }
     };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
-  }, [loadDashboardStats]);
+  }, [loadDashboardStats, loadSidecarStorageStats]);
+
+  /** Periodic refresh: DB-backed stat can lag vs disk; sidecar scan picks up new recordings/clips. */
+  useEffect(() => {
+    if (!sidecarConnected) {
+      return;
+    }
+    const id = window.setInterval(() => {
+      void loadDashboardStats();
+      void loadSidecarStorageStats();
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, [sidecarConnected, loadDashboardStats, loadSidecarStorageStats]);
 
   const activeList = Object.values(recordings).filter(
     (r) => r.status === "pending" || r.status === "recording",

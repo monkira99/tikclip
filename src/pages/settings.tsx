@@ -747,8 +747,9 @@ export function SettingsPage() {
                   placeholder="7"
                 />
                 <p className="text-xs text-[var(--color-text-muted)]">
-                  File ghi gốc trong thư mục <code className="text-[var(--color-text)]">recordings/</code>{" "}
-                  cũ hơn số ngày này có thể bị xóa khi sidecar chạy dọn dẹp.
+                  File ghi gốc trong <code className="text-[var(--color-text)]">records/</code> (và bản cũ{" "}
+                  <code className="text-[var(--color-text)]">recordings/</code> nếu còn) cũ hơn số ngày
+                  này có thể bị xóa khi sidecar chạy dọn dẹp.
                 </p>
               </div>
               <div className="space-y-2">

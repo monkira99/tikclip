@@ -27,11 +27,18 @@ def _dir_size(path: Path) -> tuple[int, int]:
     return total, count
 
 
+def _raw_recordings_usage(root: Path) -> tuple[int, int]:
+    """Sum ``records/`` (current) and legacy ``recordings/``."""
+    b1, c1 = _dir_size(root / "records")
+    b2, c2 = _dir_size(root / "recordings")
+    return b1 + b2, c1 + c2
+
+
 @router.get("/api/storage/stats", response_model=StorageStatsResponse)
 async def storage_stats():
     root = settings.storage_path
 
-    rec_bytes, rec_count = _dir_size(root / "recordings")
+    rec_bytes, rec_count = _raw_recordings_usage(root)
     clip_bytes, clip_count = _dir_size(root / "clips")
     prod_bytes, _ = _dir_size(root / "products")
 

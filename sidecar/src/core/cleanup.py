@@ -1,6 +1,6 @@
 """Periodic storage cleanup: raw recordings by retention + quota warnings over WebSocket.
 
-We only delete files under ``recordings/`` when older than ``raw_retention_days``.
+We delete old raw media under ``records/`` (current worker output) and legacy ``recordings/``.
 Automatic deletion of exported clips by age is not done here: the sidecar cannot
 correlate files on disk with clip rows (draft/ready/archived) in the Tauri DB.
 Use ``archive_retention_days > 0`` only as a future hook; until desktop-driven
@@ -42,12 +42,9 @@ def _dir_total_bytes(path: Path) -> int:
     return total
 
 
-def _delete_old_recordings(root: Path, retention_days: int) -> tuple[int, int]:
-    """Delete recording media under ``recordings/`` older than retention_days."""
-    if retention_days <= 0:
-        return 0, 0
-    rec_dir = root / "recordings"
-    if not rec_dir.is_dir():
+def _delete_old_under_dir(rec_dir: Path, retention_days: int) -> tuple[int, int]:
+    """Delete old raw media files under one directory tree."""
+    if retention_days <= 0 or not rec_dir.is_dir():
         return 0, 0
     count = 0
     freed = 0
@@ -63,6 +60,13 @@ def _delete_old_recordings(root: Path, retention_days: int) -> tuple[int, int]:
                 except OSError as e:
                     logger.warning("Failed to delete recording %s: %s", f, e)
     return count, freed
+
+
+def _delete_old_recordings(root: Path, retention_days: int) -> tuple[int, int]:
+    """Delete old raw media under ``records/`` and legacy ``recordings/``."""
+    c1, f1 = _delete_old_under_dir(root / "records", retention_days)
+    c2, f2 = _delete_old_under_dir(root / "recordings", retention_days)
+    return c1 + c2, f1 + f2
 
 
 def _maybe_delete_archived_clips(_root: Path, retention_days: int) -> tuple[int, int]:
