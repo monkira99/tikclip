@@ -20,6 +20,9 @@ VECTOR_SUBDIR = Path("vector") / "product_media"
 _coll_lock = threading.Lock()
 _coll_cache: dict[str, zvec.Collection] = {}
 
+# Recommended in zvec docs: mmap for local collections; read-write for upsert/delete.
+_COLLECTION_RW = zvec.CollectionOption(read_only=False, enable_mmap=True)
+
 
 class MediaIndexItem(BaseModel):
     kind: Literal["image", "video"]
@@ -51,7 +54,7 @@ def _build_schema(dim: int) -> zvec.CollectionSchema:
                 "product_id",
                 zvec.DataType.INT64,
                 nullable=False,
-                index_param=zvec.InvertIndexParam(),
+                index_param=zvec.InvertIndexParam(enable_range_optimization=True),
             ),
             zvec.FieldSchema("image_path", zvec.DataType.STRING, nullable=False),
             zvec.FieldSchema("source_url", zvec.DataType.STRING, nullable=True),
@@ -93,7 +96,6 @@ def get_or_open_collection_sync() -> zvec.Collection:
         raise ValueError(msg)
 
     root = _vector_root()
-    root.mkdir(parents=True, exist_ok=True)
     path_str = str(root)
     key = _cache_key(path_str, dim)
 
@@ -102,8 +104,10 @@ def get_or_open_collection_sync() -> zvec.Collection:
         if cached is not None:
             return cached
 
+        root.parent.mkdir(parents=True, exist_ok=True)
+
         if root.exists() and any(root.iterdir()):
-            coll = zvec.open(path_str)
+            coll = zvec.open(path_str, option=_COLLECTION_RW)
             got = _embedding_dimension_from_schema(coll.schema)
             if got != dim:
                 msg = (
@@ -112,7 +116,16 @@ def get_or_open_collection_sync() -> zvec.Collection:
                 )
                 raise ValueError(msg)
         else:
-            coll = zvec.create_and_open(path_str, _build_schema(dim))
+            if root.exists() and not any(root.iterdir()):
+                try:
+                    root.rmdir()
+                except OSError:
+                    pass
+            coll = zvec.create_and_open(
+                path_str,
+                _build_schema(dim),
+                option=_COLLECTION_RW,
+            )
 
         _coll_cache[key] = coll
         return coll
@@ -122,15 +135,24 @@ def delete_vectors_for_product_sync(product_id: int) -> None:
     if not settings.product_vector_enabled:
         return
     root = _vector_root()
-    if not root.exists():
+    if not root.exists() or not any(root.iterdir()):
         return
+    path_str = str(root)
+    dim = settings.gemini_embedding_dimensions
+    key = _cache_key(path_str, dim)
+    with _coll_lock:
+        coll = _coll_cache.get(key)
+    if coll is None:
+        try:
+            coll = zvec.open(path_str, option=_COLLECTION_RW)
+        except Exception as exc:
+            logger.debug("skip vector delete: could not open zvec collection: %s", exc)
+            return
     try:
-        coll = get_or_open_collection_sync()
-    except (RuntimeError, ValueError) as exc:
-        logger.debug("skip vector delete: %s", exc)
-        return
-    coll.delete_by_filter(f"product_id = {int(product_id)}")
-    coll.flush()
+        coll.delete_by_filter(f"product_id = {int(product_id)}")
+        coll.flush()
+    except Exception as exc:
+        logger.warning("vector delete failed for product_id=%s: %s", product_id, exc)
 
 
 class IndexSummary(BaseModel):
@@ -203,6 +225,7 @@ async def index_product_media(
                 path=fs_path,
                 kind=item.kind,
                 output_dimensionality=dim,
+                product_name=product_name,
             )
         except (OSError, ValueError, FileNotFoundError) as exc:
             errors.append(f"{item.path}: {exc}")
