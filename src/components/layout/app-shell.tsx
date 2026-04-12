@@ -11,6 +11,7 @@ import { AccountsPage } from "@/pages/accounts";
 import { ClipsPage } from "@/pages/clips";
 import { DashboardPage } from "@/pages/dashboard";
 import { RecordingsPage } from "@/pages/recordings";
+import { ProductsPage } from "@/pages/products";
 import { SettingsPage } from "@/pages/settings";
 import {
   insertClipFromSidecarWsPayload,
@@ -34,6 +35,7 @@ type PageId =
   | "accounts"
   | "recordings"
   | "clips"
+  | "products"
   | "statistics"
   | "settings";
 
@@ -42,6 +44,7 @@ const pageMeta: Record<PageId, { title: string; subtitle: string }> = {
   accounts: { title: "Accounts", subtitle: "Manage TikTok accounts" },
   recordings: { title: "Recordings", subtitle: "Active and completed recordings" },
   clips: { title: "Clips", subtitle: "Generated video clips" },
+  products: { title: "Products", subtitle: "Product catalog and tagging" },
   statistics: { title: "Statistics", subtitle: "Analytics and reports" },
   settings: { title: "Settings", subtitle: "App configuration" },
 };
@@ -51,6 +54,7 @@ const pageComponents: Record<PageId, ComponentType> = {
   accounts: AccountsPage,
   recordings: RecordingsPage,
   clips: ClipsPage,
+  products: ProductsPage,
   statistics: () => (
     <p className="text-[var(--color-text-muted)]">Statistics coming in Phase 3.</p>
   ),

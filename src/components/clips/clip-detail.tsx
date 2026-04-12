@@ -1,20 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
-import { FolderOpen, Trash2 } from "lucide-react";
+import { FolderOpen, Plus, Trash2, X } from "lucide-react";
 import { ClipStatusBadge } from "@/components/clips/clip-status-badge";
 import { TrimControls } from "@/components/clips/trim-controls";
 import { VideoPlayer, type VideoPlayerHandle } from "@/components/clips/video-player";
 import { Button } from "@/components/ui/button";
+import { ProductPicker } from "@/components/products/product-picker";
 import {
   batchDeleteClips,
   getClipById,
+  listClipProducts,
   openPathInSystem,
+  untagClipProduct,
   updateClipNotes,
   updateClipStatus,
   updateClipTitle,
 } from "@/lib/api";
 import { useClipStore } from "@/stores/clip-store";
-import type { Clip, ClipStatus } from "@/types";
+import type { Clip, ClipStatus, Product } from "@/types";
 
 function formatBytes(n: number): string {
   if (n < 1024) {
@@ -45,6 +48,17 @@ export function ClipDetail({ clipId }: { clipId: number }) {
   const [notesDraft, setNotesDraft] = useState("");
   const [videoDuration, setVideoDuration] = useState<number | null>(null);
   const playerRef = useRef<VideoPlayerHandle | null>(null);
+  const [clipProducts, setClipProducts] = useState<Product[]>([]);
+  const [productPickerOpen, setProductPickerOpen] = useState(false);
+
+  const refreshClipProducts = useCallback(async () => {
+    try {
+      const rows = await listClipProducts(clipId);
+      setClipProducts(rows);
+    } catch {
+      setClipProducts([]);
+    }
+  }, [clipId]);
 
   useEffect(() => {
     setVideoDuration(null);
@@ -69,6 +83,10 @@ export function ClipDetail({ clipId }: { clipId: number }) {
       cancelled = true;
     };
   }, [clipId, clipsRevision]);
+
+  useEffect(() => {
+    void refreshClipProducts();
+  }, [clipId, clipsRevision, refreshClipProducts]);
 
   const videoSrc = useMemo(() => {
     if (!isTauri() || !clip?.file_path?.trim()) {
@@ -241,9 +259,58 @@ export function ClipDetail({ clipId }: { clipId: number }) {
             />
           </label>
 
-          <div className="rounded-md border border-dashed border-[var(--color-border)] px-3 py-2 text-sm text-[var(--color-text-muted)]">
-            Products: coming soon
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
+                Products
+              </span>
+              <Button type="button" variant="outline" size="sm" onClick={() => setProductPickerOpen(true)}>
+                <Plus className="mr-1 h-3.5 w-3.5" />
+                Add product
+              </Button>
+            </div>
+            {clipProducts.length === 0 ? (
+              <p className="text-sm text-[var(--color-text-muted)]">No products linked to this clip.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {clipProducts.map((p) => (
+                  <div
+                    key={p.id}
+                    className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-background py-1 pl-1 pr-1 text-sm"
+                  >
+                    {p.image_url ? (
+                      <img src={p.image_url} alt="" className="h-6 w-6 rounded-full object-cover" />
+                    ) : (
+                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px]">
+                        📦
+                      </span>
+                    )}
+                    <span className="max-w-[140px] truncate text-[var(--color-text)]">{p.name}</span>
+                    <button
+                      type="button"
+                      className="rounded-full p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                      aria-label={`Remove ${p.name}`}
+                      onClick={() =>
+                        void (async () => {
+                          await untagClipProduct(clip.id, p.id);
+                          void refreshClipProducts();
+                        })()
+                      }
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
+
+          <ProductPicker
+            clipId={clip.id}
+            open={productPickerOpen}
+            onClose={() => setProductPickerOpen(false)}
+            onUpdated={() => void refreshClipProducts()}
+          />
 
           <div className="flex flex-wrap gap-2 pt-2">
             <Button

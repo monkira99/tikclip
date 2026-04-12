@@ -6,7 +6,10 @@ import type {
   Clip,
   ClipFilters,
   CreateAccountInput,
+  CreateProductInput,
+  Product,
   SidecarRecordingStatus,
+  UpdateProductInput,
 } from "@/types";
 
 /** Raw row from SQLite: schedule stored as JSON string. */
@@ -269,6 +272,66 @@ export async function insertTrimmedClip(input: {
   end_sec: number;
 }): Promise<number> {
   return invoke<number>("insert_trimmed_clip", { input });
+}
+
+export async function listProducts(): Promise<Product[]> {
+  return invoke<Product[]>("list_products");
+}
+
+export async function getProductById(productId: number): Promise<Product> {
+  return invoke<Product>("get_product_by_id", { product_id: productId });
+}
+
+export async function createProduct(input: CreateProductInput): Promise<number> {
+  return invoke<number>("create_product", { input });
+}
+
+export async function updateProduct(productId: number, input: UpdateProductInput): Promise<void> {
+  await invoke("update_product", { product_id: productId, input });
+}
+
+export async function deleteProduct(productId: number): Promise<void> {
+  await invoke("delete_product", { product_id: productId });
+}
+
+export async function listClipProducts(clipId: number): Promise<Product[]> {
+  return invoke<Product[]>("list_clip_products", { clip_id: clipId });
+}
+
+export async function tagClipProduct(clipId: number, productId: number): Promise<void> {
+  await invoke("tag_clip_product", { clip_id: clipId, product_id: productId });
+}
+
+export async function untagClipProduct(clipId: number, productId: number): Promise<void> {
+  await invoke("untag_clip_product", { clip_id: clipId, product_id: productId });
+}
+
+export async function batchTagClipProducts(clipIds: number[], productId: number): Promise<void> {
+  await invoke("batch_tag_clip_products", { clip_ids: clipIds, product_id: productId });
+}
+
+export type FetchProductFromUrlResult = {
+  success: boolean;
+  incomplete: boolean;
+  data: {
+    name: string | null;
+    description: string | null;
+    price: number | null;
+    image_url: string | null;
+    category: string | null;
+    tiktok_shop_id: string | null;
+  } | null;
+  error: string | null;
+};
+
+export async function fetchProductFromUrl(
+  url: string,
+  cookiesJson?: string | null,
+): Promise<FetchProductFromUrlResult> {
+  return sidecarJson<FetchProductFromUrlResult>("/api/products/fetch-from-url", {
+    method: "POST",
+    body: JSON.stringify({ url, cookies_json: cookiesJson ?? null }),
+  });
 }
 
 function normalizeAccount(row: AccountInvokeRow): Account {
