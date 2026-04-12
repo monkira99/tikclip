@@ -71,6 +71,47 @@ function logSidecarDbSyncError(context: string, err: unknown): void {
   }
 }
 
+function parseAutoTagClipProductEnabled(raw: string | null): boolean {
+  if (raw === null || raw.trim() === "") {
+    return false;
+  }
+  const t = raw.trim().toLowerCase();
+  return t === "1" || t === "true" || t === "yes" || t === "on";
+}
+
+async function maybeAutoTagClipAfterInsert(
+  clipId: number,
+  data: Record<string, unknown>,
+): Promise<void> {
+  try {
+    if (!api.getSidecarBaseUrl()) {
+      return;
+    }
+    const raw = await api.getSetting("auto_tag_clip_product_enabled");
+    if (!parseAutoTagClipProductEnabled(raw)) {
+      return;
+    }
+    const videoPath = typeof data.path === "string" ? data.path : "";
+    if (!videoPath) {
+      return;
+    }
+    const thumbnailPath =
+      typeof data.thumbnail_path === "string" && data.thumbnail_path.trim() !== ""
+        ? data.thumbnail_path
+        : null;
+    const res = await api.suggestProductForClip({
+      video_path: videoPath,
+      thumbnail_path: thumbnailPath,
+    });
+    if (res.product_id != null) {
+      await api.tagClipProduct(clipId, res.product_id);
+      useClipStore.getState().bumpClipsRevision();
+    }
+  } catch {
+    /* sidecar/Gemini optional */
+  }
+}
+
 async function syncLiveFromSidecarHttp(): Promise<void> {
   try {
     const rows = await api.getLiveOverview();
@@ -221,8 +262,11 @@ export function AppShell() {
       useAppStore.getState().bumpDashboardRevision();
       void (async () => {
         try {
-          await insertClipFromSidecarWsPayload(data);
+          const clipId = await insertClipFromSidecarWsPayload(data);
           useClipStore.getState().bumpClipsRevision();
+          if (clipId != null) {
+            void maybeAutoTagClipAfterInsert(clipId, data);
+          }
         } catch (err) {
           logSidecarDbSyncError("clip_ready → SQLite insert failed", err);
         }
