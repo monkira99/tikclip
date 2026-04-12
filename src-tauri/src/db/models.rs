@@ -77,3 +77,18 @@ pub struct Notification {
     pub is_read: bool,
     pub created_at: String,
 }
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Product {
+    pub id: i64,
+    pub name: String,
+    pub description: Option<String>,
+    pub sku: Option<String>,
+    pub image_url: Option<String>,
+    pub tiktok_shop_id: Option<String>,
+    pub tiktok_url: Option<String>,
+    pub price: Option<f64>,
+    pub category: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
