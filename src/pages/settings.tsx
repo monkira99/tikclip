@@ -146,6 +146,7 @@ export function SettingsPage() {
   const [storageCleanupPercent, setStorageCleanupPercent] = useState("95");
   const [storageStats, setStorageStats] = useState<StorageStats | null>(null);
   const [storageScanBusy, setStorageScanBusy] = useState(false);
+  const [storageStatsError, setStorageStatsError] = useState<string | null>(null);
   const [storageCleanupBusy, setStorageCleanupBusy] = useState(false);
 
   useEffect(() => {
@@ -233,6 +234,56 @@ export function SettingsPage() {
     setMessage(null);
     setError(null);
   }, []);
+
+  const fetchStorageStats = useCallback(
+    async (opts?: {
+      announce?: boolean;
+      signal?: AbortSignal;
+      showBusy?: boolean;
+      /** When false, failed refresh does not clear existing stats (e.g. after cleanup). */
+      clearStatsOnError?: boolean;
+    }) => {
+      const announce = opts?.announce ?? false;
+      const showBusy = opts?.showBusy !== false;
+      const clearStatsOnError = opts?.clearStatsOnError !== false;
+      const sig = opts?.signal;
+      const aborted = () => sig?.aborted ?? false;
+
+      if (announce) clearFeedback();
+      if (showBusy) setStorageScanBusy(true);
+      setStorageStatsError(null);
+      try {
+        const s = await getStorageStats();
+        if (aborted()) return;
+        setStorageStats(s);
+        if (announce) {
+          setMessage("Đã cập nhật số liệu lưu trữ từ sidecar.");
+        }
+      } catch (e) {
+        if (aborted()) return;
+        const msg = e instanceof Error ? e.message : "Không lấy được số liệu lưu trữ.";
+        if (clearStatsOnError) {
+          setStorageStats(null);
+        }
+        setStorageStatsError(msg);
+        if (announce) {
+          setError(msg);
+        }
+      } finally {
+        if (showBusy && !aborted()) {
+          setStorageScanBusy(false);
+        }
+      }
+    },
+    [clearFeedback],
+  );
+
+  useEffect(() => {
+    if (loading) return;
+    const ac = new AbortController();
+    void fetchStorageStats({ signal: ac.signal });
+    return () => ac.abort();
+  }, [loading, fetchStorageStats]);
 
   const chooseStorageRoot = useCallback(async () => {
     clearFeedback();
@@ -364,21 +415,6 @@ export function SettingsPage() {
     }
   }, [clearFeedback, clipMinDuration, clipMaxDuration]);
 
-  const scanStorageStats = useCallback(async () => {
-    clearFeedback();
-    setStorageScanBusy(true);
-    try {
-      const s = await getStorageStats();
-      setStorageStats(s);
-      setMessage("Đã cập nhật số liệu lưu trữ từ sidecar.");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Không lấy được stats");
-      setStorageStats(null);
-    } finally {
-      setStorageScanBusy(false);
-    }
-  }, [clearFeedback]);
-
   const saveStorageCard = useCallback(async () => {
     clearFeedback();
     const sg = maxStorageGb.trim();
@@ -459,18 +495,13 @@ export function SettingsPage() {
       setMessage(
         `Cleanup xong: ${summary.deleted_recordings} recording(s), ${summary.deleted_clips} clip(s), ~${mb.toFixed(1)} MB.`,
       );
-      await scanStorageStats();
+      await fetchStorageStats({ showBusy: false, clearStatsOnError: false });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Cleanup thất bại");
     } finally {
       setStorageCleanupBusy(false);
     }
-  }, [
-    clearFeedback,
-    scanStorageStats,
-    rawRetentionDays,
-    archiveRetentionDays,
-  ]);
+  }, [clearFeedback, fetchStorageStats, rawRetentionDays, archiveRetentionDays]);
 
   if (loading) {
     return (
@@ -665,19 +696,10 @@ export function SettingsPage() {
           </div>
 
           <div className="space-y-3 border-t border-[var(--color-border)] pt-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <Label className="text-[var(--color-text)]">Tổng quan (sidecar)</Label>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="border-[var(--color-border)]"
-                disabled={storageScanBusy}
-                onClick={() => void scanStorageStats()}
-              >
-                {storageScanBusy ? "Đang quét…" : "Quét ngay"}
-              </Button>
-            </div>
+            <Label className="text-[var(--color-text)]">Tổng quan (sidecar)</Label>
+            {storageScanBusy && !storageStats ? (
+              <p className="text-xs text-[var(--color-text-muted)]">Đang tải số liệu lưu trữ…</p>
+            ) : null}
             {storageStats ? (
               <div className="space-y-2 text-sm text-[var(--color-text-muted)]">
                 <p>
@@ -721,11 +743,11 @@ export function SettingsPage() {
                   </div>
                 ) : null}
               </div>
-            ) : (
-              <p className="text-xs text-[var(--color-text-muted)]">
-                Bấm &quot;Quét ngay&quot; khi sidecar đang chạy để xem dung lượng theo thư mục.
+            ) : storageStatsError && !storageScanBusy ? (
+              <p className="text-xs text-red-500" role="alert">
+                {storageStatsError}
               </p>
-            )}
+            ) : null}
           </div>
 
           <div className="space-y-3 border-t border-[var(--color-border)] pt-4">
