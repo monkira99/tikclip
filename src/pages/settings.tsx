@@ -754,7 +754,7 @@ export function SettingsPage() {
             <Label className="text-[var(--color-text)]">Dọn dữ liệu &amp; cảnh báo dung lượng</Label>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="raw_ret">Bản ghi thô — xóa sau (ngày)</Label>
+                <Label htmlFor="raw_ret">Bản ghi thô — xóa sau (ngày), 0 = tắt</Label>
                 <Input
                   id="raw_ret"
                   type="text"
@@ -766,7 +766,7 @@ export function SettingsPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="arch_ret">Clip — xóa sau (ngày)</Label>
+                <Label htmlFor="arch_ret">Clip — xóa sau (ngày), 0 = tắt</Label>
                 <Input
                   id="arch_ret"
                   type="text"
@@ -774,7 +774,7 @@ export function SettingsPage() {
                   className={fieldSurface}
                   value={archiveRetentionDays}
                   onChange={(e) => setArchiveRetentionDays(e.target.value)}
-                  placeholder="0"
+                  placeholder="0 = tắt"
                 />
               </div>
               <div className="space-y-2">
