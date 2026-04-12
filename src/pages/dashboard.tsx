@@ -19,6 +19,8 @@ export function DashboardPage() {
   const clipsRevision = useClipStore((s) => s.clipsRevision);
   const [dashStats, setDashStats] = useState<DashboardStats | null>(null);
   const [sidecarUsagePct, setSidecarUsagePct] = useState<number | null>(null);
+  /** Sidecar filesystem scan — matches debug log; preferred for Storage card when connected. */
+  const [sidecarTotalBytes, setSidecarTotalBytes] = useState<number | null>(null);
 
   const loadDashboardStats = useCallback(async () => {
     try {
@@ -35,16 +37,19 @@ export function DashboardPage() {
   const loadSidecarStorageStats = useCallback(async () => {
     if (!sidecarConnected) {
       setSidecarUsagePct(null);
+      setSidecarTotalBytes(null);
       return;
     }
     try {
       const s = await getStorageStats();
       setSidecarUsagePct(s.usage_percent);
+      setSidecarTotalBytes(s.total_bytes);
     } catch (e) {
       if (import.meta.env.DEV) {
         console.warn("[TikClip] getStorageStats failed", e);
       }
       setSidecarUsagePct(null);
+      setSidecarTotalBytes(null);
     }
   }, [sidecarConnected]);
 
@@ -114,13 +119,18 @@ export function DashboardPage() {
   const activeCount = countActiveRecordings(recordings);
   const liveAccounts = accounts.filter((a) => a.is_live);
 
+  const storageDisplayBytes =
+    sidecarConnected && sidecarTotalBytes != null
+      ? sidecarTotalBytes
+      : (dashStats?.storageUsedBytes ?? 0);
+
   return (
     <div className="flex flex-col gap-8">
       <StatCards
         activeRecordings={activeCount}
         accountCount={accounts.length}
         clipsToday={dashStats?.clipsToday ?? 0}
-        storageUsedBytes={dashStats?.storageUsedBytes ?? 0}
+        storageUsedBytes={storageDisplayBytes}
         storageQuotaGb={dashStats?.storageQuotaGb ?? null}
         storageSidecarUsagePercent={sidecarUsagePct}
       />
