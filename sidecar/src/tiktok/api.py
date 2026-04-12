@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 
 import httpx
 
@@ -41,6 +43,28 @@ _ROOM_ID_PATTERNS = (
     re.compile(r"room/(\d{10,})"),
     re.compile(r'"web_rid"\s*:\s*"(\d+)"'),
 )
+
+# Cap saved debug HTML so a huge response cannot fill the disk.
+_DEBUG_TIKTOK_HTML_MAX_BYTES = 512 * 1024
+
+
+def _save_debug_tiktok_live_html(username: str, html: str) -> Path | None:
+    """Write live page HTML when room_id parse fails (debug_tiktok). Returns path or None."""
+    try:
+        root = settings.storage_path.resolve() / "debug" / "tiktok_live_html"
+        root.mkdir(parents=True, exist_ok=True)
+        safe_chars = (c if c.isalnum() or c in "-_" else "_" for c in username.strip())
+        safe = "".join(safe_chars)[:64] or "unknown"
+        name = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}_{safe}.html"
+        path = root / name
+        raw = html.encode("utf-8", errors="replace")
+        if len(raw) > _DEBUG_TIKTOK_HTML_MAX_BYTES:
+            raw = raw[:_DEBUG_TIKTOK_HTML_MAX_BYTES]
+        path.write_bytes(raw)
+        return path
+    except OSError as e:
+        logger.warning("debug_tiktok: could not save HTML file: %s", e)
+        return None
 
 
 class TikTokAPI:
@@ -309,8 +333,20 @@ class TikTokAPI:
                 username,
             )
             if settings.debug_tiktok:
-                snippet = text[:800].replace("\n", " ")
-                logger.warning("debug_tiktok HTML snippet (truncated): %s", snippet)
+                saved = _save_debug_tiktok_live_html(username, text)
+                if saved is not None:
+                    n = len(text.encode("utf-8", errors="replace"))
+                    cap = _DEBUG_TIKTOK_HTML_MAX_BYTES
+                    logger.warning(
+                        "debug_tiktok: saved /@%s/live HTML (%s bytes%s) to %s",
+                        username,
+                        n,
+                        f", truncated to {cap}" if n > cap else "",
+                        saved,
+                    )
+                else:
+                    snippet = text[:800].replace("\n", " ")
+                    logger.warning("debug_tiktok HTML snippet (truncated): %s", snippet)
             return {"LiveRoomInfo": {"status": 4}, "room_id": None}
 
         return await self._fetch_webcast_room_payload(client, room_id)
