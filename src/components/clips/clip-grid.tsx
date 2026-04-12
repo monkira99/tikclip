@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { ClipCard } from "@/components/clips/clip-card";
 import { Button } from "@/components/ui/button";
-import { listClips } from "@/lib/api";
 import {
   groupClipsByDateAndUser,
   userRowKey,
@@ -10,7 +9,6 @@ import {
 } from "@/lib/group-clips";
 import { cn } from "@/lib/utils";
 import { useClipStore } from "@/stores/clip-store";
-import type { Clip } from "@/types";
 
 function applyFirstDateDefaults(grouped: DateClipGroup[]): {
   dates: Set<string>;
@@ -28,33 +26,18 @@ function applyFirstDateDefaults(grouped: DateClipGroup[]): {
 }
 
 export function ClipGrid() {
-  const [clips, setClips] = useState<Clip[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const clipsRevision = useClipStore((s) => s.clipsRevision);
+  const clips = useClipStore((s) => s.clips);
+  const loading = useClipStore((s) => s.loading);
+  const selectedClipIds = useClipStore((s) => s.selectedClipIds);
+  const toggleSelect = useClipStore((s) => s.toggleSelect);
+  const setActiveClipId = useClipStore((s) => s.setActiveClipId);
+  const fetchClips = useClipStore((s) => s.fetchClips);
+
   const [openDates, setOpenDates] = useState<Set<string>>(() => new Set());
   const [openUsers, setOpenUsers] = useState<Set<string>>(() => new Set());
   const expansionInitRef = useRef(false);
 
   const grouped = useMemo(() => groupClipsByDateAndUser(clips), [clips]);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const rows = await listClips();
-      setClips(rows);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setClips([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load, clipsRevision]);
 
   useEffect(() => {
     return () => {
@@ -106,22 +89,11 @@ export function ClipGrid() {
     return <p className="text-sm text-[var(--color-text-muted)]">Loading clips…</p>;
   }
 
-  if (error) {
-    return (
-      <div className="space-y-2">
-        <p className="text-sm text-red-400">{error}</p>
-        <Button type="button" variant="outline" size="sm" onClick={() => void load()}>
-          Retry
-        </Button>
-      </div>
-    );
-  }
-
   if (clips.length === 0) {
     return (
       <div className="space-y-2">
-        <p className="text-sm text-[var(--color-text-muted)]">No clips in the database yet.</p>
-        <Button type="button" variant="outline" size="sm" onClick={() => void load()}>
+        <p className="text-sm text-[var(--color-text-muted)]">No clips match the current filters.</p>
+        <Button type="button" variant="outline" size="sm" onClick={() => void fetchClips()}>
           Refresh
         </Button>
       </div>
@@ -131,7 +103,7 @@ export function ClipGrid() {
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <Button type="button" variant="outline" size="sm" onClick={() => void load()}>
+        <Button type="button" variant="outline" size="sm" onClick={() => void fetchClips()}>
           Refresh
         </Button>
       </div>
@@ -198,7 +170,13 @@ export function ClipGrid() {
                         {userOpen ? (
                           <div className="mt-2 grid gap-4 px-1 sm:grid-cols-2 lg:grid-cols-3">
                             {ug.clips.map((c) => (
-                              <ClipCard key={c.id} clip={c} />
+                              <ClipCard
+                                key={c.id}
+                                clip={c}
+                                selected={selectedClipIds.has(c.id)}
+                                onToggleSelect={() => toggleSelect(c.id)}
+                                onOpen={() => setActiveClipId(c.id)}
+                              />
                             ))}
                           </div>
                         ) : null}
