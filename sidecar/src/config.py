@@ -46,6 +46,17 @@ class Settings(BaseSettings):
     storage_cleanup_percent: int = 95
     cleanup_interval_minutes: int = 30
 
+    # Product media vector index (zvec + Gemini Embedding API). Driven by Tauri Settings → env.
+    product_vector_enabled: bool = False
+    gemini_api_key: str | None = None
+    gemini_embedding_model: str = "gemini-embedding-2-preview"
+    gemini_embedding_dimensions: int = 1536
+
+    # After each new clip: extract frames → Gemini image embed → zvec; tag clip if match is strong.
+    auto_tag_clip_product_enabled: bool = False
+    auto_tag_clip_frame_count: int = 4
+    auto_tag_clip_max_score: float = 0.35
+
     model_config = SettingsConfigDict(
         env_prefix="TIKCLIP_",
         # Loaded on sidecar start (incl. Tauri-spawned python); no uv --env-file needed.
