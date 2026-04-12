@@ -78,9 +78,9 @@ class TikTokHttpTransport(Protocol):
 
 
 class HttpxTikTokTransport:
-    def __init__(self, cookies: dict[str, str], proxy: str | None) -> None:
+    def __init__(self, cookies: dict[str, str], proxy: str | None, timeout_seconds: float) -> None:
         self._client = httpx.AsyncClient(
-            timeout=20.0,
+            timeout=timeout_seconds,
             proxy=proxy,
             cookies=cookies,
             headers=dict(_TIKTOK_NAV_HEADERS),
@@ -113,16 +113,26 @@ class CurlCffiTikTokTransport:
         proxy: str | None,
         impersonate: str,
         session_factory: Any,
+        timeout_seconds: float,
     ) -> None:
         self._session_factory = session_factory
         self._cookies = cookies
         self._proxy = proxy
         self._impersonate = impersonate
+        self._timeout = timeout_seconds
         self._session: Any = None
 
     async def _ensure(self) -> Any:
         if self._session is None:
-            self._session = self._session_factory(timeout=20, proxy=self._proxy)
+            from curl_cffi.const import CurlOpt, CurlSslVersion
+
+            # Match tiktok-live-recorder HttpClient (non-Termux): HTTP/1.1 + TLS 1.2 cap.
+            self._session = self._session_factory(
+                timeout=self._timeout,
+                proxy=self._proxy,
+                http_version="v1",
+                curl_options={CurlOpt.SSLVERSION: CurlSslVersion.TLSv1_2},
+            )
         return self._session
 
     async def get(
@@ -164,5 +174,6 @@ def create_tiktok_transport(cookies: dict[str, str], proxy: str | None) -> TikTo
                 proxy,
                 settings.tiktok_curl_impersonate,
                 CurlAsyncSession,
+                settings.tiktok_http_timeout_seconds,
             )
-    return HttpxTikTokTransport(cookies, proxy)
+    return HttpxTikTokTransport(cookies, proxy, settings.tiktok_http_timeout_seconds)

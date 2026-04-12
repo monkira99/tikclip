@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     # Opt-in third-party sign API (e.g. tikrec): sends unique_id off-device; then TikTok JSON.
     tiktok_room_sign_enabled: bool = True
     tiktok_room_sign_base_url: str = "https://tikrec.com"
+    # TikTok HTTP request timeout (curl_cffi / httpx), seconds.
+    tiktok_http_timeout_seconds: float = 45.0
     poll_interval_seconds: int = 30
     max_concurrent_recordings: int = 5
     # Max length of one live recording if API omits max_duration_seconds (Settings, minutes).
