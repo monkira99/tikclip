@@ -772,10 +772,7 @@ export function SettingsPage() {
                   placeholder="7"
                 />
                 <p className="text-xs text-[var(--color-text-muted)]">
-                  Bản ghi thô trong <code className="text-[var(--color-text)]">records/</code> (và{" "}
-                  <code className="text-[var(--color-text)]">recordings/</code> cũ): xóa khi{" "}
-                  <span className="text-[var(--color-text)]">ngày sửa file</span> trên đĩa đã qua ít nhất số
-                  ngày này (theo lịch máy, không phải đủ 24 giờ liên tục).
+                  Khi dọn dữ liệu, app có thể xóa bản ghi gốc đã cũ hơn số ngày này.
                 </p>
               </div>
               <div className="space-y-2">
