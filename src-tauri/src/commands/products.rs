@@ -16,13 +16,14 @@ fn map_product_row(row: &Row) -> rusqlite::Result<Product> {
         tiktok_url: row.get(6)?,
         price: row.get(7)?,
         category: row.get(8)?,
-        created_at: row.get(9)?,
-        updated_at: row.get(10)?,
+        media_files_json: row.get(9)?,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
     })
 }
 
-const PRODUCT_COLS: &str =
-    "id, name, description, sku, image_url, tiktok_shop_id, tiktok_url, price, category, created_at, updated_at";
+const PRODUCT_COLS: &str = "id, name, description, sku, image_url, tiktok_shop_id, tiktok_url, \
+    price, category, media_files_json, created_at, updated_at";
 
 #[tauri::command]
 pub fn list_products(state: State<'_, AppState>) -> Result<Vec<Product>, String> {
@@ -64,6 +65,7 @@ pub struct CreateProductInput {
     pub tiktok_url: Option<String>,
     pub price: Option<f64>,
     pub category: Option<String>,
+    pub media_files_json: Option<String>,
 }
 
 #[tauri::command]
@@ -77,8 +79,8 @@ pub fn create_product(
     let conn = state.db.lock().map_err(|e| e.to_string())?;
     conn.execute(
         &format!(
-            "INSERT INTO products (name, description, sku, image_url, tiktok_shop_id, tiktok_url, price, category, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, {}, {})",
+            "INSERT INTO products (name, description, sku, image_url, tiktok_shop_id, tiktok_url, price, category, media_files_json, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, {}, {})",
             SQL_NOW_HCM, SQL_NOW_HCM
         ),
         params![
@@ -90,6 +92,7 @@ pub fn create_product(
             input.tiktok_url,
             input.price,
             input.category,
+            input.media_files_json,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -107,6 +110,7 @@ pub struct UpdateProductInput {
     pub tiktok_url: Option<String>,
     pub price: Option<f64>,
     pub category: Option<String>,
+    pub media_files_json: Option<String>,
 }
 
 #[tauri::command]
@@ -163,6 +167,11 @@ pub fn update_product(
         params_vec.push(Box::new(v.clone()));
         idx += 1;
     }
+    if let Some(ref v) = input.media_files_json {
+        sets.push(format!("media_files_json = ?{idx}"));
+        params_vec.push(Box::new(v.clone()));
+        idx += 1;
+    }
 
     if sets.is_empty() {
         return Ok(());
@@ -194,9 +203,15 @@ pub fn delete_product(state: State<'_, AppState>, product_id: i64) -> Result<(),
         "DELETE FROM clip_products WHERE product_id = ?1",
         [product_id],
     )
-    .map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM products WHERE id = ?1", [product_id])
-        .map_err(|e| e.to_string())?;
+    .map_err(|e| format!("Could not unlink clips from product {product_id}: {e}"))?;
+    let n = conn
+        .execute("DELETE FROM products WHERE id = ?1", [product_id])
+        .map_err(|e| format!("Could not delete product {product_id}: {e}"))?;
+    if n == 0 {
+        return Err(format!(
+            "Product {product_id} was not found (already deleted?)"
+        ));
+    }
     Ok(())
 }
 
@@ -209,7 +224,7 @@ pub fn list_clip_products(
     let mut stmt = conn
         .prepare(
             "SELECT p.id, p.name, p.description, p.sku, p.image_url, p.tiktok_shop_id, \
-             p.tiktok_url, p.price, p.category, p.created_at, p.updated_at \
+             p.tiktok_url, p.price, p.category, p.media_files_json, p.created_at, p.updated_at \
              FROM products p \
              INNER JOIN clip_products cp ON cp.product_id = p.id \
              WHERE cp.clip_id = ?1 \

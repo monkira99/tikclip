@@ -89,6 +89,7 @@ pub struct Product {
     pub tiktok_url: Option<String>,
     pub price: Option<f64>,
     pub category: Option<String>,
+    pub media_files_json: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
