@@ -72,7 +72,14 @@ pub(super) fn sync_recording_from_sidecar_conn(
                  WHERE id = ?6",
                 SQL_NOW_HCM
             ),
-            params![mapped, input.duration_seconds, input.file_size_bytes, path, err, id],
+            params![
+                mapped,
+                input.duration_seconds,
+                input.file_size_bytes,
+                path,
+                err,
+                id
+            ],
         )
         .map_err(|e| e.to_string())?;
         Ok(id)

@@ -58,20 +58,24 @@ fn push_bool_setting(
 ) -> Result<(), String> {
     if let Some(t) = get_setting_trimmed(conn, db_key).map_err(|e| e.to_string())? {
         let lower = t.to_ascii_lowercase();
-        let enabled = matches!(
-            lower.as_str(),
-            "1" | "true" | "yes" | "on"
-        );
+        let enabled = matches!(lower.as_str(), "1" | "true" | "yes" | "on");
         env.push((
             tikclip_key.to_string(),
-            if enabled { "true".to_string() } else { "false".to_string() },
+            if enabled {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            },
         ));
     }
     Ok(())
 }
 
 /// Environment variables passed to the Python sidecar. Always includes `TIKCLIP_STORAGE_PATH`.
-pub fn build_sidecar_env(conn: &Connection, storage_path: &Path) -> Result<Vec<(String, String)>, String> {
+pub fn build_sidecar_env(
+    conn: &Connection,
+    storage_path: &Path,
+) -> Result<Vec<(String, String)>, String> {
     let resolved = storage_path
         .canonicalize()
         .unwrap_or_else(|_| storage_path.to_path_buf());
@@ -92,12 +96,18 @@ pub fn build_sidecar_env(conn: &Connection, storage_path: &Path) -> Result<Vec<(
         "max_concurrent",
         "TIKCLIP_MAX_CONCURRENT_RECORDINGS",
     )?;
-    if let Some(t) = get_setting_trimmed(conn, "recording_max_minutes").map_err(|e| e.to_string())? {
+    if let Some(t) =
+        get_setting_trimmed(conn, "recording_max_minutes").map_err(|e| e.to_string())?
+    {
         if t.parse::<i64>().is_err() {
-            return Err(format!("recording_max_minutes must be an integer, got {t:?}"));
+            return Err(format!(
+                "recording_max_minutes must be an integer, got {t:?}"
+            ));
         }
         env.push(("TIKCLIP_MAX_DURATION_MINUTES".to_string(), t));
-    } else if let Some(h) = get_setting_trimmed(conn, "recording_max_hours").map_err(|e| e.to_string())? {
+    } else if let Some(h) =
+        get_setting_trimmed(conn, "recording_max_hours").map_err(|e| e.to_string())?
+    {
         // Legacy Settings key (hours) → minutes for sidecar env.
         if let Ok(hours) = h.parse::<i64>() {
             if hours > 0 {
@@ -122,17 +132,36 @@ pub fn build_sidecar_env(conn: &Connection, storage_path: &Path) -> Result<Vec<(
         "clip_max_duration",
         "TIKCLIP_CLIP_MAX_DURATION",
     )?;
-    push_float_if_valid(
-        &mut env,
-        conn,
-        "max_storage_gb",
-        "TIKCLIP_STORAGE_QUOTA_GB",
-    )?;
+    push_float_if_valid(&mut env, conn, "max_storage_gb", "TIKCLIP_STORAGE_QUOTA_GB")?;
     push_bool_setting(
         &mut env,
         conn,
         "auto_process_after_record",
         "TIKCLIP_AUTO_PROCESS_AFTER_RECORD",
+    )?;
+    push_int_if_valid(
+        &mut env,
+        conn,
+        "TIKCLIP_RAW_RETENTION_DAYS",
+        "TIKCLIP_RAW_RETENTION_DAYS",
+    )?;
+    push_int_if_valid(
+        &mut env,
+        conn,
+        "TIKCLIP_ARCHIVE_RETENTION_DAYS",
+        "TIKCLIP_ARCHIVE_RETENTION_DAYS",
+    )?;
+    push_int_if_valid(
+        &mut env,
+        conn,
+        "TIKCLIP_STORAGE_WARN_PERCENT",
+        "TIKCLIP_STORAGE_WARN_PERCENT",
+    )?;
+    push_int_if_valid(
+        &mut env,
+        conn,
+        "TIKCLIP_STORAGE_CLEANUP_PERCENT",
+        "TIKCLIP_STORAGE_CLEANUP_PERCENT",
     )?;
 
     Ok(env)
