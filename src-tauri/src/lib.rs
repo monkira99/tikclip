@@ -2,8 +2,8 @@ mod app_paths;
 mod commands;
 mod db;
 mod sidecar;
-mod time_hcm;
 mod sidecar_env;
+mod time_hcm;
 mod tray;
 
 use db::init::initialize_database;
@@ -47,6 +47,13 @@ pub fn run() {
             commands::accounts::sync_accounts_live_status,
             commands::clips::insert_clip_from_sidecar,
             commands::clips::list_clips,
+            commands::clips::list_clips_filtered,
+            commands::clips::get_clip_by_id,
+            commands::clips::update_clip_status,
+            commands::clips::update_clip_title,
+            commands::clips::update_clip_notes,
+            commands::clips::batch_update_clip_status,
+            commands::clips::batch_delete_clips,
             commands::dashboard::get_dashboard_stats,
             commands::notifications::insert_notification,
             commands::notifications::list_notifications,
@@ -72,8 +79,9 @@ pub fn run() {
                 .path()
                 .app_config_dir()
                 .expect("failed to get app config dir");
-            let storage_path = app_paths::resolve_storage_root(home_dir, app_data_dir, app_config_dir)
-                .expect("failed to resolve storage path");
+            let storage_path =
+                app_paths::resolve_storage_root(home_dir, app_data_dir, app_config_dir)
+                    .expect("failed to resolve storage path");
             std::fs::create_dir_all(&storage_path).ok();
 
             let db_path = storage_path.join("data").join("app.db");
