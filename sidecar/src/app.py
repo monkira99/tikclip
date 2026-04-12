@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from core.cleanup import cleanup_worker
 from core.watcher import account_watcher
+from embeddings.zvec_runtime import setup_zvec
 from routes import accounts, health, recordings
 from routes import clips as clips_routes
 from routes import products as product_routes
@@ -15,6 +16,7 @@ from ws.manager import ws_manager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    setup_zvec()
     await account_watcher.start()
     await cleanup_worker.start()
     yield
