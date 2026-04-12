@@ -442,7 +442,7 @@ export function SettingsPage() {
     if (dimStr) {
       const n = Number(dimStr);
       if (!Number.isInteger(n) || n < 1 || n > 8192) {
-        setError("Chiều vector (outputDimensionality) phải là số nguyên từ 1 đến 8192.");
+        setError("Giá trị “số chiều” phải là số nguyên từ 1 đến 8192 (thường giữ 1536).");
         return;
       }
     }
@@ -450,7 +450,7 @@ export function SettingsPage() {
     if (framesStr) {
       const fn = Number(framesStr);
       if (!Number.isInteger(fn) || fn < 1 || fn > 12) {
-        setError("Số frame trích từ mỗi clip phải là số nguyên từ 1 đến 12.");
+        setError("Số ảnh lấy từ mỗi clip phải là số nguyên từ 1 đến 12.");
         return;
       }
     }
@@ -458,7 +458,7 @@ export function SettingsPage() {
     if (scoreStr) {
       const sn = Number(scoreStr);
       if (!Number.isFinite(sn) || sn <= 0 || sn > 2) {
-        setError("Ngưỡng khoảng cách vector phải là số dương (ví dụ 0.35, tối đa 2).");
+        setError("Ngưỡng độ khớp phải là số dương (ví dụ 0.35, tối đa 2).");
         return;
       }
     }
@@ -476,7 +476,7 @@ export function SettingsPage() {
       const fresh = await getAppDataPaths();
       setPaths(fresh);
       setMessage(
-        "Đã lưu cài đặt vector sản phẩm và gắn clip tự động. Sidecar đã khởi động lại để áp dụng biến môi trường.",
+        "Đã lưu. Dịch vụ nền đã khởi động lại để áp dụng cài đặt nhận diện sản phẩm.",
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
@@ -787,32 +787,30 @@ export function SettingsPage() {
 
       <Card className="bg-[var(--color-bg-elevated)]">
         <CardHeader>
-          <CardTitle>Vector sản phẩm (tìm kiếm ảnh / video / text)</CardTitle>
+          <CardTitle>Tìm và nhận diện sản phẩm</CardTitle>
           <CardDescription>
-            Lưu embedding media sản phẩm bằng thư viện zvec và Gemini Embedding API. Index chạy sau khi
-            bạn lưu sản phẩm có file ảnh/video đã tải về.
+            Tìm sản phẩm theo ảnh hoặc chữ; có thể tự gắn vào clip khi khớp.
           </CardDescription>
+          <CardAction>
+            <div className="flex items-center gap-2">
+              <Label
+                htmlFor="product_vector_switch"
+                className="cursor-pointer text-xs whitespace-nowrap text-[var(--color-text-muted)]"
+              >
+                Bật tìm kiếm theo ảnh, video và chữ
+              </Label>
+              <Switch
+                id="product_vector_switch"
+                checked={productVectorEnabled}
+                onCheckedChange={setProductVectorEnabled}
+                aria-label="Bật tìm kiếm sản phẩm theo ảnh, video và chữ"
+              />
+            </div>
+          </CardAction>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <div className="flex items-center justify-between gap-3 rounded-md border border-[var(--color-border)] px-3 py-2">
-            <div className="space-y-0.5">
-              <Label htmlFor="product_vector_switch" className="text-[var(--color-text)]">
-                Bật index &amp; tìm kiếm vector
-              </Label>
-              <p className="text-xs text-[var(--color-text-muted)]">
-                Cần API key Gemini. Dữ liệu vector nằm trong thư mục dữ liệu:{" "}
-                <span className="font-mono">vector/product_media</span>.
-              </p>
-            </div>
-            <Switch
-              id="product_vector_switch"
-              checked={productVectorEnabled}
-              onCheckedChange={setProductVectorEnabled}
-              aria-label="Bật index vector sản phẩm"
-            />
-          </div>
           <div className="space-y-2">
-            <Label htmlFor="gemini_api_key">Gemini API key</Label>
+            <Label htmlFor="gemini_api_key">Khóa API Google AI (Gemini)</Label>
             <Input
               id="gemini_api_key"
               type="password"
@@ -825,7 +823,7 @@ export function SettingsPage() {
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="gemini_embed_model">Model embedding</Label>
+              <Label htmlFor="gemini_embed_model">Mô hình nhận diện (tùy chọn)</Label>
               <Input
                 id="gemini_embed_model"
                 type="text"
@@ -834,9 +832,10 @@ export function SettingsPage() {
                 onChange={(e) => setGeminiEmbeddingModel(e.target.value)}
                 placeholder={DEFAULTS.geminiEmbeddingModel}
               />
+              <p className="text-xs text-[var(--color-text-muted)]">Chỉ đổi khi Google AI yêu cầu tên khác.</p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="gemini_embed_dim">Chiều vector (outputDimensionality)</Label>
+              <Label htmlFor="gemini_embed_dim">Tham số nâng cao: số chiều</Label>
               <Input
                 id="gemini_embed_dim"
                 type="text"
@@ -846,6 +845,7 @@ export function SettingsPage() {
                 onChange={(e) => setGeminiEmbeddingDim(e.target.value)}
                 placeholder={DEFAULTS.geminiEmbeddingDim}
               />
+              <p className="text-xs text-[var(--color-text-muted)]">Thường giữ mặc định; đổi khi mô hình yêu cầu.</p>
             </div>
           </div>
 
@@ -855,10 +855,6 @@ export function SettingsPage() {
                 <Label htmlFor={autoTagClipSwitchId} className="text-[var(--color-text)]">
                   Tự gắn sản phẩm cho clip mới
                 </Label>
-                <p className="text-xs text-[var(--color-text-muted)]">
-                  Sau mỗi clip được tạo: trích vài frame (và thumbnail), embed ảnh, tìm trong zvec; nếu khớp
-                  đủ chặt thì gắn sản phẩm vào clip. Cần đã bật vector + index sản phẩm.
-                </p>
               </div>
               <Switch
                 id={autoTagClipSwitchId}
@@ -869,7 +865,7 @@ export function SettingsPage() {
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="auto_tag_frames">Số frame trích từ video clip (1–12)</Label>
+                <Label htmlFor="auto_tag_frames">Số ảnh lấy từ mỗi clip (1–12)</Label>
                 <Input
                   id="auto_tag_frames"
                   type="text"
@@ -881,7 +877,7 @@ export function SettingsPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="auto_tag_score">Ngưỡng khoảng cách tối đa (nhỏ hơn = chặt hơn)</Label>
+                <Label htmlFor="auto_tag_score">Độ chặt khi gắn</Label>
                 <Input
                   id="auto_tag_score"
                   type="text"
@@ -901,7 +897,7 @@ export function SettingsPage() {
             disabled={saving === "product_vector"}
             onClick={() => void saveProductVector()}
           >
-            {saving === "product_vector" ? "Đang lưu…" : "Lưu cài đặt vector"}
+            {saving === "product_vector" ? "Đang lưu…" : "Lưu cài đặt nhận diện"}
           </Button>
         </CardFooter>
       </Card>
