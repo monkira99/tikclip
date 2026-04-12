@@ -15,8 +15,8 @@ class Settings(BaseSettings):
     # Desktop app uses ~/.tikclip by default; CLI / standalone may set TIKCLIP_STORAGE_PATH or .env.
     storage_path: Path = Path.home() / ".tikclip"
     log_level: str = "info"
-    # TIKCLIP_DEBUG_TIKTOK=1 — when room_id parse fails, save live HTML under
-    # {TIKCLIP_STORAGE_PATH}/debug/tiktok_live_html/ (log path; no secrets in logs).
+    # TIKCLIP_DEBUG_TIKTOK=1 — save live-page HTML only on HTTP errors or suspected WAF/block HTML
+    # under {TIKCLIP_STORAGE_PATH}/debug/tiktok_live_html/ (log path; no secrets in logs).
     debug_tiktok: bool = True
     poll_interval_seconds: int = 30
     max_concurrent_recordings: int = 5

@@ -49,7 +49,7 @@ _DEBUG_TIKTOK_HTML_MAX_BYTES = 512 * 1024
 
 
 def _save_debug_tiktok_live_html(username: str, html: str) -> Path | None:
-    """Write live page HTML when room_id parse fails (debug_tiktok). Returns path or None."""
+    """Write live page HTML for debug_tiktok (HTTP errors or block/WAF-style pages)."""
     try:
         root = settings.storage_path.resolve() / "debug" / "tiktok_live_html"
         root.mkdir(parents=True, exist_ok=True)
@@ -65,6 +65,21 @@ def _save_debug_tiktok_live_html(username: str, html: str) -> Path | None:
     except OSError as e:
         logger.warning("debug_tiktok: could not save HTML file: %s", e)
         return None
+
+
+def _live_page_html_suggests_error_or_block(html: str) -> bool:
+    """Plain offline pages are not saved; WAF/challenge-style HTML is."""
+    h = html.lower().replace("\u2019", "'")
+    markers = (
+        "wafchallenge",
+        "_wafchallengeid",
+        "slardar_us_waf",
+        "verify you're human",
+        "access denied",
+        "unusual traffic",
+        "captcha",
+    )
+    return any(m in h for m in markers)
 
 
 class TikTokAPI:
@@ -315,8 +330,37 @@ class TikTokAPI:
     async def _fetch_room_info(self, username: str) -> dict:
         client = await self._get_client()
         page_url = f"{self.BASE_URL}/@{username}/live"
-        response = await client.get(page_url)
-        response.raise_for_status()
+        try:
+            response = await client.get(page_url)
+            response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            if settings.debug_tiktok:
+                try:
+                    body = e.response.text or ""
+                except Exception:
+                    body = ""
+                saved = _save_debug_tiktok_live_html(username, body) if body.strip() else None
+                if saved is not None:
+                    logger.warning(
+                        "debug_tiktok: saved HTTP %s /@%s/live response to %s",
+                        e.response.status_code,
+                        username,
+                        saved,
+                    )
+                elif body.strip():
+                    snippet = body[:800].replace("\n", " ")
+                    logger.warning(
+                        "debug_tiktok: HTTP %s body (truncated, file save failed?): %s",
+                        e.response.status_code,
+                        snippet,
+                    )
+                else:
+                    logger.warning(
+                        "debug_tiktok: HTTP %s /@%s/live (empty body)",
+                        e.response.status_code,
+                        username,
+                    )
+            raise
         text = response.text
         logger.debug(
             "live page GET username=%s status=%s bytes=%s final_url=%s",
@@ -332,13 +376,13 @@ class TikTokAPI:
                 "no room_id in /@%s/live HTML (offline, private, block, or page layout changed)",
                 username,
             )
-            if settings.debug_tiktok:
+            if settings.debug_tiktok and _live_page_html_suggests_error_or_block(text):
                 saved = _save_debug_tiktok_live_html(username, text)
                 if saved is not None:
                     n = len(text.encode("utf-8", errors="replace"))
                     cap = _DEBUG_TIKTOK_HTML_MAX_BYTES
                     logger.warning(
-                        "debug_tiktok: saved /@%s/live HTML (%s bytes%s) to %s",
+                        "debug_tiktok: saved suspected block/error HTML for @%s (%s bytes%s) to %s",
                         username,
                         n,
                         f", truncated to {cap}" if n > cap else "",
