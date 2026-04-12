@@ -18,7 +18,7 @@ from pathlib import Path
 from config import settings
 from ws.manager import ws_manager
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("tikclip.cleanup")
 
 
 def _file_age_days(path: Path) -> float:
@@ -45,6 +45,11 @@ def _dir_total_bytes(path: Path) -> int:
 def _delete_old_under_dir(rec_dir: Path, retention_days: int) -> tuple[int, int]:
     """Delete old raw media files under one directory tree."""
     if retention_days <= 0 or not rec_dir.is_dir():
+        logger.debug(
+            "cleanup raw skip dir=%s retention_days=%s (not applicable or missing)",
+            rec_dir,
+            retention_days,
+        )
         return 0, 0
     count = 0
     freed = 0
@@ -59,6 +64,13 @@ def _delete_old_under_dir(rec_dir: Path, retention_days: int) -> tuple[int, int]
                     count += 1
                 except OSError as e:
                     logger.warning("Failed to delete recording %s: %s", f, e)
+    logger.debug(
+        "cleanup raw summary dir=%s deleted_files=%s freed_bytes=%s retention_days=%s",
+        rec_dir,
+        count,
+        freed,
+        retention_days,
+    )
     return count, freed
 
 
@@ -112,16 +124,32 @@ class StorageCleanupWorker:
 
     async def run_once(self) -> dict:
         """Run cleanup cycle once. Returns summary dict."""
-        root = settings.storage_path
+        root = settings.storage_path.resolve()
         total_deleted_rec = 0
         total_deleted_clips = 0
         total_freed = 0
+
+        logger.debug(
+            "cleanup cycle start root=%s raw_retention_days=%s archive_retention_days=%s "
+            "storage_quota_gb=%s warn_pct=%s cleanup_pct=%s",
+            root,
+            settings.raw_retention_days,
+            settings.archive_retention_days,
+            settings.storage_quota_gb,
+            settings.storage_warn_percent,
+            settings.storage_cleanup_percent,
+        )
 
         rec_count, rec_freed = await asyncio.to_thread(
             _delete_old_recordings, root, settings.raw_retention_days
         )
         total_deleted_rec += rec_count
         total_freed += rec_freed
+        logger.debug(
+            "cleanup after raw retention deleted_recordings=%s freed_bytes=%s",
+            rec_count,
+            rec_freed,
+        )
 
         clip_count, clip_freed = await asyncio.to_thread(
             _maybe_delete_archived_clips, root, settings.archive_retention_days
@@ -134,8 +162,23 @@ class StorageCleanupWorker:
             current = await asyncio.to_thread(_dir_total_bytes, root)
             usage_pct = current / quota_bytes * 100 if quota_bytes > 0 else 0.0
 
+            logger.debug(
+                "cleanup quota check total_under_root=%s quota_bytes=%s usage_pct=%.2f "
+                "warn_threshold=%s cleanup_threshold=%s",
+                current,
+                quota_bytes,
+                usage_pct,
+                settings.storage_warn_percent,
+                settings.storage_cleanup_percent,
+            )
+
             if usage_pct >= settings.storage_warn_percent:
                 critical = usage_pct >= settings.storage_cleanup_percent
+                logger.debug(
+                    "cleanup broadcasting storage_warning usage_pct=%s critical=%s",
+                    round(usage_pct, 1),
+                    critical,
+                )
                 await ws_manager.broadcast(
                     "storage_warning",
                     {
@@ -151,6 +194,13 @@ class StorageCleanupWorker:
             "deleted_clips": total_deleted_clips,
             "freed_bytes": total_freed,
         }
+
+        logger.debug(
+            "cleanup cycle end deleted_recordings=%s deleted_clips=%s freed_bytes=%s",
+            total_deleted_rec,
+            total_deleted_clips,
+            total_freed,
+        )
 
         if total_freed > 0:
             await ws_manager.broadcast("cleanup_completed", summary)
