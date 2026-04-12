@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     # TIKCLIP_DEBUG_TIKTOK=1 — save live-page HTML only on HTTP errors or suspected WAF/block HTML
     # under {TIKCLIP_STORAGE_PATH}/debug/tiktok_live_html/ (log path; no secrets in logs).
     debug_tiktok: bool = True
+    # TikTok HTTP: curl_cffi = Chrome TLS impersonation (see tiktok-live-recorder); httpx = legacy.
+    tiktok_http_backend: str = "curl_cffi"
+    tiktok_curl_impersonate: str = "chrome131"
+    # Opt-in third-party sign API (e.g. tikrec): sends unique_id off-device; then TikTok JSON.
+    tiktok_room_sign_enabled: bool = True
+    tiktok_room_sign_base_url: str = "https://tikrec.com"
     poll_interval_seconds: int = 30
     max_concurrent_recordings: int = 5
     # Max length of one live recording if API omits max_duration_seconds (Settings, minutes).
