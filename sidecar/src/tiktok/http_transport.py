@@ -36,6 +36,17 @@ _TIKTOK_NAV_HEADERS: dict[str, str] = {
     ),
 }
 
+_TIKTOK_BINARY_HEADERS: dict[str, str] = {
+    "Accept": "*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.tiktok.com/",
+    "Origin": "https://www.tiktok.com",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "no-cors",
+    "Sec-Fetch-Site": "cross-site",
+    "User-Agent": _TIKTOK_NAV_HEADERS["User-Agent"],
+}
+
 
 class TikTokHttpStatusError(Exception):
     """HTTP error from TikTok transport (mirrors raise_for_status use)."""
@@ -74,6 +85,15 @@ class TikTokHttpTransport(Protocol):
         headers: dict[str, str] | None = None,
     ) -> TikTokHttpResponse: ...
 
+    async def get_bytes(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, bytes, str, str | None]:
+        """HTTP status, body, final URL, content-type (lowercase or None)."""
+        ...
+
     async def aclose(self) -> None: ...
 
 
@@ -99,6 +119,20 @@ class HttpxTikTokTransport:
             merged.update(headers)
         r = await self._client.get(url, params=params, headers=merged)
         return TikTokHttpResponse(r.status_code, r.text, str(r.url))
+
+    async def get_bytes(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, bytes, str, str | None]:
+        merged = dict(_TIKTOK_BINARY_HEADERS)
+        if headers:
+            merged.update(headers)
+        r = await self._client.get(url, headers=merged)
+        ct = r.headers.get("content-type")
+        ct = ct.split(";")[0].strip().lower() if ct else None
+        return r.status_code, r.content, str(r.url), ct
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -154,6 +188,28 @@ class CurlCffiTikTokTransport:
             impersonate=self._impersonate,
         )
         return TikTokHttpResponse(r.status_code, r.text, str(r.url))
+
+    async def get_bytes(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, bytes, str, str | None]:
+        sess = await self._ensure()
+        merged = dict(_TIKTOK_BINARY_HEADERS)
+        if headers:
+            merged.update(headers)
+        r = await sess.get(
+            url,
+            headers=merged,
+            cookies=self._cookies or None,
+            impersonate=self._impersonate,
+        )
+        raw_ct = r.headers.get("content-type") if hasattr(r.headers, "get") else None
+        if raw_ct is None and hasattr(r.headers, "get_header"):
+            raw_ct = r.headers.get_header("content-type")  # type: ignore[union-attr]
+        ct = raw_ct.split(";")[0].strip().lower() if isinstance(raw_ct, str) else None
+        return r.status_code, r.content, str(r.url), ct
 
     async def aclose(self) -> None:
         if self._session is not None:
