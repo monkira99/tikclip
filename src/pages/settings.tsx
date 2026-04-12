@@ -427,8 +427,8 @@ export function SettingsPage() {
     const w = storageWarnPercent.trim();
     const c = storageCleanupPercent.trim();
     for (const [label, v] of [
-      ["Số ngày giữ bản ghi thô", raw],
-      ["Số ngày với clip lưu trữ", arch],
+      ["Bản ghi thô — xóa sau (ngày)", raw],
+      ["Clip — xóa sau (ngày)", arch],
       ["Ngưỡng cảnh báo (%)", w],
       ["Ngưỡng nghiêm trọng (%)", c],
     ] as const) {
@@ -482,7 +482,7 @@ export function SettingsPage() {
     const rawN = rawStr === "" ? 7 : Number(rawStr);
     const archN = archStr === "" ? 0 : Number(archStr);
     if (!Number.isFinite(rawN) || rawN < 0 || !Number.isFinite(archN) || archN < 0) {
-      setError("Số ngày giữ bản ghi / clip phải là số không âm.");
+      setError("Số ngày xóa bản ghi thô / clip phải là số không âm.");
       return;
     }
     setStorageCleanupBusy(true);
@@ -754,7 +754,7 @@ export function SettingsPage() {
             <Label className="text-[var(--color-text)]">Dọn dữ liệu &amp; cảnh báo dung lượng</Label>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="raw_ret">Xóa bản ghi thô sau (ngày)</Label>
+                <Label htmlFor="raw_ret">Bản ghi thô — xóa sau (ngày)</Label>
                 <Input
                   id="raw_ret"
                   type="text"
@@ -766,7 +766,7 @@ export function SettingsPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="arch_ret">Clip lưu trữ — tuổi tối đa (ngày)</Label>
+                <Label htmlFor="arch_ret">Clip — xóa sau (ngày)</Label>
                 <Input
                   id="arch_ret"
                   type="text"
