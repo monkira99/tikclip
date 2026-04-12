@@ -112,7 +112,7 @@ export function dispatchSidecarNotification(
     const { kind, title, body } = formatSidecarMessage(eventType, data);
     const accountId = pickAccountId(data);
     let idStr: string | undefined;
-    let createdAt = Date.now();
+    const createdAt = Date.now();
 
     if (isTauri()) {
       try {
