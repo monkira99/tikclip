@@ -22,3 +22,11 @@ def setup_sidecar_logging() -> None:
     if not root_tikclip.handlers:
         root_tikclip.addHandler(handler)
     root_tikclip.propagate = False
+
+    # Modules using logging.getLogger(__name__) live under these prefixes (not under tikclip.*).
+    for prefix in ("routes", "tiktok", "embeddings", "core"):
+        lg = logging.getLogger(prefix)
+        lg.setLevel(level)
+        if not lg.handlers:
+            lg.addHandler(handler)
+        lg.propagate = False
