@@ -364,28 +364,6 @@ export function SettingsPage() {
     }
   }, [clearFeedback, clipMinDuration, clipMaxDuration]);
 
-  const saveStorage = useCallback(async () => {
-    clearFeedback();
-    const sg = maxStorageGb.trim();
-    if (sg && Number.isNaN(Number(sg))) {
-      setError("Max storage must be a number.");
-      return;
-    }
-    setSaving("storage");
-    try {
-      await setSetting("max_storage_gb", sg);
-      await restartSidecar();
-      await resyncSidecarWatchers();
-      const fresh = await getAppDataPaths();
-      setPaths(fresh);
-      setMessage("Storage settings saved. Sidecar restarted to apply.");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed");
-    } finally {
-      setSaving(null);
-    }
-  }, [clearFeedback, maxStorageGb]);
-
   const scanStorageStats = useCallback(async () => {
     clearFeedback();
     setStorageScanBusy(true);
@@ -401,8 +379,13 @@ export function SettingsPage() {
     }
   }, [clearFeedback]);
 
-  const saveStorageRetention = useCallback(async () => {
+  const saveStorageCard = useCallback(async () => {
     clearFeedback();
+    const sg = maxStorageGb.trim();
+    if (sg && Number.isNaN(Number(sg))) {
+      setError("Giới hạn dung lượng (GB) phải là số hoặc để trống.");
+      return;
+    }
     const raw = rawRetentionDays.trim();
     const arch = archiveRetentionDays.trim();
     const w = storageWarnPercent.trim();
@@ -428,8 +411,9 @@ export function SettingsPage() {
       setError("Ngưỡng nghiêm trọng (%) nên lớn hơn hoặc bằng ngưỡng cảnh báo (%) — ví dụ 95 và 80.");
       return;
     }
-    setSaving("storage_retention");
+    setSaving("storage_card");
     try {
+      await setSetting("max_storage_gb", sg);
       await setSetting(KEY_RAW_RETENTION, raw || "7");
       await setSetting(KEY_ARCHIVE_RETENTION, arch || "0");
       await setSetting(KEY_STORAGE_WARN, w || "80");
@@ -438,7 +422,9 @@ export function SettingsPage() {
       await resyncSidecarWatchers();
       const fresh = await getAppDataPaths();
       setPaths(fresh);
-      setMessage("Đã lưu cài đặt dọn dữ liệu và cảnh báo. Sidecar đã khởi động lại.");
+      setMessage(
+        "Đã lưu giới hạn dung lượng, dọn dữ liệu và cảnh báo. Sidecar đã khởi động lại để áp dụng.",
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
     } finally {
@@ -446,6 +432,7 @@ export function SettingsPage() {
     }
   }, [
     clearFeedback,
+    maxStorageGb,
     rawRetentionDays,
     archiveRetentionDays,
     storageWarnPercent,
@@ -748,8 +735,8 @@ export function SettingsPage() {
               </p>
               <p className="mt-1 text-xs text-[var(--color-text-muted)]">
                 Sidecar dùng các giá trị này khi quét và dọn file. Không cần nhập mã cấu hình kỹ thuật. Nút
-                &quot;Chạy cleanup ngay&quot; áp dụng đúng số ngày đang nhập; &quot;Lưu…&quot; ghi vào cơ sở
-                dữ liệu và khởi động lại sidecar để chu kỳ dọn tự động cũng khớp.
+                &quot;Chạy cleanup ngay&quot; áp dụng đúng số ngày đang nhập; &quot;Lưu cài đặt lưu trữ&quot;
+                ghi quota GB, retention và ngưỡng cảnh báo vào cơ sở dữ liệu và khởi động lại sidecar một lần.
               </p>
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
@@ -833,20 +820,11 @@ export function SettingsPage() {
           </Button>
           <Button
             type="button"
-            variant="outline"
-            className="w-full border-[var(--color-border)] sm:w-auto"
-            disabled={saving === "storage_retention"}
-            onClick={() => void saveStorageRetention()}
-          >
-            {saving === "storage_retention" ? "Saving…" : "Lưu dọn dữ liệu & cảnh báo"}
-          </Button>
-          <Button
-            type="button"
-            disabled={saving === "storage"}
+            disabled={saving === "storage_card"}
             className="w-full sm:w-auto"
-            onClick={() => void saveStorage()}
+            onClick={() => void saveStorageCard()}
           >
-            {saving === "storage" ? "Saving…" : "Save storage settings"}
+            {saving === "storage_card" ? "Đang lưu…" : "Lưu cài đặt lưu trữ"}
           </Button>
         </CardFooter>
       </Card>
