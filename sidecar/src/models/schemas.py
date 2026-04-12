@@ -123,3 +123,20 @@ class FetchProductResponse(BaseModel):
     incomplete: bool = False
     data: FetchedProductData | None = None
     error: str | None = None
+
+
+class StorageStatsResponse(BaseModel):
+    recordings_bytes: int = 0
+    recordings_count: int = 0
+    clips_bytes: int = 0
+    clips_count: int = 0
+    products_bytes: int = 0
+    total_bytes: int = 0
+    quota_bytes: int | None = None
+    usage_percent: float = 0.0
+
+
+class CleanupRunResponse(BaseModel):
+    deleted_recordings: int = 0
+    deleted_clips: int = 0
+    freed_bytes: int = 0

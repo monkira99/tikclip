@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     auto_process_after_record: bool = True
     auto_cleanup_raw: bool = True
     raw_retention_days: int = 7
+    # No clip DB here: default 0 skips age-based deletion under clips/.
+    archive_retention_days: int = 0
+    storage_warn_percent: int = 80
+    storage_cleanup_percent: int = 95
+    cleanup_interval_minutes: int = 30
 
     model_config = SettingsConfigDict(
         env_prefix="TIKCLIP_",
