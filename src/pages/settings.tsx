@@ -750,15 +750,8 @@ export function SettingsPage() {
             ) : null}
           </div>
 
-          <div className="space-y-3 border-t border-[var(--color-border)] pt-4">
-            <div>
-              <p className="text-sm font-medium text-[var(--color-text)]">
-                Dọn dữ liệu &amp; cảnh báo dung lượng
-              </p>
-              <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                Cleanup ngay chỉ chạy một lần với số đang nhập. Lưu để ghi vào app và khởi động lại sidecar.
-              </p>
-            </div>
+          <div className="space-y-4 border-t border-[var(--color-border)] pt-4">
+            <Label className="text-[var(--color-text)]">Dọn dữ liệu &amp; cảnh báo dung lượng</Label>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="raw_ret">Xóa bản ghi thô sau (ngày)</Label>
@@ -771,9 +764,6 @@ export function SettingsPage() {
                   onChange={(e) => setRawRetentionDays(e.target.value)}
                   placeholder="7"
                 />
-                <p className="text-xs text-[var(--color-text-muted)]">
-                  Khi dọn dữ liệu, app có thể xóa bản ghi gốc đã cũ hơn số ngày này.
-                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="arch_ret">Clip lưu trữ — tuổi tối đa (ngày)</Label>
@@ -786,10 +776,6 @@ export function SettingsPage() {
                   onChange={(e) => setArchiveRetentionDays(e.target.value)}
                   placeholder="0"
                 />
-                <p className="text-xs text-[var(--color-text-muted)]">
-                  Nên để <span className="tabular-nums">0</span>: không tự xóa clip theo tuổi. Số khác được
-                  lưu nhưng hiện chưa có tác dụng.
-                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="st_warn">Cảnh báo khi dùng quá (% quota)</Label>
@@ -802,9 +788,6 @@ export function SettingsPage() {
                   onChange={(e) => setStorageWarnPercent(e.target.value)}
                   placeholder="80"
                 />
-                <p className="text-xs text-[var(--color-text-muted)]">
-                  So với giới hạn GB phía trên — ngưỡng bắt đầu cảnh báo.
-                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="st_clean">Mức nghiêm trọng / ưu tiên dọn (% quota)</Label>
@@ -817,9 +800,6 @@ export function SettingsPage() {
                   onChange={(e) => setStorageCleanupPercent(e.target.value)}
                   placeholder="95"
                 />
-                <p className="text-xs text-[var(--color-text-muted)]">
-                  Nên lớn hơn mức cảnh báo — mức coi là nghiêm trọng (ví dụ 95 và 80).
-                </p>
               </div>
             </div>
           </div>
