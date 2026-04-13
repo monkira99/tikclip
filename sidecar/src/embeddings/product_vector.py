@@ -32,7 +32,6 @@ _bm25_query: Any = None
 _bm25_corpus_size: int = 0
 
 _COLLECTION_RW = zvec.CollectionOption(read_only=False, enable_mmap=True)
-_COLLECTION_RO = zvec.CollectionOption(read_only=True, enable_mmap=True)
 
 
 class MediaIndexItem(BaseModel):
@@ -47,10 +46,6 @@ def _vector_root() -> Path:
 
 def _rw_cache_key(path_str: str, dim: int) -> str:
     return f"{path_str}\0{dim}\0rw"
-
-
-def _ro_cache_key(path_str: str, dim: int) -> str:
-    return f"{path_str}\0{dim}\0ro"
 
 
 def _embedding_dimension_from_schema(schema: Any) -> int:
@@ -201,6 +196,24 @@ def ensure_bm25_ready(coll: zvec.Collection) -> tuple[Any, Any]:
         return _bm25_doc, _bm25_query
 
 
+def _open_existing_rw_collection(path_str: str, dim: int) -> zvec.Collection:
+    coll = zvec.open(path_str, option=_COLLECTION_RW)
+    got = _embedding_dimension_from_schema(coll.schema)
+    if got != dim:
+        msg = (
+            f"zvec collection dimension is {got} but settings request {dim}; "
+            "delete the vector folder or match gemini_embedding_dimensions."
+        )
+        raise ValueError(msg)
+    if not _collection_has_hybrid_text_vectors(coll.schema):
+        msg = (
+            "Product vector index was created before hybrid text search. "
+            f"Delete {_vector_root()} and re-index products to upgrade."
+        )
+        raise ValueError(msg)
+    return coll
+
+
 def get_or_open_collection_sync() -> zvec.Collection:
     if not settings.product_vector_enabled:
         msg = "Product vector indexing is disabled in settings"
@@ -217,32 +230,16 @@ def get_or_open_collection_sync() -> zvec.Collection:
     root = _vector_root()
     path_str = str(root)
     rwk = _rw_cache_key(path_str, dim)
-    rok = _ro_cache_key(path_str, dim)
 
     with _coll_lock:
         cached = _coll_cache.get(rwk)
         if cached is not None:
             return cached
 
-        _coll_cache.pop(rok, None)
-
         root.parent.mkdir(parents=True, exist_ok=True)
 
         if root.exists() and any(root.iterdir()):
-            coll = zvec.open(path_str, option=_COLLECTION_RW)
-            got = _embedding_dimension_from_schema(coll.schema)
-            if got != dim:
-                msg = (
-                    f"zvec collection dimension is {got} but settings request {dim}; "
-                    "delete the vector folder or match gemini_embedding_dimensions."
-                )
-                raise ValueError(msg)
-            if not _collection_has_hybrid_text_vectors(coll.schema):
-                msg = (
-                    "Product vector index was created before hybrid text search. "
-                    f"Delete {_vector_root()} and re-index products to upgrade."
-                )
-                raise ValueError(msg)
+            coll = _open_existing_rw_collection(path_str, dim)
         else:
             if root.exists() and not any(root.iterdir()):
                 try:
@@ -260,6 +257,12 @@ def get_or_open_collection_sync() -> zvec.Collection:
 
 
 def get_or_open_collection_for_query_sync() -> zvec.Collection:
+    """Open the product vector store for search.
+
+    Uses the same read-write handle as indexing. A separate read-only zvec handle
+    would keep a filesystem lock until GC and blocks ``get_or_open_collection_sync``
+    with "Can't lock read-write collection".
+    """
     if not settings.product_vector_enabled:
         msg = "Product vector indexing is disabled in settings"
         raise RuntimeError(msg)
@@ -275,36 +278,18 @@ def get_or_open_collection_for_query_sync() -> zvec.Collection:
     root = _vector_root()
     path_str = str(root)
     rwk = _rw_cache_key(path_str, dim)
-    rok = _ro_cache_key(path_str, dim)
 
     with _coll_lock:
         rw = _coll_cache.get(rwk)
         if rw is not None:
             return rw
-        ro = _coll_cache.get(rok)
-        if ro is not None:
-            return ro
 
         if not root.exists() or not any(root.iterdir()):
             msg = "Product vector store is empty; index product media before searching"
             raise RuntimeError(msg)
 
-        coll = zvec.open(path_str, option=_COLLECTION_RO)
-        got = _embedding_dimension_from_schema(coll.schema)
-        if got != dim:
-            msg = (
-                f"zvec collection dimension is {got} but settings request {dim}; "
-                "delete the vector folder or match gemini_embedding_dimensions."
-            )
-            raise ValueError(msg)
-        if not _collection_has_hybrid_text_vectors(coll.schema):
-            msg = (
-                "Product vector index was created before hybrid text search. "
-                f"Delete {_vector_root()} and re-index products to upgrade."
-            )
-            raise ValueError(msg)
-
-        _coll_cache[rok] = coll
+        coll = _open_existing_rw_collection(path_str, dim)
+        _coll_cache[rwk] = coll
         return coll
 
 
@@ -317,9 +302,7 @@ def delete_vectors_for_product_sync(product_id: int) -> None:
     path_str = str(root)
     dim = settings.gemini_embedding_dimensions
     rwk = _rw_cache_key(path_str, dim)
-    rok = _ro_cache_key(path_str, dim)
     with _coll_lock:
-        _coll_cache.pop(rok, None)
         coll = _coll_cache.get(rwk)
     if coll is None:
         try:
