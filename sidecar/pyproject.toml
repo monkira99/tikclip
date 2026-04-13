@@ -14,6 +14,10 @@ dependencies = [
     "scenedetect[opencv]>=0.6",
     "zvec>=0.3.0",
     "google-genai>=1.0",
+    "sherpa-onnx>=1.10.0",
+    "huggingface-hub>=0.20.0",
+    "soundfile>=0.12.0",
+    "onnxruntime>=1.17.0",
 ]
 
 [project.optional-dependencies]

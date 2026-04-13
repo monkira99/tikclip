@@ -57,6 +57,15 @@ class Settings(BaseSettings):
     auto_tag_clip_frame_count: int = 4
     auto_tag_clip_max_score: float = 0.35
 
+    # Audio: VAD + STT (sherpa-onnx, gipformer ONNX). Models under models_path.
+    audio_processing_enabled: bool = True
+    speech_merge_gap_sec: float = 0.5
+    speech_cut_tolerance_sec: float = 1.5
+    stt_num_threads: int = 4
+    # auto: fp32 when CUDA ExecutionProvider available, else int8.
+    stt_quantize: str = "auto"
+    models_path: Path = Path.home() / ".tikclip" / "models"
+
     model_config = SettingsConfigDict(
         env_prefix="TIKCLIP_",
         # Loaded on sidecar start (incl. Tauri-spawned python); no uv --env-file needed.
