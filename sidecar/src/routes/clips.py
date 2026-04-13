@@ -143,16 +143,11 @@ async def suggest_product_for_clip_route(body: ClipSuggestProductRequest):
             http=client,
         )
     logger.debug(
-        "suggest-product done product_id=%s score=%s frames=%s skip=%r",
+        "suggest-product done matched=%s product_id=%s score=%s frames=%s skip=%r",
+        result.matched,
         result.product_id,
         result.best_score,
         result.frames_used,
         result.skipped_reason,
     )
-    return ClipSuggestProductResponse(
-        product_id=result.product_id,
-        product_name=result.product_name,
-        best_score=result.best_score,
-        frames_used=result.frames_used,
-        skipped_reason=result.skipped_reason,
-    )
+    return result

@@ -222,9 +222,46 @@ class ClipSuggestProductRequest(BaseModel):
     thumbnail_path: str | None = None
 
 
+class ClipSuggestVoteRow(BaseModel):
+    product_id: int
+    vote_count: int
+
+
+class ClipSuggestFrameRow(BaseModel):
+    """One thumbnail or extracted frame and its best zvec hit (if any)."""
+
+    index: int
+    source: Literal["thumbnail", "extracted"]
+    media_relative_path: str
+    outcome: Literal["hit", "no_hit", "error"]
+    error: str | None = None
+    top_product_id: int | None = None
+    top_score: float | None = None
+    top_product_name: str | None = None
+
+
 class ClipSuggestProductResponse(BaseModel):
+    matched: bool = False
     product_id: int | None = None
     product_name: str | None = None
     best_score: float | None = None
     frames_used: int = 0
     skipped_reason: str | None = None
+    video_relative_path: str | None = None
+    thumbnail_used: bool = False
+    extracted_frame_count: int = 0
+    frames_searched: int = 0
+    config_target_extracted_frames: int = 0
+    config_max_score_threshold: float = 0.0
+    pick_method: Literal["majority_vote", "min_distance_tiebreak"] | None = None
+    votes_by_product: list[ClipSuggestVoteRow] = Field(
+        default_factory=list,
+        description="Votes over frames that had a vector hit (top-1 product per frame).",
+    )
+    candidate_product_id: int | None = None
+    candidate_product_name: str | None = None
+    candidate_score: float | None = Field(
+        default=None,
+        description="Set when a winner was chosen but rejected (score above threshold).",
+    )
+    frame_rows: list[ClipSuggestFrameRow] = Field(default_factory=list)

@@ -396,12 +396,41 @@ export async function deleteProductEmbeddings(productId: number): Promise<void> 
   });
 }
 
+export type ClipSuggestFrameRow = {
+  index: number;
+  source: "thumbnail" | "extracted";
+  media_relative_path: string;
+  outcome: "hit" | "no_hit" | "error";
+  error: string | null;
+  top_product_id: number | null;
+  top_score: number | null;
+  top_product_name: string | null;
+};
+
+export type ClipSuggestVoteRow = {
+  product_id: number;
+  vote_count: number;
+};
+
 export type ClipSuggestProductResult = {
+  matched: boolean;
   product_id: number | null;
   product_name: string | null;
   best_score: number | null;
   frames_used: number;
   skipped_reason: string | null;
+  video_relative_path: string | null;
+  thumbnail_used: boolean;
+  extracted_frame_count: number;
+  frames_searched: number;
+  config_target_extracted_frames: number;
+  config_max_score_threshold: number;
+  pick_method: "majority_vote" | "min_distance_tiebreak" | null;
+  votes_by_product: ClipSuggestVoteRow[];
+  candidate_product_id: number | null;
+  candidate_product_name: string | null;
+  candidate_score: number | null;
+  frame_rows: ClipSuggestFrameRow[];
 };
 
 export async function suggestProductForClip(body: {
