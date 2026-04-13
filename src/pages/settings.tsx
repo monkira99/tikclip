@@ -49,6 +49,8 @@ const DEFAULTS = {
   suggestWeightImage: "0.6",
   suggestWeightText: "0.4",
   suggestMinFusedScore: "0.25",
+  suggestImageEmbedFocusPrompt:
+    "Focus on the main product in this image for similarity to product catalog photos.",
   speechMergeGapSec: "0.5",
   speechCutToleranceSec: "1.5",
   sttNumThreads: "4",
@@ -79,6 +81,8 @@ const KEY_AUTO_TAG_MAX_SCORE = "auto_tag_clip_max_score";
 const KEY_SUGGEST_WEIGHT_IMAGE = "suggest_weight_image";
 const KEY_SUGGEST_WEIGHT_TEXT = "suggest_weight_text";
 const KEY_SUGGEST_MIN_FUSED_SCORE = "suggest_min_fused_score";
+const KEY_DEBUG_KEEP_SUGGEST_FRAMES = "debug_keep_suggest_clip_frames";
+const KEY_SUGGEST_IMAGE_EMBED_FOCUS_PROMPT = "suggest_image_embed_focus_prompt";
 
 const KEY_RAW_RETENTION = "TIKCLIP_RAW_RETENTION_DAYS";
 const KEY_ARCHIVE_RETENTION = "TIKCLIP_ARCHIVE_RETENTION_DAYS";
@@ -206,7 +210,10 @@ export function SettingsPage() {
   const [suggestWeightImage, setSuggestWeightImage] = useState("");
   const [suggestWeightText, setSuggestWeightText] = useState("");
   const [suggestMinFusedScore, setSuggestMinFusedScore] = useState("");
+  const [debugKeepSuggestClipFrames, setDebugKeepSuggestClipFrames] = useState(false);
+  const [suggestImageEmbedFocusPrompt, setSuggestImageEmbedFocusPrompt] = useState("");
   const autoTagClipSwitchId = useId();
+  const debugSuggestFramesSwitchId = useId();
   const [audioProcessingEnabled, setAudioProcessingEnabled] = useState(true);
   const [speechMergeGapSec, setSpeechMergeGapSec] = useState("");
   const [speechCutToleranceSec, setSpeechCutToleranceSec] = useState("");
@@ -243,6 +250,8 @@ export function SettingsPage() {
           swImg,
           swTxt,
           smf,
+          dbgFrames,
+          imgFocusPrompt,
           apEn,
           smg,
           sct,
@@ -273,6 +282,8 @@ export function SettingsPage() {
           getSetting(KEY_SUGGEST_WEIGHT_IMAGE),
           getSetting(KEY_SUGGEST_WEIGHT_TEXT),
           getSetting(KEY_SUGGEST_MIN_FUSED_SCORE),
+          getSetting(KEY_DEBUG_KEEP_SUGGEST_FRAMES),
+          getSetting(KEY_SUGGEST_IMAGE_EMBED_FOCUS_PROMPT),
           getSetting(KEY_AUDIO_PROCESSING),
           getSetting(KEY_SPEECH_MERGE_GAP),
           getSetting(KEY_SPEECH_CUT_TOLERANCE),
@@ -310,6 +321,10 @@ export function SettingsPage() {
         setSuggestWeightImage(valueFromDb(swImg, DEFAULTS.suggestWeightImage));
         setSuggestWeightText(valueFromDb(swTxt, DEFAULTS.suggestWeightText));
         setSuggestMinFusedScore(valueFromDb(smf, DEFAULTS.suggestMinFusedScore));
+        setDebugKeepSuggestClipFrames(parseProductVectorEnabled(dbgFrames));
+        setSuggestImageEmbedFocusPrompt(
+          valueFromDb(imgFocusPrompt, DEFAULTS.suggestImageEmbedFocusPrompt),
+        );
         setAudioProcessingEnabled(parseAudioProcessingEnabled(apEn));
         setSpeechMergeGapSec(valueFromDb(smg, DEFAULTS.speechMergeGapSec));
         setSpeechCutToleranceSec(valueFromDb(sct, DEFAULTS.speechCutToleranceSec));
@@ -562,6 +577,11 @@ export function SettingsPage() {
       await setSetting(KEY_SUGGEST_WEIGHT_IMAGE, wImgStr);
       await setSetting(KEY_SUGGEST_WEIGHT_TEXT, wTxtStr);
       await setSetting(KEY_SUGGEST_MIN_FUSED_SCORE, minFusStr);
+      await setSetting(KEY_DEBUG_KEEP_SUGGEST_FRAMES, debugKeepSuggestClipFrames ? "1" : "0");
+      await setSetting(
+        KEY_SUGGEST_IMAGE_EMBED_FOCUS_PROMPT,
+        suggestImageEmbedFocusPrompt.trim(),
+      );
       await restartSidecar();
       await resyncSidecarWatchers();
       const fresh = await getAppDataPaths();
@@ -586,6 +606,8 @@ export function SettingsPage() {
     suggestWeightImage,
     suggestWeightText,
     suggestMinFusedScore,
+    debugKeepSuggestClipFrames,
+    suggestImageEmbedFocusPrompt,
   ]);
 
   const saveClips = useCallback(async () => {
@@ -1110,8 +1132,50 @@ export function SettingsPage() {
               </div>
             </div>
             <p className="text-xs text-[var(--color-text-muted)]">
-              Khi có transcript (STT): kết hợp ảnh + chữ. Trọng số 0–1; tổng không bắt buộc = 1.
+              Khi có transcript (STT): kết hợp ảnh + chữ. Trọng số 0–1; tổng không bắt buộc = 1. Đặt{" "}
+              <span className="font-medium text-[var(--color-text)]">0</span> để tắt hẳn nhánh ảnh hoặc
+              transcript (không gọi embed frame / không tìm theo chữ).
             </p>
+            <div className="flex items-center justify-between gap-3 rounded-md border border-[var(--color-border)] px-3 py-2">
+              <div className="space-y-0.5">
+                <Label htmlFor={debugSuggestFramesSwitchId} className="text-[var(--color-text)]">
+                  Giữ ảnh frame debug (suggest-product)
+                </Label>
+                <p className="text-xs text-[var(--color-text-muted)]">
+                  Lưu JPEG tách từ clip dưới{" "}
+                  <code className="rounded bg-[var(--color-bg-subtle)] px-1">debug/suggest_clip_frames/</code>{" "}
+                  trong thư mục dữ liệu; API trả về{" "}
+                  <code className="rounded bg-[var(--color-bg-subtle)] px-1">debug_extracted_frames_dir</code>.
+                </p>
+              </div>
+              <Switch
+                id={debugSuggestFramesSwitchId}
+                checked={debugKeepSuggestClipFrames}
+                onCheckedChange={setDebugKeepSuggestClipFrames}
+                aria-label="Giữ ảnh frame debug cho suggest-product"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="suggest_image_focus_prompt">Prompt kèm ảnh khi embed frame (Gemini)</Label>
+              <textarea
+                id="suggest_image_focus_prompt"
+                rows={3}
+                className={cn(
+                  "min-h-[4.5rem] w-full resize-y rounded-lg border px-2.5 py-2 text-sm outline-none transition-colors",
+                  "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
+                  "disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
+                  fieldSurface,
+                )}
+                value={suggestImageEmbedFocusPrompt}
+                onChange={(e) => setSuggestImageEmbedFocusPrompt(e.target.value)}
+                placeholder={DEFAULTS.suggestImageEmbedFocusPrompt}
+                spellCheck={false}
+              />
+              <p className="text-xs text-[var(--color-text-muted)]">
+                Gửi cùng bytes ảnh tới Gemini để hướng embedding vào sản phẩm (không dùng transcript).
+                Để trống = chỉ ảnh.
+              </p>
+            </div>
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="space-y-2">
                 <Label htmlFor="suggest_w_img">Trọng số ảnh</Label>

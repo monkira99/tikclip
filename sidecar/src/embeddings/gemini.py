@@ -113,6 +113,19 @@ def _embed_text_sync(
     return _embedding_values_from_response(result)
 
 
+def _multimodal_caption(*, product_name: str | None, companion_text: str | None) -> str | None:
+    parts: list[str] = []
+    pn = (product_name or "").strip()
+    ct = (companion_text or "").strip()
+    if pn:
+        parts.append(pn)
+    if ct:
+        parts.append(ct)
+    if not parts:
+        return None
+    return "\n".join(parts)
+
+
 def _embed_multimodal_sync(
     *,
     api_key: str,
@@ -178,6 +191,7 @@ async def embed_file(
     kind: str,
     output_dimensionality: int,
     product_name: str | None = None,
+    companion_text: str | None = None,
 ) -> list[float]:
     if not path.is_file():
         msg = f"Media file not found: {path}"
@@ -191,7 +205,7 @@ async def embed_file(
     mime = _mime_for_path(path, kind)
     if mime == "application/octet-stream":
         logger.warning("Unknown media type for %s (kind=%s); Gemini may reject", path, kind)
-    label = (product_name or "").strip() or None
+    caption = _multimodal_caption(product_name=product_name, companion_text=companion_text)
     return await asyncio.to_thread(
         _embed_multimodal_sync,
         api_key=api_key,
@@ -199,5 +213,5 @@ async def embed_file(
         media_bytes=raw,
         mime_type=mime,
         output_dimensionality=output_dimensionality,
-        text=label,
+        text=caption,
     )

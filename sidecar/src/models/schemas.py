@@ -230,6 +230,10 @@ class ProductEmbeddingSearchByMediaRequest(BaseModel):
     path: str
     kind: Literal["image", "video"] = "image"
     top_k: int = Field(default=10, ge=1, le=100)
+    companion_text: str | None = Field(
+        default=None,
+        description="Optional focus prompt with image/video for Gemini multimodal embed.",
+    )
 
 
 class ProductEmbeddingSearchHit(BaseModel):
@@ -239,6 +243,8 @@ class ProductEmbeddingSearchHit(BaseModel):
     source_url: str | None = None
     product_name: str | None = None
     modality: str | None = None
+    product_text: str | None = None
+    product_description: str | None = None
 
 
 class ProductEmbeddingSearchResponse(BaseModel):
@@ -255,11 +261,77 @@ class ClipSuggestTextHit(BaseModel):
     product_id: int
     score: float
     product_name: str | None = None
+    product_description: str | None = None
 
 
 class ClipSuggestVoteRow(BaseModel):
     product_id: int
     vote_count: int
+
+
+class ClipSuggestImageEvidenceHit(BaseModel):
+    """One zvec hit for a single query frame: pairs with parent row ``media_relative_path``."""
+
+    product_id: int
+    score: float
+    product_name: str | None = None
+    product_description: str | None = None
+    catalog_media_relative_path: str | None = Field(
+        default=None,
+        description="Storage-relative path to the indexed product image/video that matched.",
+    )
+    catalog_source_url: str | None = Field(
+        default=None,
+        description="Original source URL of the catalog media, if indexed with one.",
+    )
+    catalog_modality: Literal["image", "video"] | None = Field(
+        default=None,
+        description="Whether the matched catalog vector came from an image or video file.",
+    )
+
+
+class ClipSuggestTranscriptSegmentRow(BaseModel):
+    """One transcript slice and its best text-index match (evidence)."""
+
+    segment_index: int
+    segment_text: str
+    outcome: Literal["hit", "no_hit", "error"] = "hit"
+    error: str | None = None
+    best_product_id: int | None = None
+    best_score: float | None = None
+    best_product_name: str | None = None
+    matched_product_description: str | None = None
+
+
+class ClipSuggestProductRankRow(BaseModel):
+    """Product ranking row with absolute scores and weighted final_score."""
+
+    product_id: int
+    product_name: str | None = None
+    frame_hit_count: int = Field(
+        default=0,
+        description="Number of frames (top-k) where this product appeared.",
+    )
+    avg_frame_distance: float | None = Field(
+        default=None,
+        description="Mean best-per-frame zvec cosine distance (lower = closer match).",
+    )
+    image_score: float = Field(
+        default=0.0,
+        description="1 - avg_frame_distance; 0 when no frame hits. Absolute [0,1].",
+    )
+    transcript_text_score: float | None = Field(
+        default=None,
+        description="Raw score from full-transcript text search (higher = better).",
+    )
+    text_score: float = Field(
+        default=0.0,
+        description="Same as transcript_text_score, or 0 when absent. Absolute [0,1].",
+    )
+    final_score: float = Field(
+        default=0.0,
+        description="w_img * image_score + w_txt * text_score. Ranked descending.",
+    )
 
 
 class ClipSuggestFrameRow(BaseModel):
@@ -273,6 +345,17 @@ class ClipSuggestFrameRow(BaseModel):
     top_product_id: int | None = None
     top_score: float | None = None
     top_product_name: str | None = None
+    matched_product_description: str | None = Field(
+        default=None,
+        description="Indexed product description on the top image hit (after re-index with media).",
+    )
+    image_evidence_hits: list[ClipSuggestImageEvidenceHit] = Field(
+        default_factory=list,
+        description=(
+            "Top zvec hits for this frame: query image is ``media_relative_path``; "
+            "each hit includes the matched catalog media path."
+        ),
+    )
 
 
 class ClipSuggestProductResponse(BaseModel):
@@ -291,10 +374,29 @@ class ClipSuggestProductResponse(BaseModel):
     suggest_weight_image: float = 0.6
     suggest_weight_text: float = 0.4
     suggest_min_fused_score: float = 0.25
-    pick_method: Literal["majority_vote", "min_distance_tiebreak", "weighted_fusion"] | None = None
+    suggest_image_embed_focus_prompt: str = ""
+    pick_method: (
+        Literal[
+            "majority_vote",
+            "min_distance_tiebreak",
+            "weighted_fusion",
+            "unified_score",
+        ]
+        | None
+    ) = None
     votes_by_product: list[ClipSuggestVoteRow] = Field(
         default_factory=list,
-        description="Votes over frames that had a vector hit (top-1 product per frame).",
+        description="Legacy: vote count = number of frames where this product was top-1. "
+        "Prefer product_ranks (mean frame score + transcript score).",
+    )
+    product_ranks: list[ClipSuggestProductRankRow] = Field(
+        default_factory=list,
+        description="Products ranked by final_score descending (absolute scoring system).",
+    )
+    transcript_segment_evidence: list[ClipSuggestTranscriptSegmentRow] = Field(
+        default_factory=list,
+        description="Transcript split into segments; each mapped to best text-index product + "
+        "matched description.",
     )
     candidate_product_id: int | None = None
     candidate_product_name: str | None = None
@@ -306,3 +408,8 @@ class ClipSuggestProductResponse(BaseModel):
     text_search_hits: list[ClipSuggestTextHit] = Field(default_factory=list)
     text_search_used: bool = False
     fusion_method: str | None = None
+    debug_extracted_frames_dir: str | None = Field(
+        default=None,
+        description="When debug_keep_suggest_clip_frames is on: storage-relative path to the "
+        "folder containing extracted frame_*.jpg (and README.txt).",
+    )

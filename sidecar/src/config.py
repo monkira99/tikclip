@@ -51,16 +51,28 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = None
     gemini_embedding_model: str = "gemini-embedding-2-preview"
     gemini_embedding_dimensions: int = 1536
+    # Appended after product name for Gemini multimodal embed when indexing product images/videos.
+    # Full caption: "{product_name} {product_media_embed_suffix}" (skipped if name is empty).
+    product_media_embed_suffix: str = "đang được mặc hoặc cầm trên tay giới thiệu"
 
     # After each new clip: extract frames → Gemini image embed → zvec; tag clip if match is strong.
     auto_tag_clip_product_enabled: bool = False
     auto_tag_clip_frame_count: int = 4
     auto_tag_clip_max_score: float = 0.35
     # Weighted fusion for hybrid suggest (image frames + STT text). Used when transcript is present.
+    # Zero disables that branch: no frame extract/embed, or no transcript vector search.
     suggest_weight_image: float = 0.6
     suggest_weight_text: float = 0.4
     # Minimum normalized fused score (0-1) to accept a hybrid match.
     suggest_min_fused_score: float = 0.25
+    # Prepended to clip frame/thumbnail as text part in Gemini multimodal embed (suggest-product
+    # image search only). Empty = image bytes only. Not the STT transcript.
+    suggest_image_embed_focus_prompt: str = (
+        "Focus on the main product in this image for similarity to product catalog photos."
+    )
+    # When true: keep JPEG frames from suggest-product under
+    # {storage_path}/debug/suggest_clip_frames/<timestamp>_<id>/ (see API response field).
+    debug_keep_suggest_clip_frames: bool = False
 
     # Audio: VAD + STT (sherpa-onnx, gipformer ONNX). Models under models_path.
     audio_processing_enabled: bool = True

@@ -112,6 +112,7 @@ async def index_product_embeddings(body: IndexProductEmbeddingsRequest):
             product_name=body.product_name,
             items=items,
             http=client,
+            product_description=body.product_description,
         )
         if body.product_name.strip() or body.product_description.strip():
             tsum = await index_product_text(
@@ -177,6 +178,8 @@ async def search_product_embeddings_text(body: ProductEmbeddingSearchRequest):
                 source_url=h.source_url,
                 product_name=h.product_name,
                 modality=h.modality,
+                product_text=h.product_text,
+                product_description=h.product_description,
             )
             for h in hits
         ],
@@ -201,6 +204,7 @@ async def search_product_embeddings_media(body: ProductEmbeddingSearchByMediaReq
                 kind=body.kind,
                 top_k=body.top_k,
                 http=client,
+                companion_text=body.companion_text,
             )
     except (ValueError, FileNotFoundError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -214,6 +218,8 @@ async def search_product_embeddings_media(body: ProductEmbeddingSearchByMediaReq
                 source_url=h.source_url,
                 product_name=h.product_name,
                 modality=h.modality,
+                product_text=h.product_text,
+                product_description=h.product_description,
             )
             for h in hits
         ],

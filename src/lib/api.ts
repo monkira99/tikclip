@@ -401,6 +401,17 @@ export async function deleteProductEmbeddings(productId: number): Promise<void> 
   });
 }
 
+export type ClipSuggestImageEvidenceHit = {
+  product_id: number;
+  score: number;
+  product_name: string | null;
+  product_description: string | null;
+  /** Ảnh/video catalog đã index, đường dẫn tương đối storage (cặp với query = media_relative_path của frame row). */
+  catalog_media_relative_path?: string | null;
+  catalog_source_url?: string | null;
+  catalog_modality?: "image" | "video" | null;
+};
+
 export type ClipSuggestFrameRow = {
   index: number;
   source: "thumbnail" | "extracted";
@@ -410,6 +421,8 @@ export type ClipSuggestFrameRow = {
   top_product_id: number | null;
   top_score: number | null;
   top_product_name: string | null;
+  matched_product_description?: string | null;
+  image_evidence_hits?: ClipSuggestImageEvidenceHit[];
 };
 
 export type ClipSuggestVoteRow = {
@@ -421,6 +434,34 @@ export type ClipSuggestTextHit = {
   product_id: number;
   score: number;
   product_name: string | null;
+  product_description?: string | null;
+};
+
+export type ClipSuggestTranscriptSegmentRow = {
+  segment_index: number;
+  segment_text: string;
+  outcome: "hit" | "no_hit" | "error";
+  error: string | null;
+  best_product_id: number | null;
+  best_score: number | null;
+  best_product_name: string | null;
+  matched_product_description: string | null;
+};
+
+export type ClipSuggestProductRankRow = {
+  product_id: number;
+  product_name: string | null;
+  frame_hit_count: number;
+  /** Mean best-per-frame cosine distance (lower = closer). */
+  avg_frame_distance: number | null;
+  /** 1 - avg_frame_distance; 0 khi không có frame hit. [0,1] */
+  image_score: number;
+  /** Raw score từ full-transcript text search (higher = better). */
+  transcript_text_score: number | null;
+  /** = transcript_text_score hoặc 0. [0,1] */
+  text_score: number;
+  /** w_img * image_score + w_txt * text_score. Xếp hạng giảm dần. */
+  final_score: number;
 };
 
 export type ClipSuggestProductResult = {
@@ -439,8 +480,12 @@ export type ClipSuggestProductResult = {
   suggest_weight_image: number;
   suggest_weight_text: number;
   suggest_min_fused_score: number;
-  pick_method: "majority_vote" | "min_distance_tiebreak" | "weighted_fusion" | null;
+  /** Prompt đang dùng kèm ảnh khi embed frame (echo từ cấu hình). */
+  suggest_image_embed_focus_prompt?: string;
+  pick_method: "majority_vote" | "min_distance_tiebreak" | "weighted_fusion" | "unified_score" | null;
   votes_by_product: ClipSuggestVoteRow[];
+  product_ranks?: ClipSuggestProductRankRow[];
+  transcript_segment_evidence?: ClipSuggestTranscriptSegmentRow[];
   candidate_product_id: number | null;
   candidate_product_name: string | null;
   candidate_score: number | null;
@@ -448,6 +493,8 @@ export type ClipSuggestProductResult = {
   text_search_hits: ClipSuggestTextHit[];
   text_search_used: boolean;
   fusion_method: string | null;
+  /** Khi bật lưu frame debug: đường dẫn tương đối từ thư mục lưu trữ tới thư mục chứa frame_*.jpg */
+  debug_extracted_frames_dir?: string | null;
 };
 
 export async function suggestProductForClip(body: {

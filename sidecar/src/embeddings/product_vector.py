@@ -337,6 +337,7 @@ async def index_product_media(
     product_name: str,
     items: list[MediaIndexItem],
     http: httpx.AsyncClient,
+    product_description: str = "",
 ) -> IndexSummary:
     if not settings.product_vector_enabled:
         return IndexSummary(
@@ -388,6 +389,13 @@ async def index_product_media(
             skipped += 1
             continue
         doc_id = f"p{product_id}_{i}"
+        pname_strip = product_name.strip() if product_name else ""
+        suffix = (settings.product_media_embed_suffix or "").strip()
+        catalog_caption = (
+            (pname_strip + " " + suffix).strip()
+            if pname_strip and suffix
+            else (pname_strip or None)
+        )
         try:
             vec = await gemini.embed_file(
                 http,
@@ -396,7 +404,8 @@ async def index_product_media(
                 path=fs_path,
                 kind=item.kind,
                 output_dimensionality=dim,
-                product_name=product_name,
+                product_name=None,
+                companion_text=catalog_caption,
             )
         except (OSError, ValueError, FileNotFoundError) as exc:
             errors.append(f"{item.path}: {exc}")
@@ -412,6 +421,8 @@ async def index_product_media(
 
         src = item.source_url.strip() if item.source_url else ""
         pname = product_name.strip() if product_name else ""
+        pdesc = (product_description or "").strip()
+        pdesc_field = pdesc[:8000] if pdesc else None
         docs.append(
             zvec.Doc(
                 id=doc_id,
@@ -423,7 +434,7 @@ async def index_product_media(
                     "product_name": pname or None,
                     "modality": item.kind,
                     "product_text": None,
-                    "product_description": None,
+                    "product_description": pdesc_field,
                 },
             ),
         )
@@ -558,6 +569,18 @@ class SearchHit(BaseModel):
     source_url: str | None = None
     product_name: str | None = None
     modality: str | None = None
+    product_text: str | None = None
+    product_description: str | None = None
+
+
+def _hit_text_field(fields: dict, key: str, max_len: int = 4000) -> str | None:
+    raw = fields.get(key)
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    return s[:max_len]
 
 
 def _docs_to_hits(raw: list[zvec.Doc]) -> list[SearchHit]:
@@ -576,9 +599,22 @@ def _docs_to_hits(raw: list[zvec.Doc]) -> list[SearchHit]:
                 source_url=(str(fields["source_url"]) if fields.get("source_url") else None),
                 product_name=(str(fields["product_name"]) if fields.get("product_name") else None),
                 modality=(str(fields["modality"]) if fields.get("modality") else None),
+                product_text=_hit_text_field(fields, "product_text"),
+                product_description=_hit_text_field(fields, "product_description"),
             ),
         )
     return out
+
+
+_OUTPUT_HIT_FIELDS = [
+    "product_id",
+    "image_path",
+    "source_url",
+    "product_name",
+    "modality",
+    "product_text",
+    "product_description",
+]
 
 
 async def search_by_text(
@@ -627,25 +663,13 @@ async def search_by_text(
                 reranker=zvec.RrfReRanker(topn=top_k),
                 filter="modality = 'text'",
                 topk=top_k,
-                output_fields=[
-                    "product_id",
-                    "image_path",
-                    "source_url",
-                    "product_name",
-                    "modality",
-                ],
+                output_fields=_OUTPUT_HIT_FIELDS,
             )
         return coll.query(
             vectors=zvec.VectorQuery("text_dense", vector=dense_vec),
             filter="modality = 'text'",
             topk=top_k,
-            output_fields=[
-                "product_id",
-                "image_path",
-                "source_url",
-                "product_name",
-                "modality",
-            ],
+            output_fields=_OUTPUT_HIT_FIELDS,
         )
 
     raw = await asyncio.to_thread(_run_query)
@@ -658,6 +682,7 @@ async def search_by_media_path(
     kind: Literal["image", "video"],
     top_k: int,
     http: httpx.AsyncClient,
+    companion_text: str | None = None,
 ) -> list[SearchHit]:
     fs_path = resolve_storage_media_path(media_path)
     if not settings.product_vector_enabled:
@@ -672,6 +697,7 @@ async def search_by_media_path(
     dim = settings.gemini_embedding_dimensions
     api_key = settings.gemini_api_key or ""
 
+    ct = (companion_text or "").strip()
     vec = await gemini.embed_file(
         http,
         api_key=api_key,
@@ -679,6 +705,7 @@ async def search_by_media_path(
         path=fs_path,
         kind=kind,
         output_dimensionality=dim,
+        companion_text=ct if ct else None,
     )
     if len(vec) != dim:
         msg = f"Media embedding length {len(vec)} != configured {dim}"
@@ -689,13 +716,7 @@ async def search_by_media_path(
             vectors=zvec.VectorQuery("embedding", vector=vec),
             topk=top_k,
             filter="(modality = 'image' OR modality = 'video')",
-            output_fields=[
-                "product_id",
-                "image_path",
-                "source_url",
-                "product_name",
-                "modality",
-            ],
+            output_fields=_OUTPUT_HIT_FIELDS,
         )
 
     raw = await asyncio.to_thread(_run_query)
@@ -748,25 +769,13 @@ async def search_by_transcript(
                 reranker=zvec.RrfReRanker(topn=top_k),
                 filter="modality = 'text'",
                 topk=top_k,
-                output_fields=[
-                    "product_id",
-                    "image_path",
-                    "source_url",
-                    "product_name",
-                    "modality",
-                ],
+                output_fields=_OUTPUT_HIT_FIELDS,
             )
         return coll.query(
             vectors=zvec.VectorQuery("text_dense", vector=dense_vec),
             filter="modality = 'text'",
             topk=top_k,
-            output_fields=[
-                "product_id",
-                "image_path",
-                "source_url",
-                "product_name",
-                "modality",
-            ],
+            output_fields=_OUTPUT_HIT_FIELDS,
         )
 
     raw = await asyncio.to_thread(_run_query)

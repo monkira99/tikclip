@@ -221,6 +221,17 @@ pub fn build_sidecar_env(
         "suggest_min_fused_score",
         "TIKCLIP_SUGGEST_MIN_FUSED_SCORE",
     )?;
+    push_bool_setting(
+        &mut env,
+        conn,
+        "debug_keep_suggest_clip_frames",
+        "TIKCLIP_DEBUG_KEEP_SUGGEST_CLIP_FRAMES",
+    )?;
+    if let Some(t) =
+        get_setting_trimmed(conn, "suggest_image_embed_focus_prompt").map_err(|e| e.to_string())?
+    {
+        env.push(("TIKCLIP_SUGGEST_IMAGE_EMBED_FOCUS_PROMPT".to_string(), t));
+    }
 
     push_bool_setting(
         &mut env,
