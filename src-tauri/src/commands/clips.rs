@@ -1,4 +1,4 @@
-use crate::db::models::Clip;
+use crate::db::models::{Clip, SpeechSegment};
 use crate::time_hcm::SQL_NOW_HCM;
 use crate::AppState;
 use rusqlite::Result as SqlResult;
@@ -26,13 +26,14 @@ fn map_clip_row(row: &Row) -> SqlResult<Clip> {
         scene_type: row.get(13)?,
         ai_tags_json: row.get(14)?,
         notes: row.get(15)?,
-        created_at: row.get(16)?,
-        updated_at: row.get(17)?,
+        transcript_text: row.get(16)?,
+        created_at: row.get(17)?,
+        updated_at: row.get(18)?,
     })
 }
 
 /// Lists clips joined with `accounts.username` as `account_username`.
-/// Column order matches `clips` table in `db/migrations/001_initial.sql` plus joined username.
+/// Column order: clips columns plus `transcript_text` (migration 006), joined username.
 #[tauri::command]
 pub fn list_clips(state: State<'_, AppState>) -> Result<Vec<Clip>, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
@@ -42,7 +43,7 @@ pub fn list_clips(state: State<'_, AppState>) -> Result<Vec<Clip>, String> {
              c.id, c.recording_id, c.account_id, a.username, \
              c.title, c.file_path, c.thumbnail_path, c.duration_seconds, c.file_size_bytes, \
              c.start_time, c.end_time, c.status, c.quality_score, c.scene_type, c.ai_tags_json, \
-             c.notes, c.created_at, c.updated_at \
+             c.notes, c.transcript_text, c.created_at, c.updated_at \
              FROM clips c \
              INNER JOIN accounts a ON a.id = c.account_id \
              ORDER BY c.created_at DESC",
@@ -85,7 +86,7 @@ pub fn list_clips_filtered(
          c.id, c.recording_id, c.account_id, a.username, \
          c.title, c.file_path, c.thumbnail_path, c.duration_seconds, c.file_size_bytes, \
          c.start_time, c.end_time, c.status, c.quality_score, c.scene_type, c.ai_tags_json, \
-         c.notes, c.created_at, c.updated_at \
+         c.notes, c.transcript_text, c.created_at, c.updated_at \
          FROM clips c \
          INNER JOIN accounts a ON a.id = c.account_id \
          WHERE 1=1",
@@ -168,7 +169,7 @@ pub fn get_clip_by_id(state: State<'_, AppState>, clip_id: i64) -> Result<Clip, 
          c.id, c.recording_id, c.account_id, a.username, \
          c.title, c.file_path, c.thumbnail_path, c.duration_seconds, c.file_size_bytes, \
          c.start_time, c.end_time, c.status, c.quality_score, c.scene_type, c.ai_tags_json, \
-         c.notes, c.created_at, c.updated_at \
+         c.notes, c.transcript_text, c.created_at, c.updated_at \
          FROM clips c \
          INNER JOIN accounts a ON a.id = c.account_id \
          WHERE c.id = ?1",
@@ -377,6 +378,7 @@ pub struct InsertClipFromSidecarInput {
     pub duration_sec: f64,
     pub start_sec: f64,
     pub end_sec: f64,
+    pub transcript_text: Option<String>,
 }
 
 /// Persist one generated clip when the sidecar emits `clip_ready` over WebSocket.
@@ -448,13 +450,18 @@ pub fn insert_clip_from_sidecar(
 
     let thumb = input.thumbnail_path.trim();
     let thumb_opt = if thumb.is_empty() { None } else { Some(thumb) };
+    let transcript = input
+        .transcript_text
+        .as_ref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
 
     conn.execute(
         &format!(
             "INSERT INTO clips (\
                recording_id, account_id, title, file_path, thumbnail_path, \
-               duration_seconds, file_size_bytes, start_time, end_time, status, created_at, updated_at\
-             ) VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, ?7, ?8, 'ready', {}, {})",
+               duration_seconds, file_size_bytes, start_time, end_time, status, transcript_text, created_at, updated_at\
+             ) VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, ?7, ?8, 'ready', ?9, {}, {})",
             SQL_NOW_HCM, SQL_NOW_HCM
         ),
         params![
@@ -466,9 +473,126 @@ pub fn insert_clip_from_sidecar(
             file_size_bytes,
             input.start_sec,
             input.end_sec,
+            transcript,
         ],
     )
     .map_err(|e| e.to_string())?;
 
     Ok(conn.last_insert_rowid())
+}
+
+fn map_speech_segment_row(row: &Row) -> SqlResult<SpeechSegment> {
+    Ok(SpeechSegment {
+        id: row.get(0)?,
+        recording_id: row.get(1)?,
+        start_time: row.get(2)?,
+        end_time: row.get(3)?,
+        text: row.get(4)?,
+        confidence: row.get(5)?,
+        created_at: row.get(6)?,
+    })
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct InsertSpeechSegmentInput {
+    pub sidecar_recording_id: String,
+    /// Used to create a stub `recordings` row if missing (same as clip insert).
+    pub account_id: i64,
+    pub start_time: f64,
+    pub end_time: f64,
+    pub text: String,
+    pub confidence: Option<f64>,
+}
+
+/// Persist one speech segment when the sidecar emits `speech_segment_ready` over WebSocket.
+#[tauri::command]
+pub fn insert_speech_segment(
+    state: State<'_, AppState>,
+    input: InsertSpeechSegmentInput,
+) -> Result<i64, String> {
+    if input.sidecar_recording_id.trim().is_empty() {
+        return Err("sidecar_recording_id is required".to_string());
+    }
+    if input.account_id <= 0 {
+        return Err("account_id is required".to_string());
+    }
+
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+
+    let mut rec_id: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM recordings WHERE sidecar_recording_id = ?1",
+            [&input.sidecar_recording_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+
+    if rec_id.is_none() {
+        sync_recording_from_sidecar_conn(
+            &conn,
+            &SyncRecordingFromSidecarInput {
+                sidecar_recording_id: input.sidecar_recording_id.clone(),
+                account_id: input.account_id,
+                status: "done".to_string(),
+                duration_seconds: 0,
+                file_size_bytes: 0,
+                file_path: None,
+                error_message: None,
+            },
+        )?;
+        rec_id = Some(
+            conn.query_row(
+                "SELECT id FROM recordings WHERE sidecar_recording_id = ?1",
+                [&input.sidecar_recording_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?,
+        );
+    }
+
+    let recording_id = rec_id.expect("recording row must exist after upsert");
+
+    conn.execute(
+        &format!(
+            "INSERT INTO speech_segments (recording_id, start_time, end_time, text, confidence, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, {})",
+            SQL_NOW_HCM
+        ),
+        params![
+            recording_id,
+            input.start_time,
+            input.end_time,
+            input.text,
+            input.confidence,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+pub fn list_speech_segments(
+    state: State<'_, AppState>,
+    recording_id: i64,
+) -> Result<Vec<SpeechSegment>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, recording_id, start_time, end_time, text, confidence, created_at \
+             FROM speech_segments WHERE recording_id = ?1 ORDER BY start_time ASC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map([recording_id], map_speech_segment_row)
+        .map_err(|e| e.to_string())?;
+
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| e.to_string())?);
+    }
+    Ok(out)
 }

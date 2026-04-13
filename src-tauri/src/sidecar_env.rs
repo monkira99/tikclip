@@ -204,5 +204,52 @@ pub fn build_sidecar_env(
         "TIKCLIP_AUTO_TAG_CLIP_MAX_SCORE",
     )?;
 
+    push_bool_setting(
+        &mut env,
+        conn,
+        "audio_processing_enabled",
+        "TIKCLIP_AUDIO_PROCESSING_ENABLED",
+    )?;
+    push_float_if_valid(
+        &mut env,
+        conn,
+        "speech_merge_gap_sec",
+        "TIKCLIP_SPEECH_MERGE_GAP_SEC",
+    )?;
+    push_float_if_valid(
+        &mut env,
+        conn,
+        "speech_cut_tolerance_sec",
+        "TIKCLIP_SPEECH_CUT_TOLERANCE_SEC",
+    )?;
+    push_int_if_valid(
+        &mut env,
+        conn,
+        "stt_num_threads",
+        "TIKCLIP_STT_NUM_THREADS",
+    )?;
+    push_stt_quantize(&mut env, conn)?;
+
     Ok(env)
+}
+
+fn push_stt_quantize(
+    env: &mut Vec<(String, String)>,
+    conn: &Connection,
+) -> Result<(), String> {
+    if let Some(t) = get_setting_trimmed(conn, "stt_quantize").map_err(|e| e.to_string())? {
+        let lower = t.to_ascii_lowercase();
+        let v = match lower.as_str() {
+            "auto" => "auto",
+            "fp32" | "float32" => "fp32",
+            "int8" => "int8",
+            _ => {
+                return Err(format!(
+                    "stt_quantize must be auto, fp32, or int8, got {t:?}"
+                ));
+            }
+        };
+        env.push(("TIKCLIP_STT_QUANTIZE".to_string(), v.to_string()));
+    }
+    Ok(())
 }

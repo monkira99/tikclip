@@ -60,8 +60,20 @@ pub struct Clip {
     pub scene_type: Option<String>,
     pub ai_tags_json: Option<String>,
     pub notes: Option<String>,
+    pub transcript_text: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SpeechSegment {
+    pub id: i64,
+    pub recording_id: i64,
+    pub start_time: f64,
+    pub end_time: f64,
+    pub text: String,
+    pub confidence: Option<f64>,
+    pub created_at: String,
 }
 
 #[allow(dead_code)]

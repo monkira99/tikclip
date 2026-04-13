@@ -46,6 +46,8 @@ pub fn run() {
             commands::accounts::update_account_live_status,
             commands::accounts::sync_accounts_live_status,
             commands::clips::insert_clip_from_sidecar,
+            commands::clips::insert_speech_segment,
+            commands::clips::list_speech_segments,
             commands::clips::list_clips,
             commands::clips::list_clips_filtered,
             commands::clips::get_clip_by_id,
