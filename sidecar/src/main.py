@@ -5,9 +5,12 @@ import sys
 
 import uvicorn
 
+import onnx_runtime_preload
 from app import create_app
 from config import settings
 from logging_config import setup_sidecar_logging
+
+onnx_runtime_preload.preload_onnxruntime_shared_lib()
 
 
 def rebind_stdout_to_stderr_after_port_line() -> None:
