@@ -76,6 +76,7 @@ export interface Clip {
   scene_type: SceneType | null;
   ai_tags_json: string | null;
   notes: string | null;
+  transcript_text?: string | null;
   created_at: string;
   updated_at: string;
 }

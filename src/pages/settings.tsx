@@ -29,6 +29,7 @@ import {
   type StorageStats,
 } from "@/lib/api";
 import { resyncSidecarWatchers } from "@/lib/resync-sidecar-watchers";
+import { cn } from "@/lib/utils";
 
 const fieldSurface =
   "border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)]";
@@ -45,7 +46,16 @@ const DEFAULTS = {
   geminiEmbeddingDim: "1536",
   autoTagClipFrames: "4",
   autoTagClipMaxScore: "0.35",
+  speechMergeGapSec: "0.5",
+  speechCutToleranceSec: "1.5",
+  sttNumThreads: "4",
 } as const;
+
+const KEY_AUDIO_PROCESSING = "audio_processing_enabled";
+const KEY_SPEECH_MERGE_GAP = "speech_merge_gap_sec";
+const KEY_SPEECH_CUT_TOLERANCE = "speech_cut_tolerance_sec";
+const KEY_STT_NUM_THREADS = "stt_num_threads";
+const KEY_STT_QUANTIZE = "stt_quantize";
 
 function valueFromDb(db: string | null, fallback: string): string {
   if (db === null) {
@@ -102,6 +112,14 @@ function parseProductVectorEnabled(raw: string | null): boolean {
 
 function parseAutoTagClipProductEnabled(raw: string | null): boolean {
   return parseProductVectorEnabled(raw);
+}
+
+function parseAudioProcessingEnabled(raw: string | null): boolean {
+  if (raw === null || raw.trim() === "") {
+    return true;
+  }
+  const t = raw.trim().toLowerCase();
+  return t === "1" || t === "true" || t === "yes" || t === "on";
 }
 
 function PathRow({
@@ -180,6 +198,12 @@ export function SettingsPage() {
   const [autoTagClipFrameCount, setAutoTagClipFrameCount] = useState("");
   const [autoTagClipMaxScore, setAutoTagClipMaxScore] = useState("");
   const autoTagClipSwitchId = useId();
+  const [audioProcessingEnabled, setAudioProcessingEnabled] = useState(true);
+  const [speechMergeGapSec, setSpeechMergeGapSec] = useState("");
+  const [speechCutToleranceSec, setSpeechCutToleranceSec] = useState("");
+  const [sttNumThreads, setSttNumThreads] = useState("");
+  const [sttQuantize, setSttQuantize] = useState<"auto" | "fp32" | "int8">("auto");
+  const audioProcessingSwitchId = useId();
 
   useEffect(() => {
     let cancelled = false;
@@ -207,6 +231,11 @@ export function SettingsPage() {
           atEn,
           atFrames,
           atScore,
+          apEn,
+          smg,
+          sct,
+          sttTh,
+          sttQ,
         ] = await Promise.all([
           getAppDataPaths(),
           storageRootIsCustom(),
@@ -229,6 +258,11 @@ export function SettingsPage() {
           getSetting(KEY_AUTO_TAG_CLIP),
           getSetting(KEY_AUTO_TAG_FRAMES),
           getSetting(KEY_AUTO_TAG_MAX_SCORE),
+          getSetting(KEY_AUDIO_PROCESSING),
+          getSetting(KEY_SPEECH_MERGE_GAP),
+          getSetting(KEY_SPEECH_CUT_TOLERANCE),
+          getSetting(KEY_STT_NUM_THREADS),
+          getSetting(KEY_STT_QUANTIZE),
         ]);
         if (cancelled) return;
         setPaths(pathInfo);
@@ -258,6 +292,18 @@ export function SettingsPage() {
         setAutoTagClipProductEnabled(parseAutoTagClipProductEnabled(atEn));
         setAutoTagClipFrameCount(valueFromDb(atFrames, DEFAULTS.autoTagClipFrames));
         setAutoTagClipMaxScore(valueFromDb(atScore, DEFAULTS.autoTagClipMaxScore));
+        setAudioProcessingEnabled(parseAudioProcessingEnabled(apEn));
+        setSpeechMergeGapSec(valueFromDb(smg, DEFAULTS.speechMergeGapSec));
+        setSpeechCutToleranceSec(valueFromDb(sct, DEFAULTS.speechCutToleranceSec));
+        setSttNumThreads(valueFromDb(sttTh, DEFAULTS.sttNumThreads));
+        const q = (sttQ ?? "").trim().toLowerCase();
+        if (q === "fp32" || q === "float32") {
+          setSttQuantize("fp32");
+        } else if (q === "int8") {
+          setSttQuantize("int8");
+        } else {
+          setSttQuantize("auto");
+        }
       } catch (e) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : "Failed to load settings");
@@ -510,21 +556,61 @@ export function SettingsPage() {
       setError("Min duration cannot be greater than max duration.");
       return;
     }
+    const gapStr = speechMergeGapSec.trim();
+    const tolStr = speechCutToleranceSec.trim();
+    const thStr = sttNumThreads.trim();
+    if (gapStr) {
+      const g = Number(gapStr);
+      if (!Number.isFinite(g) || g < 0 || g > 5) {
+        setError("Khoảng gộp khoảng lặng (giây) phải từ 0 đến 5.");
+        return;
+      }
+    }
+    if (tolStr) {
+      const t = Number(tolStr);
+      if (!Number.isFinite(t) || t < 0.05 || t > 10) {
+        setError("Dung sai cắt hybrid (giây) phải từ 0.05 đến 10 (khuyến nghị ~1.5).");
+        return;
+      }
+    }
+    if (thStr) {
+      const n = Number(thStr);
+      if (!Number.isInteger(n) || n < 1 || n > 32) {
+        setError("Số luồng STT phải là số nguyên từ 1 đến 32.");
+        return;
+      }
+    }
     setSaving("clips");
     try {
       await setSetting("clip_min_duration", mn);
       await setSetting("clip_max_duration", mx);
+      await setSetting(KEY_AUDIO_PROCESSING, audioProcessingEnabled ? "1" : "0");
+      await setSetting(KEY_SPEECH_MERGE_GAP, gapStr || DEFAULTS.speechMergeGapSec);
+      await setSetting(KEY_SPEECH_CUT_TOLERANCE, tolStr || DEFAULTS.speechCutToleranceSec);
+      await setSetting(KEY_STT_NUM_THREADS, thStr || DEFAULTS.sttNumThreads);
+      await setSetting(KEY_STT_QUANTIZE, sttQuantize);
       await restartSidecar();
       await resyncSidecarWatchers();
       const fresh = await getAppDataPaths();
       setPaths(fresh);
-      setMessage("Clip processing settings saved. Sidecar restarted to apply.");
+      setMessage(
+        "Đã lưu cài đặt xử lý clip và âm thanh (VAD/STT). Sidecar đã khởi động lại để áp dụng.",
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
     } finally {
       setSaving(null);
     }
-  }, [clearFeedback, clipMinDuration, clipMaxDuration]);
+  }, [
+    clearFeedback,
+    clipMinDuration,
+    clipMaxDuration,
+    audioProcessingEnabled,
+    speechMergeGapSec,
+    speechCutToleranceSec,
+    sttNumThreads,
+    sttQuantize,
+  ]);
 
   const saveStorageCard = useCallback(async () => {
     clearFeedback();
@@ -752,30 +838,116 @@ export function SettingsPage() {
             </div>
           </CardAction>
         </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-2">
-            <Label htmlFor="clip_min">Thời lượng tối thiểu (giây)</Label>
-            <Input
-              id="clip_min"
-              type="text"
-              inputMode="numeric"
-              className={fieldSurface}
-              value={clipMinDuration}
-              onChange={(e) => setClipMinDuration(e.target.value)}
-              placeholder={DEFAULTS.clipMin}
-            />
+        <CardContent className="flex flex-col gap-6">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="clip_min">Thời lượng tối thiểu (giây)</Label>
+              <Input
+                id="clip_min"
+                type="text"
+                inputMode="numeric"
+                className={fieldSurface}
+                value={clipMinDuration}
+                onChange={(e) => setClipMinDuration(e.target.value)}
+                placeholder={DEFAULTS.clipMin}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="clip_max">Thời lượng tối đa (giây)</Label>
+              <Input
+                id="clip_max"
+                type="text"
+                inputMode="numeric"
+                className={fieldSurface}
+                value={clipMaxDuration}
+                onChange={(e) => setClipMaxDuration(e.target.value)}
+                placeholder={DEFAULTS.clipMax}
+              />
+            </div>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="clip_max">Thời lượng tối đa (giây)</Label>
-            <Input
-              id="clip_max"
-              type="text"
-              inputMode="numeric"
-              className={fieldSurface}
-              value={clipMaxDuration}
-              onChange={(e) => setClipMaxDuration(e.target.value)}
-              placeholder={DEFAULTS.clipMax}
-            />
+          <div className="border-t border-[var(--color-border)] pt-4">
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <div>
+                <Label
+                  htmlFor={audioProcessingSwitchId}
+                  className="text-sm font-medium text-[var(--color-text)]"
+                >
+                  Xử lý âm thanh (VAD + STT)
+                </Label>
+                <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                  Tắt nếu chỉ cần cắt clip theo cảnh, không tải model và không ghi transcript.
+                </p>
+              </div>
+              <Switch
+                id={audioProcessingSwitchId}
+                checked={audioProcessingEnabled}
+                onCheckedChange={setAudioProcessingEnabled}
+                disabled={loading}
+                aria-label="Bật xử lý âm thanh VAD và STT"
+              />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="speech_merge_gap">Gộp đoạn nói nếu im lặng ngắn hơn (giây)</Label>
+                <Input
+                  id="speech_merge_gap"
+                  type="text"
+                  inputMode="decimal"
+                  className={fieldSurface}
+                  value={speechMergeGapSec}
+                  onChange={(e) => setSpeechMergeGapSec(e.target.value)}
+                  placeholder={DEFAULTS.speechMergeGapSec}
+                  disabled={!audioProcessingEnabled}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="speech_cut_tol">Dung sai cắt hybrid (giây)</Label>
+                <Input
+                  id="speech_cut_tol"
+                  type="text"
+                  inputMode="decimal"
+                  className={fieldSurface}
+                  value={speechCutToleranceSec}
+                  onChange={(e) => setSpeechCutToleranceSec(e.target.value)}
+                  placeholder={DEFAULTS.speechCutToleranceSec}
+                  disabled={!audioProcessingEnabled}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="stt_threads">Luồng STT</Label>
+                <Input
+                  id="stt_threads"
+                  type="text"
+                  inputMode="numeric"
+                  className={fieldSurface}
+                  value={sttNumThreads}
+                  onChange={(e) => setSttNumThreads(e.target.value)}
+                  placeholder={DEFAULTS.sttNumThreads}
+                  disabled={!audioProcessingEnabled}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="stt_quantize">Chất lượng mô hình</Label>
+                <select
+                  id="stt_quantize"
+                  className={cn(
+                    "h-8 w-full min-w-0 rounded-lg border px-2.5 py-1 text-sm outline-none transition-colors",
+                    "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
+                    "disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
+                    fieldSurface,
+                  )}
+                  value={sttQuantize}
+                  onChange={(e) =>
+                    setSttQuantize(e.target.value as "auto" | "fp32" | "int8")
+                  }
+                  disabled={!audioProcessingEnabled}
+                >
+                  <option value="auto">Tự động (CUDA → fp32, còn lại → int8)</option>
+                  <option value="fp32">fp32 (nặng hơn, chính xác hơn)</option>
+                  <option value="int8">int8 (nhẹ, nhanh hơn)</option>
+                </select>
+              </div>
+            </div>
           </div>
         </CardContent>
         <CardFooter className="justify-end border-t-0 bg-transparent pt-0">

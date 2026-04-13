@@ -15,6 +15,7 @@ import { ProductsPage } from "@/pages/products";
 import { SettingsPage } from "@/pages/settings";
 import {
   insertClipFromSidecarWsPayload,
+  insertSpeechSegmentFromWsPayload,
   syncRecordingFromSidecarWsPayload,
 } from "@/lib/sidecar-db-sync";
 import { hydrateNotificationsFromDb } from "@/lib/notifications-sync";
@@ -273,6 +274,16 @@ export function AppShell() {
       })();
     });
 
+    const unsubSpeechSeg = wsClient.on("speech_segment_ready", (data) => {
+      void (async () => {
+        try {
+          await insertSpeechSegmentFromWsPayload(data);
+        } catch (err) {
+          logSidecarDbSyncError("speech_segment_ready → SQLite insert failed", err);
+        }
+      })();
+    });
+
     const unsubCleanup = wsClient.on("cleanup_completed", (data) => {
       dispatchSidecarNotification("cleanup_completed", data);
       useAppStore.getState().bumpDashboardRevision();
@@ -291,6 +302,7 @@ export function AppShell() {
       unsubLive();
       unsubAccountStatus();
       unsubClip();
+      unsubSpeechSeg();
       unsubCleanup();
       unsubStorageWarn();
       wsClient.disconnect();
