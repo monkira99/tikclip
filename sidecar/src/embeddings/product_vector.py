@@ -22,6 +22,7 @@ _coll_cache: dict[str, zvec.Collection] = {}
 
 # Recommended in zvec docs: mmap for local collections; read-write for upsert/delete.
 _COLLECTION_RW = zvec.CollectionOption(read_only=False, enable_mmap=True)
+_COLLECTION_RO = zvec.CollectionOption(read_only=True, enable_mmap=True)
 
 
 class MediaIndexItem(BaseModel):
@@ -34,8 +35,12 @@ def _vector_root() -> Path:
     return (settings.storage_path / VECTOR_SUBDIR).resolve()
 
 
-def _cache_key(path_str: str, dim: int) -> str:
-    return f"{path_str}\0{dim}"
+def _rw_cache_key(path_str: str, dim: int) -> str:
+    return f"{path_str}\0{dim}\0rw"
+
+
+def _ro_cache_key(path_str: str, dim: int) -> str:
+    return f"{path_str}\0{dim}\0ro"
 
 
 def _embedding_dimension_from_schema(schema: Any) -> int:
@@ -97,12 +102,16 @@ def get_or_open_collection_sync() -> zvec.Collection:
 
     root = _vector_root()
     path_str = str(root)
-    key = _cache_key(path_str, dim)
+    rwk = _rw_cache_key(path_str, dim)
+    rok = _ro_cache_key(path_str, dim)
 
     with _coll_lock:
-        cached = _coll_cache.get(key)
+        cached = _coll_cache.get(rwk)
         if cached is not None:
             return cached
+
+        # Drop any read-only handle so this process can take an exclusive RW lock.
+        _coll_cache.pop(rok, None)
 
         root.parent.mkdir(parents=True, exist_ok=True)
 
@@ -127,7 +136,51 @@ def get_or_open_collection_sync() -> zvec.Collection:
                 option=_COLLECTION_RW,
             )
 
-        _coll_cache[key] = coll
+        _coll_cache[rwk] = coll
+        return coll
+
+
+def get_or_open_collection_for_query_sync() -> zvec.Collection:
+    """Open the product vector store for search only (shared read lock)."""
+    if not settings.product_vector_enabled:
+        msg = "Product vector indexing is disabled in settings"
+        raise RuntimeError(msg)
+    if not settings.gemini_api_key:
+        msg = "Gemini API key is not configured"
+        raise RuntimeError(msg)
+
+    dim = settings.gemini_embedding_dimensions
+    if dim < 1 or dim > 8192:
+        msg = "gemini_embedding_dimensions must be between 1 and 8192"
+        raise ValueError(msg)
+
+    root = _vector_root()
+    path_str = str(root)
+    rwk = _rw_cache_key(path_str, dim)
+    rok = _ro_cache_key(path_str, dim)
+
+    with _coll_lock:
+        rw = _coll_cache.get(rwk)
+        if rw is not None:
+            return rw
+        ro = _coll_cache.get(rok)
+        if ro is not None:
+            return ro
+
+        if not root.exists() or not any(root.iterdir()):
+            msg = "Product vector store is empty; index product media before searching"
+            raise RuntimeError(msg)
+
+        coll = zvec.open(path_str, option=_COLLECTION_RO)
+        got = _embedding_dimension_from_schema(coll.schema)
+        if got != dim:
+            msg = (
+                f"zvec collection dimension is {got} but settings request {dim}; "
+                "delete the vector folder or match gemini_embedding_dimensions."
+            )
+            raise ValueError(msg)
+
+        _coll_cache[rok] = coll
         return coll
 
 
@@ -139,9 +192,11 @@ def delete_vectors_for_product_sync(product_id: int) -> None:
         return
     path_str = str(root)
     dim = settings.gemini_embedding_dimensions
-    key = _cache_key(path_str, dim)
+    rwk = _rw_cache_key(path_str, dim)
+    rok = _ro_cache_key(path_str, dim)
     with _coll_lock:
-        coll = _coll_cache.get(key)
+        _coll_cache.pop(rok, None)
+        coll = _coll_cache.get(rwk)
     if coll is None:
         try:
             coll = zvec.open(path_str, option=_COLLECTION_RW)
@@ -303,7 +358,7 @@ async def search_by_text(
         raise ValueError(msg)
 
     def _open() -> zvec.Collection:
-        return get_or_open_collection_sync()
+        return get_or_open_collection_for_query_sync()
 
     coll = await asyncio.to_thread(_open)
     model = settings.gemini_embedding_model
@@ -370,7 +425,7 @@ async def search_by_media_path(
         msg = "Gemini API key is not configured"
         raise ValueError(msg)
 
-    coll = await asyncio.to_thread(get_or_open_collection_sync)
+    coll = await asyncio.to_thread(get_or_open_collection_for_query_sync)
     model = settings.gemini_embedding_model
     dim = settings.gemini_embedding_dimensions
     api_key = settings.gemini_api_key or ""
