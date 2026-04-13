@@ -373,13 +373,18 @@ export type IndexProductEmbeddingsResult = {
 
 export async function indexProductEmbeddings(
   productId: number,
-  body: { product_name: string; items: ProductEmbeddingMediaItem[] },
+  body: {
+    product_name: string;
+    product_description?: string;
+    items: ProductEmbeddingMediaItem[];
+  },
 ): Promise<IndexProductEmbeddingsResult> {
   return sidecarJson<IndexProductEmbeddingsResult>("/api/products/embeddings/index", {
     method: "POST",
     body: JSON.stringify({
       product_id: productId,
       product_name: body.product_name,
+      product_description: body.product_description ?? "",
       items: body.items.map((x) => ({
         kind: x.kind,
         path: x.path,
@@ -412,6 +417,12 @@ export type ClipSuggestVoteRow = {
   vote_count: number;
 };
 
+export type ClipSuggestTextHit = {
+  product_id: number;
+  score: number;
+  product_name: string | null;
+};
+
 export type ClipSuggestProductResult = {
   matched: boolean;
   product_id: number | null;
@@ -425,23 +436,31 @@ export type ClipSuggestProductResult = {
   frames_searched: number;
   config_target_extracted_frames: number;
   config_max_score_threshold: number;
-  pick_method: "majority_vote" | "min_distance_tiebreak" | null;
+  suggest_weight_image: number;
+  suggest_weight_text: number;
+  suggest_min_fused_score: number;
+  pick_method: "majority_vote" | "min_distance_tiebreak" | "weighted_fusion" | null;
   votes_by_product: ClipSuggestVoteRow[];
   candidate_product_id: number | null;
   candidate_product_name: string | null;
   candidate_score: number | null;
   frame_rows: ClipSuggestFrameRow[];
+  text_search_hits: ClipSuggestTextHit[];
+  text_search_used: boolean;
+  fusion_method: string | null;
 };
 
 export async function suggestProductForClip(body: {
   video_path: string;
   thumbnail_path?: string | null;
+  transcript_text?: string | null;
 }): Promise<ClipSuggestProductResult> {
   return sidecarJson<ClipSuggestProductResult>("/api/clips/suggest-product", {
     method: "POST",
     body: JSON.stringify({
       video_path: body.video_path,
       thumbnail_path: body.thumbnail_path ?? null,
+      transcript_text: body.transcript_text ?? null,
     }),
   });
 }

@@ -100,9 +100,14 @@ async function maybeAutoTagClipAfterInsert(
       typeof data.thumbnail_path === "string" && data.thumbnail_path.trim() !== ""
         ? data.thumbnail_path
         : null;
+    const transcriptText =
+      typeof data.transcript_text === "string" && data.transcript_text.trim() !== ""
+        ? data.transcript_text
+        : null;
     const res = await api.suggestProductForClip({
       video_path: videoPath,
       thumbnail_path: thumbnailPath,
+      transcript_text: transcriptText,
     });
     if (res.product_id != null) {
       await api.tagClipProduct(clipId, res.product_id);

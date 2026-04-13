@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
+from typing import Literal
 
 import httpx
 from google import genai
@@ -10,12 +11,13 @@ from google.genai import types
 
 logger = logging.getLogger(__name__)
 
-# Gemini embedding API: semantic similarity aligns with product / clip matching.
-_EMBED_TASK_TYPE = "SEMANTIC_SIMILARITY"
-
 # Skip very large files to avoid OOM (video cap aligns with Gemini guidance).
 _MAX_EMBED_BYTES_IMAGE = 20 * 1024 * 1024
 _MAX_EMBED_BYTES_VIDEO = 80 * 1024 * 1024
+
+
+def _is_embedding_v2(model: str) -> bool:
+    return "embedding-2" in model.lower()
 
 
 def _mime_for_path(path: Path, kind: str) -> str:
@@ -47,25 +49,66 @@ def _embedding_values_from_response(resp: types.EmbedContentResponse) -> list[fl
     return [float(x) for x in vals]
 
 
-def _embed_config(output_dimensionality: int) -> types.EmbedContentConfig:
+def _embed_config_for_multimodal(
+    *,
+    output_dimensionality: int,
+    model: str,
+) -> types.EmbedContentConfig:
+    if _is_embedding_v2(model):
+        return types.EmbedContentConfig(output_dimensionality=output_dimensionality)
     return types.EmbedContentConfig(
         output_dimensionality=output_dimensionality,
-        task_type=_EMBED_TASK_TYPE,
+        task_type="SEMANTIC_SIMILARITY",
     )
+
+
+def _embed_config_for_text(
+    *,
+    output_dimensionality: int,
+    model: str,
+    role: Literal["query", "document"],
+    title: str | None,
+    raw_text: str,
+) -> tuple[str, types.EmbedContentConfig]:
+    """Return (contents, config) for embed_content."""
+    if _is_embedding_v2(model):
+        if role == "query":
+            return f"task: search result | query: {raw_text}", types.EmbedContentConfig(
+                output_dimensionality=output_dimensionality,
+            )
+        ti = (title or "").strip() or "none"
+        tb = raw_text.strip() or "none"
+        return f"title: {ti} | text: {tb}", types.EmbedContentConfig(
+            output_dimensionality=output_dimensionality,
+        )
+    if role == "query":
+        return raw_text, types.EmbedContentConfig(
+            output_dimensionality=output_dimensionality,
+            task_type="RETRIEVAL_QUERY",
+        )
+    body = raw_text.strip() or "none"
+    cfg = types.EmbedContentConfig(
+        output_dimensionality=output_dimensionality,
+        task_type="RETRIEVAL_DOCUMENT",
+    )
+    t = (title or "").strip()
+    if t:
+        cfg.title = t
+    return body, cfg
 
 
 def _embed_text_sync(
     *,
     api_key: str,
     model: str,
-    text: str,
-    output_dimensionality: int,
+    contents: str,
+    config: types.EmbedContentConfig,
 ) -> list[float]:
     client = genai.Client(api_key=api_key)
     result = client.models.embed_content(
         model=model,
-        contents=text.strip(),
-        config=_embed_config(output_dimensionality),
+        contents=contents,
+        config=config,
     )
     return _embedding_values_from_response(result)
 
@@ -84,10 +127,11 @@ def _embed_multimodal_sync(
     if text and text.strip():
         parts.append(types.Part(text=text.strip()))
     parts.append(types.Part.from_bytes(data=media_bytes, mime_type=mime_type))
+    cfg = _embed_config_for_multimodal(output_dimensionality=output_dimensionality, model=model)
     result = client.models.embed_content(
         model=model,
         contents=[types.Content(parts=parts)],
-        config=_embed_config(output_dimensionality),
+        config=cfg,
     )
     return _embedding_values_from_response(result)
 
@@ -99,17 +143,29 @@ async def embed_text(
     model: str,
     text: str,
     output_dimensionality: int,
+    role: Literal["query", "document"] = "query",
+    title: str | None = None,
 ) -> list[float]:
-    t = text.strip()
-    if not t:
+    raw = text.strip()
+    if role == "query" and not raw:
         msg = "Empty text for embedding"
         raise ValueError(msg)
+    if role == "document" and not raw and not (title or "").strip():
+        msg = "Empty document for embedding"
+        raise ValueError(msg)
+    contents, cfg = _embed_config_for_text(
+        output_dimensionality=output_dimensionality,
+        model=model,
+        role=role,
+        title=title,
+        raw_text=raw if raw else "",
+    )
     return await asyncio.to_thread(
         _embed_text_sync,
         api_key=api_key,
         model=model,
-        text=t,
-        output_dimensionality=output_dimensionality,
+        contents=contents,
+        config=cfg,
     )
 
 

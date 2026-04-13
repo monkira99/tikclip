@@ -1,4 +1,4 @@
-"""Match a new clip to a catalog product via frame embeddings + zvec (Gemini image embed)."""
+"""Match a clip to a product: image frames, optional STT text hybrid, weighted fusion."""
 
 from __future__ import annotations
 
@@ -10,11 +10,17 @@ from uuid import uuid4
 import httpx
 
 from config import settings
-from embeddings.product_vector import resolve_storage_media_path, search_by_media_path
+from embeddings.product_vector import (
+    SearchHit,
+    resolve_storage_media_path,
+    search_by_media_path,
+    search_by_transcript,
+)
 from embeddings.video_frames import cleanup_work_dir, extract_frames_evenly
 from models.schemas import (
     ClipSuggestFrameRow,
     ClipSuggestProductResponse,
+    ClipSuggestTextHit,
     ClipSuggestVoteRow,
 )
 
@@ -25,6 +31,9 @@ def _config_fields() -> dict:
     return {
         "config_target_extracted_frames": max(1, min(12, settings.auto_tag_clip_frame_count)),
         "config_max_score_threshold": float(settings.auto_tag_clip_max_score),
+        "suggest_weight_image": float(settings.suggest_weight_image),
+        "suggest_weight_text": float(settings.suggest_weight_text),
+        "suggest_min_fused_score": float(settings.suggest_min_fused_score),
     }
 
 
@@ -46,10 +55,44 @@ def _enabled() -> tuple[bool, str | None]:
     return True, None
 
 
+def _norm_image_scores(distances: dict[int, float]) -> dict[int, float]:
+    """Lower distance is better → higher norm in [0, 1]."""
+    if not distances:
+        return {}
+    max_d = max(distances.values())
+    if max_d <= 0:
+        return {pid: 1.0 for pid in distances}
+    return {pid: max(0.0, 1.0 - (d / max_d)) for pid, d in distances.items()}
+
+
+def _norm_text_scores(hits: list[SearchHit]) -> dict[int, float]:
+    if not hits:
+        return {}
+    max_s = max(h.score for h in hits)
+    if max_s <= 0:
+        return {h.product_id: 0.0 for h in hits}
+    return {h.product_id: h.score / max_s for h in hits}
+
+
+def _fuse(
+    image_norm: dict[int, float],
+    text_norm: dict[int, float],
+    w_img: float,
+    w_txt: float,
+) -> list[tuple[int, float]]:
+    pids = set(image_norm) | set(text_norm)
+    scored = [
+        (pid, w_img * image_norm.get(pid, 0.0) + w_txt * text_norm.get(pid, 0.0)) for pid in pids
+    ]
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return scored
+
+
 async def suggest_product_for_clip(
     *,
     video_path: str,
     thumbnail_path: str | None,
+    transcript_text: str | None,
     http: httpx.AsyncClient,
 ) -> ClipSuggestProductResponse:
     base = _config_fields()
@@ -75,12 +118,7 @@ async def suggest_product_for_clip(
 
     n = settings.auto_tag_clip_frame_count
     n = max(1, min(12, n))
-    logger.debug(
-        "suggest_product_for_clip start video=%s n_frames=%s has_thumb_path=%s",
-        str(video)[:120],
-        n,
-        bool(thumbnail_path and thumbnail_path.strip()),
-    )
+    transcript_s = (transcript_text or "").strip()
 
     frame_paths: list[Path] = []
     work_dir: Path | None = None
@@ -108,12 +146,28 @@ async def suggest_product_for_clip(
                 **base,
             )
 
-        logger.debug(
-            "suggest_product_for_clip frames total=%s thumb_included=%s extracted=%s",
-            len(frame_paths),
-            thumb_included,
-            len(extracted),
-        )
+        text_hits: list[SearchHit] = []
+        text_search_used = False
+        text_hit_rows: list[ClipSuggestTextHit] = []
+        if transcript_s:
+            try:
+                text_hits = await search_by_transcript(
+                    transcript=transcript_s,
+                    top_k=5,
+                    http=http,
+                )
+            except (RuntimeError, ValueError) as exc:
+                logger.debug("transcript search skipped: %s", exc)
+                text_hits = []
+            text_search_used = len(text_hits) > 0
+            text_hit_rows = [
+                ClipSuggestTextHit(
+                    product_id=h.product_id,
+                    score=h.score,
+                    product_name=h.product_name,
+                )
+                for h in text_hits
+            ]
 
         frame_rows: list[ClipSuggestFrameRow] = []
         top1: list[tuple[int, float, str | None]] = []
@@ -169,91 +223,171 @@ async def suggest_product_for_clip(
                 ),
             )
 
-        if not top1:
+        if not top1 and not text_hits:
             logger.debug(
-                "suggest_product_for_clip skip: no hits after searching %s frames",
+                "suggest_product_for_clip skip: no hits (frames=%s transcript=%s)",
                 len(frame_paths),
+                bool(transcript_s),
             )
             return ClipSuggestProductResponse(
                 frames_used=len(frame_paths),
                 frames_searched=frames_searched,
-                skipped_reason="no vector hits for extracted frames",
+                skipped_reason="no vector hits from frames or transcript",
                 video_relative_path=video_rel,
                 thumbnail_used=thumb_included,
                 extracted_frame_count=len(extracted),
                 frame_rows=frame_rows,
+                text_search_hits=text_hit_rows,
+                text_search_used=text_search_used,
                 **base,
             )
 
-        counts = Counter(pid for pid, _, _ in top1)
-        winner_pid, win_count = counts.most_common(1)[0]
-        half = (len(top1) + 1) // 2
-        if win_count < half:
-            best = min(top1, key=lambda t: t[1])
-            winner_pid, win_score, win_name = best[0], best[1], best[2]
-            pick = "min_distance_tiebreak"
-        else:
-            scores = [s for pid, s, _ in top1 if pid == winner_pid]
-            win_score = min(scores)
-            win_name = next((nm for pid, _, nm in top1 if pid == winner_pid), None)
-            pick = "majority_vote"
-
-        votes_by_product = [
-            ClipSuggestVoteRow(product_id=pid, vote_count=cnt) for pid, cnt in counts.most_common()
-        ]
-
-        logger.debug(
-            "suggest_product_for_clip votes=%s pick=%s winner_pid=%s win_score=%s",
-            dict(counts),
-            pick,
-            winner_pid,
-            win_score,
-        )
-
         max_dist = settings.auto_tag_clip_max_score
-        if win_score > max_dist:
-            logger.debug(
-                "suggest_product_for_clip skip: score %s > max_dist %s",
-                win_score,
-                max_dist,
-            )
+        w_img = settings.suggest_weight_image
+        w_txt = settings.suggest_weight_text
+        min_fused = settings.suggest_min_fused_score
+
+        # --- Image-only path (no usable text hits) ---
+        if not text_hits:
+            counts = Counter(pid for pid, _, _ in top1)
+            winner_pid, win_count = counts.most_common(1)[0]
+            half = (len(top1) + 1) // 2
+            if win_count < half:
+                best = min(top1, key=lambda t: t[1])
+                winner_pid, win_score, win_name = best[0], best[1], best[2]
+                pick = "min_distance_tiebreak"
+            else:
+                scores = [s for pid, s, _ in top1 if pid == winner_pid]
+                win_score = min(scores)
+                win_name = next((nm for pid, _, nm in top1 if pid == winner_pid), None)
+                pick = "majority_vote"
+
+            votes_by_product = [
+                ClipSuggestVoteRow(product_id=pid, vote_count=cnt)
+                for pid, cnt in counts.most_common()
+            ]
+
+            if win_score > max_dist:
+                return ClipSuggestProductResponse(
+                    frames_used=len(frame_paths),
+                    frames_searched=frames_searched,
+                    skipped_reason=(
+                        f"best match distance {win_score:.4f} above threshold {max_dist:.4f}"
+                    ),
+                    video_relative_path=video_rel,
+                    thumbnail_used=thumb_included,
+                    extracted_frame_count=len(extracted),
+                    pick_method=pick,
+                    votes_by_product=votes_by_product,
+                    candidate_product_id=winner_pid,
+                    candidate_product_name=win_name,
+                    candidate_score=win_score,
+                    frame_rows=frame_rows,
+                    text_search_hits=text_hit_rows,
+                    text_search_used=False,
+                    **base,
+                )
+
             return ClipSuggestProductResponse(
+                matched=True,
+                product_id=winner_pid,
+                product_name=win_name,
+                best_score=win_score,
                 frames_used=len(frame_paths),
                 frames_searched=frames_searched,
-                skipped_reason=(
-                    f"best match distance {win_score:.4f} above threshold {max_dist:.4f}"
-                ),
                 video_relative_path=video_rel,
                 thumbnail_used=thumb_included,
                 extracted_frame_count=len(extracted),
                 pick_method=pick,
                 votes_by_product=votes_by_product,
+                frame_rows=frame_rows,
+                text_search_hits=text_hit_rows,
+                text_search_used=False,
+                **base,
+            )
+
+        # --- Hybrid: text hits present; fuse with image when available ---
+        img_dist: dict[int, float] = {}
+        for pid, score, _ in top1:
+            img_dist[pid] = min(img_dist.get(pid, score), score)
+
+        img_norm = _norm_image_scores(img_dist)
+        txt_norm = _norm_text_scores(text_hits)
+        fused = _fuse(img_norm, txt_norm, w_img, w_txt)
+        winner_pid, fused_score = fused[0]
+        win_name = next((h.product_name for h in text_hits if h.product_id == winner_pid), None)
+        if win_name is None:
+            win_name = next((nm for pid, _, nm in top1 if pid == winner_pid), None)
+
+        counts = Counter(pid for pid, _, _ in top1)
+        votes_by_product = [
+            ClipSuggestVoteRow(product_id=pid, vote_count=cnt) for pid, cnt in counts.most_common()
+        ]
+
+        if fused_score < min_fused:
+            return ClipSuggestProductResponse(
+                frames_used=len(frame_paths),
+                frames_searched=frames_searched,
+                skipped_reason=(f"fused score {fused_score:.4f} below minimum {min_fused:.4f}"),
+                video_relative_path=video_rel,
+                thumbnail_used=thumb_included,
+                extracted_frame_count=len(extracted),
+                pick_method="weighted_fusion",
+                votes_by_product=votes_by_product,
                 candidate_product_id=winner_pid,
                 candidate_product_name=win_name,
-                candidate_score=win_score,
+                candidate_score=fused_score,
                 frame_rows=frame_rows,
+                text_search_hits=text_hit_rows,
+                text_search_used=True,
+                fusion_method="weighted_score",
+                **base,
+            )
+
+        if winner_pid in img_dist and img_dist[winner_pid] > max_dist:
+            return ClipSuggestProductResponse(
+                frames_used=len(frame_paths),
+                frames_searched=frames_searched,
+                skipped_reason=(
+                    f"hybrid winner image distance {img_dist[winner_pid]:.4f} "
+                    f"above threshold {max_dist:.4f}"
+                ),
+                video_relative_path=video_rel,
+                thumbnail_used=thumb_included,
+                extracted_frame_count=len(extracted),
+                pick_method="weighted_fusion",
+                votes_by_product=votes_by_product,
+                candidate_product_id=winner_pid,
+                candidate_product_name=win_name,
+                candidate_score=fused_score,
+                frame_rows=frame_rows,
+                text_search_hits=text_hit_rows,
+                text_search_used=True,
+                fusion_method="weighted_score",
                 **base,
             )
 
         logger.debug(
-            "suggest_product_for_clip match product_id=%s name=%r score=%s",
+            "suggest_product_for_clip hybrid match pid=%s fused=%.4f",
             winner_pid,
-            (win_name[:80] if win_name else None),
-            win_score,
+            fused_score,
         )
         return ClipSuggestProductResponse(
             matched=True,
             product_id=winner_pid,
             product_name=win_name,
-            best_score=win_score,
+            best_score=fused_score,
             frames_used=len(frame_paths),
             frames_searched=frames_searched,
             video_relative_path=video_rel,
             thumbnail_used=thumb_included,
             extracted_frame_count=len(extracted),
-            pick_method=pick,
+            pick_method="weighted_fusion",
             votes_by_product=votes_by_product,
             frame_rows=frame_rows,
+            text_search_hits=text_hit_rows,
+            text_search_used=True,
+            fusion_method="weighted_score",
             **base,
         )
     finally:

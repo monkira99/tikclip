@@ -9,6 +9,7 @@ from embeddings.product_vector import (
     MediaIndexItem,
     delete_vectors_for_product_sync,
     index_product_media,
+    index_product_text,
     search_by_media_path,
     search_by_text,
 )
@@ -99,9 +100,10 @@ async def fetch_product(body: FetchProductRequest):
 )
 async def index_product_embeddings(body: IndexProductEmbeddingsRequest):
     logger.debug(
-        "embeddings/index product_id=%s items=%s",
+        "embeddings/index product_id=%s items=%s desc_len=%s",
         body.product_id,
         len(body.items),
+        len(body.product_description.strip()) if body.product_description else 0,
     )
     items = [MediaIndexItem.model_validate(x.model_dump()) for x in body.items]
     async with httpx.AsyncClient() as client:
@@ -111,6 +113,17 @@ async def index_product_embeddings(body: IndexProductEmbeddingsRequest):
             items=items,
             http=client,
         )
+        if body.product_name.strip() or body.product_description.strip():
+            tsum = await index_product_text(
+                product_id=body.product_id,
+                product_name=body.product_name,
+                product_description=body.product_description,
+                http=client,
+            )
+            summary.indexed += tsum.indexed
+            summary.errors.extend(tsum.errors)
+            if tsum.message and not summary.message:
+                summary.message = tsum.message
     logger.debug(
         "embeddings/index done product_id=%s indexed=%s skipped=%s errors=%s msg=%r",
         body.product_id,

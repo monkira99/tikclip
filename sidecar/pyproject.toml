@@ -13,6 +13,8 @@ dependencies = [
     "pydantic-settings>=2.7",
     "scenedetect[opencv]>=0.6",
     "zvec>=0.3.0",
+    # BM25 sparse in zvec; wheels only for cp311/cp12 — on 3.13+ text search uses dense-only fallback.
+    "dashtext>=0.0.7; python_version < '3.13'",
     "google-genai>=1.0",
     "sherpa-onnx>=1.10.0",
     "huggingface-hub>=0.20.0",

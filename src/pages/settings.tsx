@@ -46,6 +46,9 @@ const DEFAULTS = {
   geminiEmbeddingDim: "1536",
   autoTagClipFrames: "4",
   autoTagClipMaxScore: "0.35",
+  suggestWeightImage: "0.6",
+  suggestWeightText: "0.4",
+  suggestMinFusedScore: "0.25",
   speechMergeGapSec: "0.5",
   speechCutToleranceSec: "1.5",
   sttNumThreads: "4",
@@ -73,6 +76,9 @@ const KEY_GEMINI_EMBEDDING_DIM = "gemini_embedding_dimensions";
 const KEY_AUTO_TAG_CLIP = "auto_tag_clip_product_enabled";
 const KEY_AUTO_TAG_FRAMES = "auto_tag_clip_frame_count";
 const KEY_AUTO_TAG_MAX_SCORE = "auto_tag_clip_max_score";
+const KEY_SUGGEST_WEIGHT_IMAGE = "suggest_weight_image";
+const KEY_SUGGEST_WEIGHT_TEXT = "suggest_weight_text";
+const KEY_SUGGEST_MIN_FUSED_SCORE = "suggest_min_fused_score";
 
 const KEY_RAW_RETENTION = "TIKCLIP_RAW_RETENTION_DAYS";
 const KEY_ARCHIVE_RETENTION = "TIKCLIP_ARCHIVE_RETENTION_DAYS";
@@ -197,6 +203,9 @@ export function SettingsPage() {
   const [autoTagClipProductEnabled, setAutoTagClipProductEnabled] = useState(false);
   const [autoTagClipFrameCount, setAutoTagClipFrameCount] = useState("");
   const [autoTagClipMaxScore, setAutoTagClipMaxScore] = useState("");
+  const [suggestWeightImage, setSuggestWeightImage] = useState("");
+  const [suggestWeightText, setSuggestWeightText] = useState("");
+  const [suggestMinFusedScore, setSuggestMinFusedScore] = useState("");
   const autoTagClipSwitchId = useId();
   const [audioProcessingEnabled, setAudioProcessingEnabled] = useState(true);
   const [speechMergeGapSec, setSpeechMergeGapSec] = useState("");
@@ -231,6 +240,9 @@ export function SettingsPage() {
           atEn,
           atFrames,
           atScore,
+          swImg,
+          swTxt,
+          smf,
           apEn,
           smg,
           sct,
@@ -258,6 +270,9 @@ export function SettingsPage() {
           getSetting(KEY_AUTO_TAG_CLIP),
           getSetting(KEY_AUTO_TAG_FRAMES),
           getSetting(KEY_AUTO_TAG_MAX_SCORE),
+          getSetting(KEY_SUGGEST_WEIGHT_IMAGE),
+          getSetting(KEY_SUGGEST_WEIGHT_TEXT),
+          getSetting(KEY_SUGGEST_MIN_FUSED_SCORE),
           getSetting(KEY_AUDIO_PROCESSING),
           getSetting(KEY_SPEECH_MERGE_GAP),
           getSetting(KEY_SPEECH_CUT_TOLERANCE),
@@ -292,6 +307,9 @@ export function SettingsPage() {
         setAutoTagClipProductEnabled(parseAutoTagClipProductEnabled(atEn));
         setAutoTagClipFrameCount(valueFromDb(atFrames, DEFAULTS.autoTagClipFrames));
         setAutoTagClipMaxScore(valueFromDb(atScore, DEFAULTS.autoTagClipMaxScore));
+        setSuggestWeightImage(valueFromDb(swImg, DEFAULTS.suggestWeightImage));
+        setSuggestWeightText(valueFromDb(swTxt, DEFAULTS.suggestWeightText));
+        setSuggestMinFusedScore(valueFromDb(smf, DEFAULTS.suggestMinFusedScore));
         setAudioProcessingEnabled(parseAudioProcessingEnabled(apEn));
         setSpeechMergeGapSec(valueFromDb(smg, DEFAULTS.speechMergeGapSec));
         setSpeechCutToleranceSec(valueFromDb(sct, DEFAULTS.speechCutToleranceSec));
@@ -508,6 +526,30 @@ export function SettingsPage() {
         return;
       }
     }
+    const wImgStr = suggestWeightImage.trim();
+    const wTxtStr = suggestWeightText.trim();
+    const minFusStr = suggestMinFusedScore.trim();
+    if (wImgStr) {
+      const n = Number(wImgStr);
+      if (!Number.isFinite(n) || n < 0 || n > 1) {
+        setError("Trọng số ảnh (fusion) phải từ 0 đến 1.");
+        return;
+      }
+    }
+    if (wTxtStr) {
+      const n = Number(wTxtStr);
+      if (!Number.isFinite(n) || n < 0 || n > 1) {
+        setError("Trọng số chữ (fusion) phải từ 0 đến 1.");
+        return;
+      }
+    }
+    if (minFusStr) {
+      const n = Number(minFusStr);
+      if (!Number.isFinite(n) || n < 0 || n > 1) {
+        setError("Ngưỡng điểm fusion tối thiểu phải từ 0 đến 1.");
+        return;
+      }
+    }
     setSaving("product_vector");
     try {
       await setSetting(KEY_PRODUCT_VECTOR, productVectorEnabled ? "1" : "0");
@@ -517,6 +559,9 @@ export function SettingsPage() {
       await setSetting(KEY_AUTO_TAG_CLIP, autoTagClipProductEnabled ? "1" : "0");
       await setSetting(KEY_AUTO_TAG_FRAMES, framesStr);
       await setSetting(KEY_AUTO_TAG_MAX_SCORE, scoreStr);
+      await setSetting(KEY_SUGGEST_WEIGHT_IMAGE, wImgStr);
+      await setSetting(KEY_SUGGEST_WEIGHT_TEXT, wTxtStr);
+      await setSetting(KEY_SUGGEST_MIN_FUSED_SCORE, minFusStr);
       await restartSidecar();
       await resyncSidecarWatchers();
       const fresh = await getAppDataPaths();
@@ -538,6 +583,9 @@ export function SettingsPage() {
     autoTagClipProductEnabled,
     autoTagClipFrameCount,
     autoTagClipMaxScore,
+    suggestWeightImage,
+    suggestWeightText,
+    suggestMinFusedScore,
   ]);
 
   const saveClips = useCallback(async () => {
@@ -1058,6 +1106,47 @@ export function SettingsPage() {
                   value={autoTagClipMaxScore}
                   onChange={(e) => setAutoTagClipMaxScore(e.target.value)}
                   placeholder={DEFAULTS.autoTagClipMaxScore}
+                />
+              </div>
+            </div>
+            <p className="text-xs text-[var(--color-text-muted)]">
+              Khi có transcript (STT): kết hợp ảnh + chữ. Trọng số 0–1; tổng không bắt buộc = 1.
+            </p>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="space-y-2">
+                <Label htmlFor="suggest_w_img">Trọng số ảnh</Label>
+                <Input
+                  id="suggest_w_img"
+                  type="text"
+                  inputMode="decimal"
+                  className={fieldSurface}
+                  value={suggestWeightImage}
+                  onChange={(e) => setSuggestWeightImage(e.target.value)}
+                  placeholder={DEFAULTS.suggestWeightImage}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="suggest_w_txt">Trọng số chữ (STT)</Label>
+                <Input
+                  id="suggest_w_txt"
+                  type="text"
+                  inputMode="decimal"
+                  className={fieldSurface}
+                  value={suggestWeightText}
+                  onChange={(e) => setSuggestWeightText(e.target.value)}
+                  placeholder={DEFAULTS.suggestWeightText}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="suggest_min_fused">Ngưỡng fusion tối thiểu</Label>
+                <Input
+                  id="suggest_min_fused"
+                  type="text"
+                  inputMode="decimal"
+                  className={fieldSurface}
+                  value={suggestMinFusedScore}
+                  onChange={(e) => setSuggestMinFusedScore(e.target.value)}
+                  placeholder={DEFAULTS.suggestMinFusedScore}
                 />
               </div>
             </div>

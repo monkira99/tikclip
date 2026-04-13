@@ -203,6 +203,24 @@ pub fn build_sidecar_env(
         "auto_tag_clip_max_score",
         "TIKCLIP_AUTO_TAG_CLIP_MAX_SCORE",
     )?;
+    push_float_if_valid(
+        &mut env,
+        conn,
+        "suggest_weight_image",
+        "TIKCLIP_SUGGEST_WEIGHT_IMAGE",
+    )?;
+    push_float_if_valid(
+        &mut env,
+        conn,
+        "suggest_weight_text",
+        "TIKCLIP_SUGGEST_WEIGHT_TEXT",
+    )?;
+    push_float_if_valid(
+        &mut env,
+        conn,
+        "suggest_min_fused_score",
+        "TIKCLIP_SUGGEST_MIN_FUSED_SCORE",
+    )?;
 
     push_bool_setting(
         &mut env,
@@ -222,21 +240,13 @@ pub fn build_sidecar_env(
         "speech_cut_tolerance_sec",
         "TIKCLIP_SPEECH_CUT_TOLERANCE_SEC",
     )?;
-    push_int_if_valid(
-        &mut env,
-        conn,
-        "stt_num_threads",
-        "TIKCLIP_STT_NUM_THREADS",
-    )?;
+    push_int_if_valid(&mut env, conn, "stt_num_threads", "TIKCLIP_STT_NUM_THREADS")?;
     push_stt_quantize(&mut env, conn)?;
 
     Ok(env)
 }
 
-fn push_stt_quantize(
-    env: &mut Vec<(String, String)>,
-    conn: &Connection,
-) -> Result<(), String> {
+fn push_stt_quantize(env: &mut Vec<(String, String)>, conn: &Connection) -> Result<(), String> {
     if let Some(t) = get_setting_trimmed(conn, "stt_quantize").map_err(|e| e.to_string())? {
         let lower = t.to_ascii_lowercase();
         let v = match lower.as_str() {

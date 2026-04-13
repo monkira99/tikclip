@@ -178,23 +178,28 @@ async def suggest_product_for_clip_route(body: ClipSuggestProductRequest):
         raise HTTPException(status_code=400, detail="video_path is required")
     thumb_raw = body.thumbnail_path
     thumb_s = thumb_raw.strip() if thumb_raw else ""
+    tr_raw = body.transcript_text
+    tr_s = tr_raw.strip() if tr_raw else ""
     logger.debug(
-        "suggest-product start video=%s thumb=%s",
+        "suggest-product start video=%s thumb=%s transcript_len=%s",
         video[:120],
         (thumb_s[:120] if thumb_s else ""),
+        len(tr_s),
     )
     async with httpx.AsyncClient() as client:
         result = await suggest_product_for_clip(
             video_path=video,
             thumbnail_path=(thumb_s if thumb_s else None),
+            transcript_text=(tr_s if tr_s else None),
             http=client,
         )
     logger.debug(
-        "suggest-product done matched=%s product_id=%s score=%s frames=%s skip=%r",
+        "suggest-product done matched=%s product_id=%s score=%s frames=%s text_used=%s skip=%r",
         result.matched,
         result.product_id,
         result.best_score,
         result.frames_used,
+        result.text_search_used,
         result.skipped_reason,
     )
     return result

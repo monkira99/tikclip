@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import logging
 import threading
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import httpx
 import zvec
@@ -15,12 +16,21 @@ from embeddings import gemini
 
 logger = logging.getLogger(__name__)
 
+# dashtext: cp311-cp312 wheels only; else dense-only text search.
+_HAS_DASHTEXT = importlib.util.find_spec("dashtext") is not None
+_BM25_EMBED_FN: Any = getattr(zvec, "BM25EmbeddingFunction", None)
+
 VECTOR_SUBDIR = Path("vector") / "product_media"
+_TEXT_PATH_PLACEHOLDER = "__text__"
 
 _coll_lock = threading.Lock()
 _coll_cache: dict[str, zvec.Collection] = {}
 
-# Recommended in zvec docs: mmap for local collections; read-write for upsert/delete.
+_bm25_lock = threading.Lock()
+_bm25_doc: Any = None
+_bm25_query: Any = None
+_bm25_corpus_size: int = 0
+
 _COLLECTION_RW = zvec.CollectionOption(read_only=False, enable_mmap=True)
 _COLLECTION_RO = zvec.CollectionOption(read_only=True, enable_mmap=True)
 
@@ -51,6 +61,14 @@ def _embedding_dimension_from_schema(schema: Any) -> int:
     raise RuntimeError(msg)
 
 
+def _collection_has_hybrid_text_vectors(schema: Any) -> bool:
+    vecs = schema.vectors
+    if not isinstance(vecs, list):
+        return False
+    names = {v.name for v in vecs}
+    return "text_dense" in names and "text_sparse" in names
+
+
 def _build_schema(dim: int) -> zvec.CollectionSchema:
     return zvec.CollectionSchema(
         name="product_media",
@@ -65,14 +83,36 @@ def _build_schema(dim: int) -> zvec.CollectionSchema:
             zvec.FieldSchema("source_url", zvec.DataType.STRING, nullable=True),
             zvec.FieldSchema("product_name", zvec.DataType.STRING, nullable=True),
             zvec.FieldSchema("modality", zvec.DataType.STRING, nullable=False),
+            zvec.FieldSchema("product_text", zvec.DataType.STRING, nullable=True),
+            zvec.FieldSchema("product_description", zvec.DataType.STRING, nullable=True),
         ],
-        vectors=zvec.VectorSchema(
-            "embedding",
-            zvec.DataType.VECTOR_FP32,
-            dim,
-            index_param=zvec.HnswIndexParam(metric_type=zvec.MetricType.COSINE),
-        ),
+        vectors=[
+            zvec.VectorSchema(
+                "embedding",
+                zvec.DataType.VECTOR_FP32,
+                dim,
+                index_param=zvec.HnswIndexParam(metric_type=zvec.MetricType.COSINE),
+            ),
+            zvec.VectorSchema(
+                "text_dense",
+                zvec.DataType.VECTOR_FP32,
+                dim,
+                index_param=zvec.HnswIndexParam(metric_type=zvec.MetricType.COSINE),
+            ),
+            zvec.VectorSchema(
+                "text_sparse",
+                zvec.DataType.SPARSE_VECTOR_FP32,
+            ),
+        ],
     )
+
+
+def _zeros(dim: int) -> list[float]:
+    return [0.0] * dim
+
+
+def _empty_sparse() -> dict[int, float]:
+    return {}
 
 
 def resolve_storage_media_path(raw: str) -> Path:
@@ -85,6 +125,80 @@ def resolve_storage_media_path(raw: str) -> Path:
         msg = "Media path must be under storage root"
         raise ValueError(msg) from exc
     return p
+
+
+def _require_hybrid_schema(coll: zvec.Collection) -> None:
+    if not _collection_has_hybrid_text_vectors(coll.schema):
+        msg = (
+            "Product vector store uses an older schema without text hybrid vectors. "
+            f"Delete the folder {_vector_root()} and re-index products."
+        )
+        raise ValueError(msg)
+
+
+def _load_corpus_texts(coll: zvec.Collection) -> list[str]:
+    docs = coll.query(
+        filter="product_text IS NOT NULL",
+        topk=10000,
+        output_fields=["product_text"],
+    )
+    out: list[str] = []
+    for d in docs:
+        fields = d.fields or {}
+        pt = fields.get("product_text")
+        if pt is not None and str(pt).strip():
+            out.append(str(pt).strip())
+    return out
+
+
+def _rebuild_bm25(coll: zvec.Collection) -> None:
+    global _bm25_doc, _bm25_query, _bm25_corpus_size
+    if not _HAS_DASHTEXT:
+        _bm25_doc = None
+        _bm25_query = None
+        _bm25_corpus_size = 0
+        return
+    corpus = _load_corpus_texts(coll)
+    if not corpus:
+        _bm25_doc = None
+        _bm25_query = None
+        _bm25_corpus_size = 0
+        return
+    _bm25_doc = _BM25_EMBED_FN(
+        corpus=corpus,
+        encoding_type="document",
+        language="en",
+    )
+    _bm25_query = _BM25_EMBED_FN(
+        corpus=corpus,
+        encoding_type="query",
+        language="en",
+    )
+    _bm25_corpus_size = len(corpus)
+
+
+def invalidate_bm25_cache() -> None:
+    global _bm25_doc, _bm25_query, _bm25_corpus_size
+    with _bm25_lock:
+        _bm25_doc = None
+        _bm25_query = None
+        _bm25_corpus_size = 0
+
+
+def ensure_bm25_ready(coll: zvec.Collection) -> tuple[Any, Any]:
+    _require_hybrid_schema(coll)
+    if not _HAS_DASHTEXT:
+        msg = "BM25 hybrid requires dashtext (CPython 3.11-3.12); use dense-only build"
+        raise RuntimeError(msg)
+    with _bm25_lock:
+        corpus_now = len(_load_corpus_texts(coll))
+        if _bm25_doc is not None and _bm25_query is not None and _bm25_corpus_size == corpus_now:
+            return _bm25_doc, _bm25_query
+        _rebuild_bm25(coll)
+        if _bm25_doc is None or _bm25_query is None:
+            msg = "No product text indexed yet; cannot run BM25"
+            raise RuntimeError(msg)
+        return _bm25_doc, _bm25_query
 
 
 def get_or_open_collection_sync() -> zvec.Collection:
@@ -110,7 +224,6 @@ def get_or_open_collection_sync() -> zvec.Collection:
         if cached is not None:
             return cached
 
-        # Drop any read-only handle so this process can take an exclusive RW lock.
         _coll_cache.pop(rok, None)
 
         root.parent.mkdir(parents=True, exist_ok=True)
@@ -122,6 +235,12 @@ def get_or_open_collection_sync() -> zvec.Collection:
                 msg = (
                     f"zvec collection dimension is {got} but settings request {dim}; "
                     "delete the vector folder or match gemini_embedding_dimensions."
+                )
+                raise ValueError(msg)
+            if not _collection_has_hybrid_text_vectors(coll.schema):
+                msg = (
+                    "Product vector index was created before hybrid text search. "
+                    f"Delete {_vector_root()} and re-index products to upgrade."
                 )
                 raise ValueError(msg)
         else:
@@ -141,7 +260,6 @@ def get_or_open_collection_sync() -> zvec.Collection:
 
 
 def get_or_open_collection_for_query_sync() -> zvec.Collection:
-    """Open the product vector store for search only (shared read lock)."""
     if not settings.product_vector_enabled:
         msg = "Product vector indexing is disabled in settings"
         raise RuntimeError(msg)
@@ -179,6 +297,12 @@ def get_or_open_collection_for_query_sync() -> zvec.Collection:
                 "delete the vector folder or match gemini_embedding_dimensions."
             )
             raise ValueError(msg)
+        if not _collection_has_hybrid_text_vectors(coll.schema):
+            msg = (
+                "Product vector index was created before hybrid text search. "
+                f"Delete {_vector_root()} and re-index products to upgrade."
+            )
+            raise ValueError(msg)
 
         _coll_cache[rok] = coll
         return coll
@@ -206,6 +330,7 @@ def delete_vectors_for_product_sync(product_id: int) -> None:
     try:
         coll.delete_by_filter(f"product_id = {int(product_id)}")
         coll.flush()
+        invalidate_bm25_cache()
     except Exception as exc:
         logger.warning("vector delete failed for product_id=%s: %s", product_id, exc)
 
@@ -215,6 +340,12 @@ class IndexSummary(BaseModel):
     skipped: int = 0
     errors: list[str] = []
     message: str | None = None
+
+
+def _delete_media_docs_for_product_sync(coll: zvec.Collection, product_id: int) -> None:
+    coll.delete_by_filter(
+        f"(product_id = {int(product_id)}) AND (modality = 'image' OR modality = 'video')",
+    )
 
 
 async def index_product_media(
@@ -239,19 +370,21 @@ async def index_product_media(
     if not items:
         return IndexSummary(indexed=0, skipped=0, message="No media items to index")
 
-    def _open_and_clear() -> zvec.Collection:
+    def _open_and_clear_media() -> zvec.Collection:
         coll = get_or_open_collection_sync()
-        coll.delete_by_filter(f"product_id = {int(product_id)}")
+        _delete_media_docs_for_product_sync(coll, product_id)
         return coll
 
     try:
-        coll = await asyncio.to_thread(_open_and_clear)
+        coll = await asyncio.to_thread(_open_and_clear_media)
     except (RuntimeError, ValueError) as exc:
         return IndexSummary(errors=[str(exc)], message=str(exc))
 
     model = settings.gemini_embedding_model
     dim = settings.gemini_embedding_dimensions
     api_key = settings.gemini_api_key or ""
+    zd = _zeros(dim)
+    zs = _empty_sparse()
     indexed = 0
     skipped = 0
     errors: list[str] = []
@@ -299,13 +432,15 @@ async def index_product_media(
         docs.append(
             zvec.Doc(
                 id=doc_id,
-                vectors={"embedding": vec},
+                vectors=cast(Any, {"embedding": vec, "text_dense": zd, "text_sparse": zs}),
                 fields={
                     "product_id": int(product_id),
                     "image_path": str(fs_path),
                     "source_url": src or None,
                     "product_name": pname or None,
                     "modality": item.kind,
+                    "product_text": None,
+                    "product_description": None,
                 },
             ),
         )
@@ -335,6 +470,104 @@ async def index_product_media(
     )
 
 
+async def index_product_text(
+    *,
+    product_id: int,
+    product_name: str,
+    product_description: str,
+    http: httpx.AsyncClient,
+) -> IndexSummary:
+    if not settings.product_vector_enabled:
+        return IndexSummary(message="Product vector indexing is disabled in settings")
+    if not settings.gemini_api_key:
+        return IndexSummary(message="Gemini API key is not configured")
+
+    name = (product_name or "").strip()
+    desc = (product_description or "").strip()
+    if not name and not desc:
+        return IndexSummary(message="No product name or description to index")
+
+    try:
+        coll = await asyncio.to_thread(get_or_open_collection_sync)
+    except (RuntimeError, ValueError) as exc:
+        return IndexSummary(errors=[str(exc)], message=str(exc))
+
+    model = settings.gemini_embedding_model
+    dim = settings.gemini_embedding_dimensions
+    api_key = settings.gemini_api_key or ""
+    raw_text = f"{name} {desc}".strip()
+
+    try:
+        dense_vec = await gemini.embed_text(
+            http,
+            api_key=api_key,
+            model=model,
+            text=desc,
+            output_dimensionality=dim,
+            role="document",
+            title=name or None,
+        )
+    except (OSError, ValueError) as exc:
+        return IndexSummary(errors=[str(exc)], message="Dense text embedding failed")
+
+    if len(dense_vec) != dim:
+        msg = f"Text embedding length {len(dense_vec)} != configured {dim}"
+        return IndexSummary(errors=[msg], message=msg)
+
+    def _sparse_upsert() -> None:
+        coll.delete_by_filter(
+            f"(product_id = {int(product_id)}) AND (modality = 'text')",
+        )
+        zd = _zeros(dim)
+        zs = _empty_sparse()
+        if _HAS_DASHTEXT:
+            corpus_remaining = _load_corpus_texts(coll)
+            full_corpus = [*corpus_remaining, raw_text]
+            bm25_doc = _BM25_EMBED_FN(
+                corpus=full_corpus,
+                encoding_type="document",
+                language="en",
+            )
+            sparse_vec = bm25_doc.embed(raw_text)
+        else:
+            sparse_vec = zs
+        doc_id = f"t{product_id}"
+        coll.upsert(
+            [
+                zvec.Doc(
+                    id=doc_id,
+                    vectors=cast(
+                        Any,
+                        {
+                            "embedding": zd,
+                            "text_dense": dense_vec,
+                            "text_sparse": sparse_vec,
+                        },
+                    ),
+                    fields={
+                        "product_id": int(product_id),
+                        "image_path": _TEXT_PATH_PLACEHOLDER,
+                        "source_url": None,
+                        "product_name": name or None,
+                        "modality": "text",
+                        "product_text": raw_text,
+                        "product_description": desc or None,
+                    },
+                ),
+            ],
+        )
+        coll.flush()
+        invalidate_bm25_cache()
+
+    try:
+        await asyncio.to_thread(_sparse_upsert)
+    except Exception as exc:
+        logger.exception("zvec text upsert failed for product %s", product_id)
+        return IndexSummary(errors=[str(exc)], message="Text vector upsert failed")
+
+    return IndexSummary(indexed=1)
+
+
 class SearchHit(BaseModel):
     product_id: int
     score: float
@@ -344,52 +577,7 @@ class SearchHit(BaseModel):
     modality: str | None = None
 
 
-async def search_by_text(
-    *,
-    query: str,
-    top_k: int,
-    http: httpx.AsyncClient,
-) -> list[SearchHit]:
-    if not settings.product_vector_enabled:
-        msg = "Product vector search is disabled in settings"
-        raise ValueError(msg)
-    if not settings.gemini_api_key:
-        msg = "Gemini API key is not configured"
-        raise ValueError(msg)
-
-    def _open() -> zvec.Collection:
-        return get_or_open_collection_for_query_sync()
-
-    coll = await asyncio.to_thread(_open)
-    model = settings.gemini_embedding_model
-    dim = settings.gemini_embedding_dimensions
-    api_key = settings.gemini_api_key or ""
-
-    vec = await gemini.embed_text(
-        http,
-        api_key=api_key,
-        model=model,
-        text=query,
-        output_dimensionality=dim,
-    )
-    if len(vec) != dim:
-        msg = f"Query embedding length {len(vec)} != configured {dim}"
-        raise ValueError(msg)
-
-    def _run_query() -> list[zvec.Doc]:
-        return coll.query(
-            vectors=zvec.VectorQuery("embedding", vector=vec),
-            topk=top_k,
-            output_fields=[
-                "product_id",
-                "image_path",
-                "source_url",
-                "product_name",
-                "modality",
-            ],
-        )
-
-    raw = await asyncio.to_thread(_run_query)
+def _docs_to_hits(raw: list[zvec.Doc]) -> list[SearchHit]:
     out: list[SearchHit] = []
     for doc in raw:
         fields = doc.fields or {}
@@ -408,6 +596,77 @@ async def search_by_text(
             ),
         )
     return out
+
+
+async def search_by_text(
+    *,
+    query: str,
+    top_k: int,
+    http: httpx.AsyncClient,
+) -> list[SearchHit]:
+    if not settings.product_vector_enabled:
+        msg = "Product vector search is disabled in settings"
+        raise ValueError(msg)
+    if not settings.gemini_api_key:
+        msg = "Gemini API key is not configured"
+        raise ValueError(msg)
+
+    coll = await asyncio.to_thread(get_or_open_collection_for_query_sync)
+    model = settings.gemini_embedding_model
+    dim = settings.gemini_embedding_dimensions
+    api_key = settings.gemini_api_key or ""
+
+    q = query.strip()
+    if not q:
+        return []
+
+    dense_vec = await gemini.embed_text(
+        http,
+        api_key=api_key,
+        model=model,
+        text=q,
+        output_dimensionality=dim,
+        role="query",
+    )
+    if len(dense_vec) != dim:
+        msg = f"Query embedding length {len(dense_vec)} != configured {dim}"
+        raise ValueError(msg)
+
+    def _run_query() -> list[zvec.Doc]:
+        if _HAS_DASHTEXT:
+            _, bm25_q = ensure_bm25_ready(coll)
+            sparse_vec = bm25_q.embed(q)
+            return coll.query(
+                vectors=[
+                    zvec.VectorQuery("text_dense", vector=dense_vec),
+                    zvec.VectorQuery("text_sparse", vector=sparse_vec),
+                ],
+                reranker=zvec.RrfReRanker(topn=top_k),
+                filter="modality = 'text'",
+                topk=top_k,
+                output_fields=[
+                    "product_id",
+                    "image_path",
+                    "source_url",
+                    "product_name",
+                    "modality",
+                ],
+            )
+        return coll.query(
+            vectors=zvec.VectorQuery("text_dense", vector=dense_vec),
+            filter="modality = 'text'",
+            topk=top_k,
+            output_fields=[
+                "product_id",
+                "image_path",
+                "source_url",
+                "product_name",
+                "modality",
+            ],
+        )
+
+    raw = await asyncio.to_thread(_run_query)
+    return _docs_to_hits(raw)
 
 
 async def search_by_media_path(
@@ -446,6 +705,7 @@ async def search_by_media_path(
         return coll.query(
             vectors=zvec.VectorQuery("embedding", vector=vec),
             topk=top_k,
+            filter="(modality = 'image' OR modality = 'video')",
             output_fields=[
                 "product_id",
                 "image_path",
@@ -456,21 +716,75 @@ async def search_by_media_path(
         )
 
     raw = await asyncio.to_thread(_run_query)
-    out: list[SearchHit] = []
-    for doc in raw:
-        fields = doc.fields or {}
-        pid = fields.get("product_id")
-        if pid is None:
-            continue
-        score = float(doc.score) if doc.score is not None else 0.0
-        out.append(
-            SearchHit(
-                product_id=int(pid),
-                score=score,
-                image_path=str(fields.get("image_path") or ""),
-                source_url=(str(fields["source_url"]) if fields.get("source_url") else None),
-                product_name=(str(fields["product_name"]) if fields.get("product_name") else None),
-                modality=(str(fields["modality"]) if fields.get("modality") else None),
-            ),
+    return _docs_to_hits(raw)
+
+
+async def search_by_transcript(
+    *,
+    transcript: str,
+    top_k: int,
+    http: httpx.AsyncClient,
+) -> list[SearchHit]:
+    if not settings.product_vector_enabled:
+        msg = "Product vector search is disabled in settings"
+        raise ValueError(msg)
+    if not settings.gemini_api_key:
+        msg = "Gemini API key is not configured"
+        raise ValueError(msg)
+
+    t = transcript.strip()
+    if not t:
+        return []
+
+    coll = await asyncio.to_thread(get_or_open_collection_for_query_sync)
+    model = settings.gemini_embedding_model
+    dim = settings.gemini_embedding_dimensions
+    api_key = settings.gemini_api_key or ""
+
+    dense_vec = await gemini.embed_text(
+        http,
+        api_key=api_key,
+        model=model,
+        text=t,
+        output_dimensionality=dim,
+        role="query",
+    )
+    if len(dense_vec) != dim:
+        msg = f"Query embedding length {len(dense_vec)} != configured {dim}"
+        raise ValueError(msg)
+
+    def _run_query() -> list[zvec.Doc]:
+        if _HAS_DASHTEXT:
+            _, bm25_q = ensure_bm25_ready(coll)
+            sparse_vec = bm25_q.embed(t)
+            return coll.query(
+                vectors=[
+                    zvec.VectorQuery("text_dense", vector=dense_vec),
+                    zvec.VectorQuery("text_sparse", vector=sparse_vec),
+                ],
+                reranker=zvec.RrfReRanker(topn=top_k),
+                filter="modality = 'text'",
+                topk=top_k,
+                output_fields=[
+                    "product_id",
+                    "image_path",
+                    "source_url",
+                    "product_name",
+                    "modality",
+                ],
+            )
+        return coll.query(
+            vectors=zvec.VectorQuery("text_dense", vector=dense_vec),
+            filter="modality = 'text'",
+            topk=top_k,
+            output_fields=[
+                "product_id",
+                "image_path",
+                "source_url",
+                "product_name",
+                "modality",
+            ],
         )
-    return out
+
+    raw = await asyncio.to_thread(_run_query)
+    return _docs_to_hits(raw)

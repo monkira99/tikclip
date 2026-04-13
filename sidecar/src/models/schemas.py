@@ -197,6 +197,7 @@ class ProductEmbeddingMediaItem(BaseModel):
 class IndexProductEmbeddingsRequest(BaseModel):
     product_id: int = Field(ge=1)
     product_name: str = ""
+    product_description: str = ""
     items: list[ProductEmbeddingMediaItem] = Field(default_factory=list)
 
 
@@ -247,6 +248,13 @@ class ProductEmbeddingSearchResponse(BaseModel):
 class ClipSuggestProductRequest(BaseModel):
     video_path: str
     thumbnail_path: str | None = None
+    transcript_text: str | None = None
+
+
+class ClipSuggestTextHit(BaseModel):
+    product_id: int
+    score: float
+    product_name: str | None = None
 
 
 class ClipSuggestVoteRow(BaseModel):
@@ -280,7 +288,10 @@ class ClipSuggestProductResponse(BaseModel):
     frames_searched: int = 0
     config_target_extracted_frames: int = 0
     config_max_score_threshold: float = 0.0
-    pick_method: Literal["majority_vote", "min_distance_tiebreak"] | None = None
+    suggest_weight_image: float = 0.6
+    suggest_weight_text: float = 0.4
+    suggest_min_fused_score: float = 0.25
+    pick_method: Literal["majority_vote", "min_distance_tiebreak", "weighted_fusion"] | None = None
     votes_by_product: list[ClipSuggestVoteRow] = Field(
         default_factory=list,
         description="Votes over frames that had a vector hit (top-1 product per frame).",
@@ -292,3 +303,6 @@ class ClipSuggestProductResponse(BaseModel):
         description="Set when a winner was chosen but rejected (score above threshold).",
     )
     frame_rows: list[ClipSuggestFrameRow] = Field(default_factory=list)
+    text_search_hits: list[ClipSuggestTextHit] = Field(default_factory=list)
+    text_search_used: bool = False
+    fusion_method: str | None = None

@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     auto_tag_clip_product_enabled: bool = False
     auto_tag_clip_frame_count: int = 4
     auto_tag_clip_max_score: float = 0.35
+    # Weighted fusion for hybrid suggest (image frames + STT text). Used when transcript is present.
+    suggest_weight_image: float = 0.6
+    suggest_weight_text: float = 0.4
+    # Minimum normalized fused score (0-1) to accept a hybrid match.
+    suggest_min_fused_score: float = 0.25
 
     # Audio: VAD + STT (sherpa-onnx, gipformer ONNX). Models under models_path.
     audio_processing_enabled: bool = True

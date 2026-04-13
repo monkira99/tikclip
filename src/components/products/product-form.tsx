@@ -231,7 +231,11 @@ export function ProductForm({
           }))
           .filter((x) => x.path.length > 0);
         if (items.length > 0) {
-          void indexProductEmbeddings(savedId, { product_name: name, items }).catch(() => {
+          void indexProductEmbeddings(savedId, {
+            product_name: name,
+            product_description: form.description,
+            items,
+          }).catch(() => {
             /* optional: indexing disabled or sidecar error */
           });
         }
