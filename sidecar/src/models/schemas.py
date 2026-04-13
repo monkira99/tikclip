@@ -74,6 +74,14 @@ class ClipOutput(BaseModel):
     start_sec: float
     end_sec: float
     duration_sec: float
+    transcript_text: str | None = None
+
+
+class SpeechSegmentOutput(BaseModel):
+    start_sec: float
+    end_sec: float
+    text: str
+    confidence: float | None = None
 
 
 class ProcessingStatusResponse(BaseModel):
@@ -84,6 +92,25 @@ class ProcessingStatusResponse(BaseModel):
     progress_percent: float = 0.0
     clips: list[ClipOutput] = Field(default_factory=list)
     error_message: str | None = None
+    speech_segments: list[SpeechSegmentOutput] = Field(default_factory=list)
+
+
+class AudioProcessingStatusResponse(BaseModel):
+    recording_id: str
+    status: str
+    progress_percent: float = 0.0
+    total_segments: int = 0
+    segments: list[SpeechSegmentOutput] = Field(default_factory=list)
+    error_message: str | None = None
+
+
+class ModelStatusResponse(BaseModel):
+    vad_ready: bool = False
+    stt_ready: bool = False
+    stt_quantize: str = "unknown"
+    vad_model_path: str | None = None
+    stt_model_dir: str | None = None
+    stt_loaded: bool = False
 
 
 class ProcessVideoAcceptedResponse(BaseModel):
