@@ -2,7 +2,10 @@ export type AccountType = "own" | "monitored";
 export type AccountStatus = "live" | "offline" | "recording";
 export type RecordingStatus = "recording" | "done" | "error" | "processing";
 export type ClipStatus = "draft" | "ready" | "posted" | "archived";
+export type ClipCaptionStatus = "pending" | "generating" | "completed" | "failed";
 export type SceneType = "product_intro" | "highlight" | "general";
+export type FlowNodeKey = "start" | "record" | "clip" | "caption" | "upload";
+export type FlowStatus = "idle" | "watching" | "recording" | "processing" | "error" | "disabled";
 
 export interface Account {
   id: number;
@@ -76,9 +79,64 @@ export interface Clip {
   scene_type: SceneType | null;
   ai_tags_json: string | null;
   notes: string | null;
+  flow_id: number | null;
   transcript_text?: string | null;
+  caption_text: string | null;
+  caption_status: ClipCaptionStatus;
+  caption_error: string | null;
+  caption_generated_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface FlowNodeConfig {
+  id: number;
+  flow_id: number;
+  node_key: FlowNodeKey;
+  config_json: string;
+  updated_at: string;
+}
+
+export interface FlowSummary {
+  id: number;
+  account_id: number;
+  account_username: string;
+  name: string;
+  enabled: boolean;
+  status: FlowStatus;
+  current_node: FlowNodeKey | null;
+  last_live_at: string | null;
+  last_run_at: string | null;
+  last_error: string | null;
+  recordings_count: number;
+  clips_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FlowDetail {
+  flow: {
+    id: number;
+    account_id: number;
+    name: string;
+    enabled: boolean;
+    status: FlowStatus;
+    current_node: FlowNodeKey | null;
+    last_live_at: string | null;
+    last_run_at: string | null;
+    last_error: string | null;
+    created_at: string;
+    updated_at: string;
+  };
+  node_configs: FlowNodeConfig[];
+  recordings_count: number;
+  clips_count: number;
+}
+
+export interface CreateFlowInput {
+  account_id: number;
+  name: string;
+  enabled?: boolean;
 }
 
 /** Row returned by sidecar `GET /api/recording/status` and recording WebSocket payloads. */

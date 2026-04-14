@@ -7,7 +7,13 @@ import type {
   AutoRecordSchedule,
   Clip,
   ClipFilters,
+  CreateFlowInput,
   CreateAccountInput,
+  FlowDetail,
+  FlowNodeConfig,
+  FlowNodeKey,
+  FlowStatus,
+  FlowSummary,
   CreateProductInput,
   Product,
   SidecarRecordingStatus,
@@ -243,6 +249,20 @@ export async function updateClipNotes(clipId: number, notes: string): Promise<vo
   await invoke("update_clip_notes", { clipId, notes });
 }
 
+export async function updateClipCaption(
+  clipId: number,
+  captionText: string | null,
+  captionStatus: "pending" | "generating" | "completed" | "failed",
+  captionError?: string | null,
+): Promise<void> {
+  await invoke("update_clip_caption", {
+    clipId,
+    captionText,
+    captionStatus,
+    captionError: captionError ?? null,
+  });
+}
+
 export async function batchUpdateClipStatus(clipIds: number[], newStatus: string): Promise<void> {
   await invoke("batch_update_clip_status", { clipIds, newStatus });
 }
@@ -278,6 +298,98 @@ export async function insertTrimmedClip(input: {
 
 export async function listProducts(): Promise<Product[]> {
   return invoke<Product[]>("list_products");
+}
+
+export type FlowRecording = {
+  id: number;
+  account_id: number;
+  account_username: string;
+  room_id: string | null;
+  status: string;
+  started_at: string;
+  ended_at: string | null;
+  duration_seconds: number;
+  file_path: string | null;
+  file_size_bytes: number;
+  sidecar_recording_id: string | null;
+  error_message: string | null;
+  flow_id: number | null;
+  created_at: string;
+};
+
+export type UpdateFlowInput = {
+  name?: string;
+  status?: FlowStatus;
+  current_node?: FlowNodeKey | null;
+  last_live_at?: string | null;
+  last_run_at?: string | null;
+  last_error?: string | null;
+};
+
+export async function listFlows(): Promise<FlowSummary[]> {
+  return invoke<FlowSummary[]>("list_flows");
+}
+
+export async function getFlowDetail(flowId: number): Promise<FlowDetail> {
+  return invoke<FlowDetail>("get_flow_detail", { flowId });
+}
+
+export async function createFlow(input: CreateFlowInput): Promise<number> {
+  return invoke<number>("create_flow", { input });
+}
+
+export async function updateFlow(flowId: number, input: UpdateFlowInput): Promise<void> {
+  await invoke("update_flow", {
+    flowId,
+    input: {
+      name: input.name,
+      status: input.status,
+      current_node:
+        input.current_node === undefined
+          ? undefined
+          : input.current_node === null
+            ? ""
+            : input.current_node,
+      last_live_at:
+        input.last_live_at === undefined
+          ? undefined
+          : input.last_live_at === null
+            ? ""
+            : input.last_live_at,
+      last_run_at:
+        input.last_run_at === undefined
+          ? undefined
+          : input.last_run_at === null
+            ? ""
+            : input.last_run_at,
+      last_error:
+        input.last_error === undefined
+          ? undefined
+          : input.last_error === null
+            ? ""
+            : input.last_error,
+    },
+  });
+}
+
+export async function setFlowEnabled(flowId: number, enabled: boolean): Promise<void> {
+  await invoke("set_flow_enabled", { flowId, enabled });
+}
+
+export async function saveFlowNodeConfig(input: {
+  flow_id: number;
+  node_key: FlowNodeKey;
+  config_json: string;
+}): Promise<FlowNodeConfig> {
+  return invoke<FlowNodeConfig>("save_flow_node_config", { input });
+}
+
+export async function listRecordingsByFlow(flowId: number): Promise<FlowRecording[]> {
+  return invoke<FlowRecording[]>("list_recordings_by_flow", { flowId });
+}
+
+export async function listClipsByFlow(flowId: number): Promise<Clip[]> {
+  return invoke<Clip[]>("list_clips_by_flow", { flowId });
 }
 
 export async function getProductById(productId: number): Promise<Product> {
