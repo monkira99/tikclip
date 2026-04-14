@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+fn default_caption_status() -> String {
+    "pending".to_string()
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Account {
     pub id: i64,
@@ -63,6 +67,7 @@ pub struct Clip {
     pub flow_id: Option<i64>,
     pub transcript_text: Option<String>,
     pub caption_text: Option<String>,
+    #[serde(default = "default_caption_status")]
     pub caption_status: String,
     pub caption_error: Option<String>,
     pub caption_generated_at: Option<String>,

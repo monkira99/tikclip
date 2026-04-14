@@ -39,11 +39,13 @@ fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
 
     for (version, sql) in migrations {
         if version > current_version {
-            conn.execute_batch(sql)?;
-            conn.execute(
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(sql)?;
+            tx.execute(
                 "INSERT INTO schema_version (version) VALUES (?1)",
                 [version],
             )?;
+            tx.commit()?;
         }
     }
 
