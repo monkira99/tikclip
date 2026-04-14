@@ -26,14 +26,19 @@ fn map_clip_row(row: &Row) -> SqlResult<Clip> {
         scene_type: row.get(13)?,
         ai_tags_json: row.get(14)?,
         notes: row.get(15)?,
-        transcript_text: row.get(16)?,
-        created_at: row.get(17)?,
-        updated_at: row.get(18)?,
+        flow_id: row.get(16)?,
+        transcript_text: row.get(17)?,
+        caption_text: row.get(18)?,
+        caption_status: row.get(19)?,
+        caption_error: row.get(20)?,
+        caption_generated_at: row.get(21)?,
+        created_at: row.get(22)?,
+        updated_at: row.get(23)?,
     })
 }
 
 /// Lists clips joined with `accounts.username` as `account_username`.
-/// Column order: clips columns plus `transcript_text` (migration 006), joined username.
+/// Column order: clips columns plus flow/caption fields, joined username.
 #[tauri::command]
 pub fn list_clips(state: State<'_, AppState>) -> Result<Vec<Clip>, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
@@ -43,7 +48,7 @@ pub fn list_clips(state: State<'_, AppState>) -> Result<Vec<Clip>, String> {
              c.id, c.recording_id, c.account_id, a.username, \
              c.title, c.file_path, c.thumbnail_path, c.duration_seconds, c.file_size_bytes, \
              c.start_time, c.end_time, c.status, c.quality_score, c.scene_type, c.ai_tags_json, \
-             c.notes, c.transcript_text, c.created_at, c.updated_at \
+             c.notes, c.flow_id, c.transcript_text, c.caption_text, c.caption_status, c.caption_error, c.caption_generated_at, c.created_at, c.updated_at \
              FROM clips c \
              INNER JOIN accounts a ON a.id = c.account_id \
              ORDER BY c.created_at DESC",
@@ -86,7 +91,7 @@ pub fn list_clips_filtered(
          c.id, c.recording_id, c.account_id, a.username, \
          c.title, c.file_path, c.thumbnail_path, c.duration_seconds, c.file_size_bytes, \
          c.start_time, c.end_time, c.status, c.quality_score, c.scene_type, c.ai_tags_json, \
-         c.notes, c.transcript_text, c.created_at, c.updated_at \
+         c.notes, c.flow_id, c.transcript_text, c.caption_text, c.caption_status, c.caption_error, c.caption_generated_at, c.created_at, c.updated_at \
          FROM clips c \
          INNER JOIN accounts a ON a.id = c.account_id \
          WHERE 1=1",
@@ -169,7 +174,7 @@ pub fn get_clip_by_id(state: State<'_, AppState>, clip_id: i64) -> Result<Clip, 
          c.id, c.recording_id, c.account_id, a.username, \
          c.title, c.file_path, c.thumbnail_path, c.duration_seconds, c.file_size_bytes, \
          c.start_time, c.end_time, c.status, c.quality_score, c.scene_type, c.ai_tags_json, \
-         c.notes, c.transcript_text, c.created_at, c.updated_at \
+         c.notes, c.flow_id, c.transcript_text, c.caption_text, c.caption_status, c.caption_error, c.caption_generated_at, c.created_at, c.updated_at \
          FROM clips c \
          INNER JOIN accounts a ON a.id = c.account_id \
          WHERE c.id = ?1",
