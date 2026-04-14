@@ -125,7 +125,40 @@ export function DashboardPage() {
       : (dashStats?.storageUsedBytes ?? 0);
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-6">
+      <section className="app-panel relative overflow-hidden rounded-[1.25rem] px-6 py-6 sm:px-7">
+        <div className="absolute inset-y-0 right-0 hidden w-56 opacity-80 sm:block">
+          <div className="absolute right-10 top-0 h-28 w-3 rotate-[28deg] rounded-full bg-[var(--color-primary)]" />
+          <div className="absolute right-20 top-8 h-28 w-3 rotate-[28deg] rounded-full bg-[var(--color-primary)]/80" />
+          <div className="absolute right-[7.5rem] top-16 h-28 w-3 rotate-[28deg] rounded-full bg-[var(--color-primary)]/55" />
+        </div>
+        <div className="relative max-w-3xl space-y-4">
+          <div className="inline-flex items-center rounded-md border border-white/8 bg-white/[0.03] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
+            System Pulse
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-3xl font-semibold tracking-tight text-white sm:text-[2.5rem]">
+              Monitor live accounts, capture streams, and turn moments into clips.
+            </h3>
+            <p className="max-w-2xl text-sm leading-7 text-[var(--color-text-soft)] sm:text-base">
+              TikClip stays close to the sidecar, keeps live state visible, and surfaces the
+              recording pipeline in a compact desktop-first control surface.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3 text-sm text-[var(--color-text-soft)]">
+            <div className="rounded-full border border-white/8 bg-white/[0.03] px-3 py-1.5">
+              {sidecarConnected ? "Realtime pipeline online" : "Realtime pipeline offline"}
+            </div>
+            <div className="rounded-full border border-white/8 bg-white/[0.03] px-3 py-1.5">
+              {activeCount} active recording{activeCount === 1 ? "" : "s"}
+            </div>
+            <div className="rounded-full border border-white/8 bg-white/[0.03] px-3 py-1.5">
+              {liveAccounts.length} live account{liveAccounts.length === 1 ? "" : "s"}
+            </div>
+          </div>
+        </div>
+      </section>
+
       <StatCards
         activeRecordings={activeCount}
         accountCount={accounts.length}
@@ -136,7 +169,7 @@ export function DashboardPage() {
       />
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card className="bg-[var(--color-bg-elevated)]">
+        <Card>
           <CardHeader>
             <CardTitle>Active recordings</CardTitle>
           </CardHeader>
@@ -157,7 +190,7 @@ export function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="bg-[var(--color-bg-elevated)]">
+        <Card>
           <CardHeader>
             <CardTitle>Live now</CardTitle>
           </CardHeader>
@@ -171,7 +204,7 @@ export function DashboardPage() {
                 {liveAccounts.map((a) => (
                   <li
                     key={a.id}
-                    className="flex items-center justify-between rounded-lg border border-foreground/10 px-3 py-2"
+                    className="flex items-center justify-between rounded-xl border border-white/8 bg-white/[0.03] px-4 py-3"
                   >
                     <span className="font-medium">@{a.username}</span>
                     <span className="text-[var(--color-text-muted)]">

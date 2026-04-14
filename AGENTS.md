@@ -42,6 +42,7 @@ TikClip is a desktop app for monitoring TikTok Live accounts, recording streams,
 ## 4. Conventions
 
 - Use `@/` imports in frontend code; keep shared transport/state helpers in `src/lib` and `src/stores` instead of duplicating fetch or socket logic in components.
+- `DESIGN.md` is the system design system source of truth; any frontend/UI styling, layout, component, and interaction changes should follow it unless the user explicitly asks to deviate.
 - React components and store types use PascalCase symbols; hooks use `useX`; component filenames are typically kebab-case, while page/store/type modules stay lowercase and descriptive.
 - Keep TypeScript behavior explicit with narrow helper functions such as normalization/parsing utilities instead of clever inline transformations.
 - Python code follows snake_case naming, typed request/response models, and small route helpers for validation/parsing before delegating to core services.
@@ -53,6 +54,7 @@ TikClip is a desktop app for monitoring TikTok Live accounts, recording streams,
 
 - Respond in Vietnamese unless the user asks for another language; keep technical terms in English and never translate code blocks.
 - Before editing, review related usages and the full frontend/Rust/sidecar flow for the feature you are changing.
+- Treat `DESIGN.md` as the canonical design system document for the product and check it before making UI/UX changes.
 - Prefer simple, maintainable, production-friendly changes; avoid overengineering, clever abstractions, and extra layers for small features.
 - Keep APIs small, behavior explicit, naming clear, and new code colocated with the nearest existing feature/module.
 - Preserve current public behavior unless the user asks to change it; call out any unavoidable behavior change.

@@ -26,7 +26,7 @@ export function RecordingProgress({ recording }: RecordingProgressProps) {
   const isActive = recording.status === "pending" || recording.status === "recording";
 
   return (
-    <Card className="border-[var(--color-border)] bg-[var(--color-surface)]">
+    <Card>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <div>
           <div className="text-sm font-semibold text-[var(--color-text)]">{recording.username}</div>
@@ -36,7 +36,7 @@ export function RecordingProgress({ recording }: RecordingProgressProps) {
           variant="outline"
           className={
             isActive
-              ? "border-red-500/40 bg-red-500/10 text-red-400"
+              ? "border-[rgba(255,99,99,0.2)] bg-[rgba(255,99,99,0.15)] text-[var(--color-primary)]"
               : "border-[var(--color-border)] text-[var(--color-text-muted)]"
           }
         >

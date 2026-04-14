@@ -81,9 +81,14 @@ export function ActivityFeed({ dashboardRevision }: ActivityFeedProps) {
   };
 
   return (
-    <Card className="bg-[var(--color-bg-elevated)]">
+    <Card>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-base">Hoạt động gần đây</CardTitle>
+        <div className="space-y-1">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
+            Timeline
+          </p>
+          <CardTitle className="text-base">Hoạt động gần đây</CardTitle>
+        </div>
       </CardHeader>
       <CardContent className="space-y-2">
         {loading ? (
@@ -100,13 +105,16 @@ export function ActivityFeed({ dashboardRevision }: ActivityFeedProps) {
                     type="button"
                     disabled={!clickable}
                     onClick={() => onItemClick(row)}
-                    className={`flex w-full gap-2 rounded-md border border-transparent px-2 py-1.5 text-left text-sm transition-colors ${
+                    className={`flex w-full gap-3 rounded-xl border border-transparent px-3 py-3 text-left text-sm transition-colors ${
                       clickable
-                        ? "cursor-pointer hover:border-[var(--color-border)] hover:bg-[var(--color-bg)]"
+                        ? "cursor-pointer hover:border-white/8 hover:bg-white/[0.03]"
                         : "cursor-default opacity-95"
                     }`}
                   >
-                    <span className="shrink-0 pt-0.5" aria-hidden>
+                    <span
+                      className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-white/8 bg-white/[0.03] pt-0.5"
+                      aria-hidden
+                    >
                       {iconForType(row.type)}
                     </span>
                     <span className="min-w-0 flex-1">
@@ -126,7 +134,7 @@ export function ActivityFeed({ dashboardRevision }: ActivityFeedProps) {
             })}
           </ul>
         )}
-        <p className="border-t border-[var(--color-border)] pt-3 text-xs text-[var(--color-text-muted)]">
+        <p className="border-t border-white/6 pt-3 text-xs text-[var(--color-text-muted)]">
           Xem thêm trong hộp thông báo trên thanh tiêu đề.
         </p>
       </CardContent>

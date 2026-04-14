@@ -58,11 +58,10 @@ export function ProductCard({
   return (
     <div
       className={cn(
-        "flex flex-col overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]",
-        "transition-shadow hover:shadow-md",
+        "app-panel flex flex-col overflow-hidden rounded-2xl transition-opacity hover:opacity-95",
       )}
     >
-      <div className="relative aspect-square bg-muted/40">
+      <div className="relative aspect-square bg-white/[0.03]">
         {displaySrc && imgOk ? (
           <img
             src={displaySrc}
@@ -76,15 +75,15 @@ export function ProductCard({
           </div>
         )}
       </div>
-      <div className="flex flex-1 flex-col gap-2 p-3">
+      <div className="flex flex-1 flex-col gap-3 p-4">
         <div className="min-w-0">
-          <h3 className="truncate font-medium text-[var(--color-text)]">{product.name}</h3>
+          <h3 className="truncate text-base font-medium text-[var(--color-text)]">{product.name}</h3>
           <p className="mt-0.5 font-mono text-sm text-[var(--color-text-muted)]">
             {formatPrice(product.price)}
           </p>
         </div>
         {product.category ? (
-          <span className="w-fit rounded-md bg-primary/15 px-2 py-0.5 text-xs text-primary">
+          <span className="w-fit rounded-md border border-white/8 bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-soft)]">
             {product.category}
           </span>
         ) : null}

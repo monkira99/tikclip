@@ -6,64 +6,66 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --color-primary: #fe2c55;
-  --color-accent: #25f4ee;
-  --color-bg: #0a0a0f;
-  --color-surface: #111118;
-  --color-border: #222222;
-  --color-text: #e8e8ed;
-  --color-text-muted: #a1a1b0;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-}
-
-body {
-  background-color: var(--color-bg);
-  color: var(--color-text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  margin: 0;
-  min-height: 100vh;
-  overflow: hidden;
+  --color-primary: #ff6363;
+  --color-accent: #55b3ff;
+  --color-success: #5fc992;
+  --color-warning: #ffbc33;
+  --color-bg: #07080a;
+  --color-surface: #101111;
+  --color-bg-elevated: rgba(16, 17, 17, 0.9);
+  --color-bg-subtle: #1b1c1e;
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border-strong: #252829;
+  --color-text: #f9f9f9;
+  --color-text-soft: #cecece;
+  --color-text-muted: #9c9c9d;
+  --color-button-foreground: #18191a;
+  --color-key-start: #121212;
+  --color-key-end: #0d0d0d;
+  --color-warm-glow: rgba(215, 201, 175, 0.05);
+  --background: #07080a;
+  --foreground: #f9f9f9;
+  --card: #101111;
+  --card-foreground: #f9f9f9;
+  --popover: #101111;
+  --popover-foreground: #f9f9f9;
+  --primary: #ff6363;
+  --primary-foreground: #18191a;
+  --secondary: #1b1c1e;
+  --secondary-foreground: #f9f9f9;
+  --muted: #1b1c1e;
+  --muted-foreground: #9c9c9d;
+  --accent: #161d22;
+  --accent-foreground: #f9f9f9;
+  --destructive: #ff6363;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.08);
+  --ring: #55b3ff;
+  --chart-1: #f9f9f9;
+  --chart-2: #cecece;
+  --chart-3: #9c9c9d;
+  --chart-4: #6a6b6c;
+  --chart-5: #252829;
+  --radius: 0.875rem;
+  --sidebar: rgba(16, 17, 17, 0.82);
+  --sidebar-foreground: #f9f9f9;
+  --sidebar-primary: rgba(85, 179, 255, 0.14);
+  --sidebar-primary-foreground: #f9f9f9;
+  --sidebar-accent: #161d22;
+  --sidebar-accent-foreground: #f9f9f9;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-ring: #55b3ff;
 }
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: #333 transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
 }
 
 @theme inline {
   --font-heading: var(--font-sans);
-  --font-sans: 'Geist Variable', sans-serif;
+  --font-sans: Inter, "Geist Variable", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -105,47 +107,112 @@ body {
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: #07080a;
+  --foreground: #f9f9f9;
+  --card: #101111;
+  --card-foreground: #f9f9f9;
+  --popover: #101111;
+  --popover-foreground: #f9f9f9;
+  --primary: #ff6363;
+  --primary-foreground: #18191a;
+  --secondary: #1b1c1e;
+  --secondary-foreground: #f9f9f9;
+  --muted: #1b1c1e;
+  --muted-foreground: #9c9c9d;
+  --accent: #161d22;
+  --accent-foreground: #f9f9f9;
+  --destructive: #ff6363;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.08);
+  --ring: #55b3ff;
+  --chart-1: #f9f9f9;
+  --chart-2: #cecece;
+  --chart-3: #9c9c9d;
+  --chart-4: #6a6b6c;
+  --chart-5: #252829;
+  --sidebar: rgba(16, 17, 17, 0.82);
+  --sidebar-foreground: #f9f9f9;
+  --sidebar-primary: rgba(85, 179, 255, 0.14);
+  --sidebar-primary-foreground: #f9f9f9;
+  --sidebar-accent: #161d22;
+  --sidebar-accent-foreground: #f9f9f9;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-ring: #55b3ff;
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
-  body {
-    @apply bg-background text-foreground;
+  html,
+  body,
+  #root {
+    min-height: 100vh;
   }
   html {
     @apply font-sans;
+    color-scheme: dark;
   }
+  body {
+    @apply bg-background text-foreground;
+    margin: 0;
+    overflow: hidden;
+    background-color: var(--color-bg);
+    background-image:
+      radial-gradient(circle at top left, rgba(85, 179, 255, 0.08), transparent 26%),
+      radial-gradient(circle at top right, rgba(255, 99, 99, 0.06), transparent 18%),
+      radial-gradient(circle at bottom center, var(--color-warm-glow), transparent 24%);
+    color: var(--color-text);
+    font-family: Inter, "Geist Variable", -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+    font-feature-settings: "calt" 1, "kern" 1, "liga" 1, "ss03" 1;
+    letter-spacing: 0.2px;
+    line-height: 1.6;
+  }
+}
+
+::selection {
+  background: rgba(85, 179, 255, 0.28);
+  color: var(--color-text);
+}
+
+.app-panel {
+  background: var(--color-bg-elevated);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow:
+    0 0 0 1px rgb(27 28 30 / 1),
+    inset 0 1px 0 rgb(255 255 255 / 0.04),
+    inset 0 -1px 0 rgb(0 0 0 / 0.28),
+    0 18px 40px rgb(0 0 0 / 0.24);
+  backdrop-filter: blur(18px);
+}
+
+.app-panel-subtle {
+  background: rgb(16 17 17 / 0.74);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow:
+    0 0 0 1px rgb(27 28 30 / 1),
+    inset 0 1px 0 rgb(255 255 255 / 0.03),
+    0 10px 26px rgb(0 0 0 / 0.18);
+  backdrop-filter: blur(14px);
+}
+
+.app-shell-surface {
+  background: rgb(7 8 10 / 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.05),
+    0 12px 24px rgb(0 0 0 / 0.18);
+  backdrop-filter: blur(18px);
+}
+
+.app-keycap {
+  background: linear-gradient(180deg, var(--color-key-start) 0%, var(--color-key-end) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    rgb(0 0 0 / 0.4) 0 1.5px 0.5px 2.5px,
+    inset 0 1px 0 rgb(255 255 255 / 0.08),
+    inset 0 -1px 0 rgb(0 0 0 / 0.45);
+  color: var(--color-text-soft);
+  font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
 }

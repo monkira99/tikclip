@@ -1,5 +1,6 @@
 import { Clapperboard, HardDrive, Radio, Users } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 type StatCardsProps = {
   activeRecordings: number;
@@ -48,15 +49,15 @@ function storageLabel(usedBytes: number, quotaGb: number | null): string {
 
 function storageCardClass(usagePct: number | null | undefined): string {
   if (usagePct == null || !Number.isFinite(usagePct) || usagePct <= 0) {
-    return "bg-[var(--color-bg-elevated)]";
+    return "";
   }
   if (usagePct > 95) {
-    return "border border-red-500/40 bg-[var(--color-bg-elevated)]";
+    return "border-[rgba(255,99,99,0.24)] bg-[rgba(255,99,99,0.08)]";
   }
   if (usagePct >= 80) {
-    return "border border-amber-500/40 bg-[var(--color-bg-elevated)]";
+    return "border-[rgba(255,188,51,0.24)] bg-[rgba(255,188,51,0.08)]";
   }
-  return "bg-[var(--color-bg-elevated)]";
+  return "";
 }
 
 export function StatCards({
@@ -102,24 +103,34 @@ export function StatCards({
           <Card
             key={title}
             size="sm"
-            className={isStorage ? storageCardClass(pct ?? null) : "bg-[var(--color-bg-elevated)]"}
+            className={cn("min-h-[152px] justify-between", isStorage ? storageCardClass(pct ?? null) : "")}
           >
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-[var(--color-text-muted)]">
-                {title}
-              </CardTitle>
-              <Icon className="size-4 text-[var(--color-text-muted)]" aria-hidden />
+            <CardHeader className="flex flex-row items-start justify-between pb-0">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
+                  {title}
+                </p>
+              </div>
+              <div className="flex size-10 items-center justify-center rounded-xl border border-white/8 bg-white/[0.03]">
+                <Icon className="size-4 text-[var(--color-accent)]" aria-hidden />
+              </div>
             </CardHeader>
-            <CardContent>
-              <p className="font-heading text-2xl font-semibold tabular-nums text-[var(--color-text)]">
+            <CardContent className="space-y-2">
+              <p className="font-heading text-3xl font-semibold tracking-tight tabular-nums text-[var(--color-text)]">
                 {value}
+              </p>
+              <p className="text-sm leading-relaxed text-[var(--color-text-muted)]">
+                {title === "Active recordings" && "Jobs that are still capturing stream data."}
+                {title === "Accounts" && "Monitored profiles available for polling and recording."}
+                {title === "Clips today" && "Short-form assets created from recent live sessions."}
+                {title === "Storage" && "Current media footprint across recordings and generated clips."}
               </p>
               {isStorage &&
               pct != null &&
               Number.isFinite(pct) &&
               storageQuotaGb != null &&
               storageQuotaGb > 0 ? (
-                <p className="mt-1 text-xs text-[var(--color-text-muted)] tabular-nums">
+                <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--color-text-muted)] tabular-nums">
                   ~{pct.toFixed(1)}% quota (sidecar)
                 </p>
               ) : null}

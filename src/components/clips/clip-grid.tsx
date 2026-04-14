@@ -102,7 +102,15 @@ export function ClipGrid() {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="app-panel-subtle flex items-center justify-between rounded-2xl px-4 py-4">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
+            Review queue
+          </p>
+          <p className="mt-1 text-sm text-[var(--color-text-soft)]">
+            Browse clips by day and account to keep review sessions compact.
+          </p>
+        </div>
         <Button type="button" variant="outline" size="sm" onClick={() => void fetchClips()}>
           Refresh
         </Button>
@@ -115,14 +123,14 @@ export function ClipGrid() {
           return (
             <section
               key={block.dateKey}
-              className="overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]"
+              className="app-panel-subtle overflow-hidden rounded-2xl"
             >
               <button
                 type="button"
                 onClick={() => toggleDate(block.dateKey)}
                 className={cn(
                   "flex w-full items-center gap-2 px-4 py-3 text-left transition-colors",
-                  "hover:bg-white/5",
+                  "hover:bg-white/[0.03]",
                 )}
               >
                 {dateOpen ? (
@@ -139,7 +147,7 @@ export function ClipGrid() {
               </button>
 
               {dateOpen ? (
-                <div className="border-t border-[var(--color-border)] px-2 pb-3 pt-1">
+                <div className="border-t border-white/6 px-2 pb-3 pt-1">
                   {block.users.map((ug) => {
                     const uKey = userRowKey(block.dateKey, ug.username);
                     const userOpen = openUsers.has(uKey);
@@ -150,7 +158,7 @@ export function ClipGrid() {
                           onClick={() => toggleUser(block.dateKey, ug.username)}
                           className={cn(
                             "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm",
-                            "hover:bg-white/5",
+                            "hover:bg-white/[0.03]",
                           )}
                         >
                           {userOpen ? (

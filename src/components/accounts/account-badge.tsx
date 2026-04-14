@@ -8,16 +8,17 @@ const statusConfig: Record<
   live: {
     label: "Live",
     className:
-      "border-green-500/30 bg-green-500/20 text-green-400 dark:text-green-300",
+      "border-[rgba(95,201,146,0.2)] bg-[rgba(95,201,146,0.14)] text-[var(--color-success)]",
   },
   offline: {
     label: "Offline",
     className:
-      "border-muted-foreground/30 bg-muted/50 text-muted-foreground",
+      "border-white/8 bg-white/[0.03] text-[var(--color-text-muted)]",
   },
   recording: {
     label: "Recording",
-    className: "border-red-500/30 bg-red-500/20 text-red-400 dark:text-red-300",
+    className:
+      "border-[rgba(255,99,99,0.2)] bg-[rgba(255,99,99,0.14)] text-[var(--color-primary)]",
   },
 };
 
@@ -26,10 +27,10 @@ export function AccountBadge({ status }: { status: AccountStatus }) {
   return (
     <Badge variant="outline" className={config.className}>
       {status === "live" && (
-        <span className="mr-1.5 size-1.5 animate-pulse rounded-full bg-green-400" />
+        <span className="mr-1.5 size-1.5 animate-pulse rounded-full bg-[var(--color-success)]" />
       )}
       {status === "recording" && (
-        <span className="mr-1.5 size-1.5 animate-pulse rounded-full bg-red-400" />
+        <span className="mr-1.5 size-1.5 animate-pulse rounded-full bg-[var(--color-primary)]" />
       )}
       {config.label}
     </Badge>

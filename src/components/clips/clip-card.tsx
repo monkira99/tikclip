@@ -75,8 +75,9 @@ export function ClipCard({
   return (
     <Card
       className={cn(
-        "relative cursor-pointer overflow-hidden border-[var(--color-border)] bg-[var(--color-surface)] ring-1 ring-transparent transition-colors",
-        selected && "ring-primary/60",
+        "relative cursor-pointer overflow-hidden transition-opacity hover:opacity-95",
+        selected &&
+          "border-[color-mix(in_oklab,var(--color-accent)_30%,var(--color-border))] shadow-[0_0_0_1px_rgba(85,179,255,0.18),inset_0_1px_0_rgba(255,255,255,0.04),0_18px_40px_rgba(0,0,0,0.24)]",
       )}
       onClick={() => onOpen?.()}
       onKeyDown={(e) => {
@@ -96,7 +97,7 @@ export function ClipCard({
       >
         <input
           type="checkbox"
-          className="size-4 rounded border border-white/40 bg-black/50 shadow-sm"
+          className="size-4 rounded border border-white/20 bg-black/50 shadow-sm"
           checked={selected}
           onChange={() => onToggleSelect?.()}
           aria-label={`Select clip ${clip.id}`}
@@ -125,7 +126,7 @@ export function ClipCard({
             🎞️
           </div>
         )}
-        <div className="pointer-events-none absolute bottom-2 right-2 rounded bg-black/60 px-2 py-0.5 font-mono text-[10px] text-white">
+        <div className="app-keycap pointer-events-none absolute bottom-2 right-2 rounded-md px-2 py-0.5 text-[10px] text-white">
           {formatDuration(clip.duration_seconds)}
         </div>
         <div className="pointer-events-none absolute bottom-2 left-2">

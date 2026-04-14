@@ -27,8 +27,8 @@ export function ProductList() {
   }, [products, searchQuery]);
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="space-y-5">
+      <div className="app-panel-subtle flex flex-col gap-3 rounded-2xl px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
         <Input
           placeholder="Search by name or SKU…"
           value={searchQuery}
@@ -48,9 +48,11 @@ export function ProductList() {
       </div>
 
       {filtered.length === 0 ? (
-        <p className="text-sm text-[var(--color-text-muted)]">
-          {products.length === 0 ? "No products yet." : "No matches for your search."}
-        </p>
+        <div className="app-panel-subtle rounded-2xl px-5 py-8">
+          <p className="text-sm text-[var(--color-text-muted)]">
+            {products.length === 0 ? "No products yet." : "No matches for your search."}
+          </p>
+        </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {filtered.map((p) => (
