@@ -1,11 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
+
+import { formatInvokeError } from "@/lib/invoke-error";
 import type {
   Account,
   AccountType,
   AutoRecordSchedule,
   Clip,
+  ClipFilters,
   CreateAccountInput,
+  CreateProductInput,
+  Product,
   SidecarRecordingStatus,
+  UpdateProductInput,
 } from "@/types";
 
 /** Raw row from SQLite: schedule stored as JSON string. */
@@ -141,7 +147,7 @@ export async function updateAccountLiveStatus(id: number, isLive: boolean): Prom
   if (import.meta.env.DEV) {
     console.debug("[TikClip] invoke update_account_live_status", { id, isLive });
   }
-  await invoke("update_account_live_status", { id, is_live: isLive });
+  await invoke("update_account_live_status", { id, isLive });
 }
 
 /** Single transaction — avoids N× invoke racing with list_accounts (StrictMode / duplicate fetches). */
@@ -204,6 +210,306 @@ export async function syncWatcherForAccounts(
 
 export async function listClips(): Promise<Clip[]> {
   return invoke<Clip[]>("list_clips");
+}
+
+export async function listClipsFiltered(filters: ClipFilters): Promise<Clip[]> {
+  return invoke<Clip[]>("list_clips_filtered", {
+    input: {
+      status: filters.status === "all" ? null : filters.status,
+      account_id: filters.accountId,
+      scene_type: filters.sceneType === "all" ? null : filters.sceneType,
+      date_from: filters.dateFrom,
+      date_to: filters.dateTo,
+      search: filters.search || null,
+      sort_by: filters.sortBy,
+      sort_order: filters.sortOrder,
+    },
+  });
+}
+
+export async function getClipById(clipId: number): Promise<Clip> {
+  return invoke<Clip>("get_clip_by_id", { clipId });
+}
+
+export async function updateClipStatus(clipId: number, newStatus: string): Promise<void> {
+  await invoke("update_clip_status", { clipId, newStatus });
+}
+
+export async function updateClipTitle(clipId: number, title: string): Promise<void> {
+  await invoke("update_clip_title", { clipId, title });
+}
+
+export async function updateClipNotes(clipId: number, notes: string): Promise<void> {
+  await invoke("update_clip_notes", { clipId, notes });
+}
+
+export async function batchUpdateClipStatus(clipIds: number[], newStatus: string): Promise<void> {
+  await invoke("batch_update_clip_status", { clipIds, newStatus });
+}
+
+export async function batchDeleteClips(clipIds: number[]): Promise<void> {
+  await invoke("batch_delete_clips", { clipIds });
+}
+
+export async function trimClip(body: {
+  source_path: string;
+  start_sec: number;
+  end_sec: number;
+  account_id: number;
+  recording_id: number;
+}): Promise<{ file_path: string; thumbnail_path: string; duration_sec: number }> {
+  return sidecarJson("/api/clips/trim", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function insertTrimmedClip(input: {
+  recording_id: number;
+  account_id: number;
+  file_path: string;
+  thumbnail_path: string;
+  duration_sec: number;
+  start_sec: number;
+  end_sec: number;
+}): Promise<number> {
+  return invoke<number>("insert_trimmed_clip", { input });
+}
+
+export async function listProducts(): Promise<Product[]> {
+  return invoke<Product[]>("list_products");
+}
+
+export async function getProductById(productId: number): Promise<Product> {
+  return invoke<Product>("get_product_by_id", { productId });
+}
+
+export async function createProduct(input: CreateProductInput): Promise<number> {
+  return invoke<number>("create_product", { input });
+}
+
+export async function updateProduct(productId: number, input: UpdateProductInput): Promise<void> {
+  await invoke("update_product", { productId, input });
+}
+
+export async function deleteProduct(productId: number): Promise<void> {
+  const id = Number(productId);
+  if (!Number.isInteger(id) || id < 1) {
+    throw new Error(`Invalid product id: ${String(productId)}`);
+  }
+  try {
+    await invoke("delete_product", { productId: id });
+  } catch (e) {
+    throw new Error(formatInvokeError(e));
+  }
+}
+
+export async function listClipProducts(clipId: number): Promise<Product[]> {
+  return invoke<Product[]>("list_clip_products", { clipId });
+}
+
+export async function tagClipProduct(clipId: number, productId: number): Promise<void> {
+  await invoke("tag_clip_product", { clipId, productId });
+}
+
+export async function untagClipProduct(clipId: number, productId: number): Promise<void> {
+  await invoke("untag_clip_product", { clipId, productId });
+}
+
+export async function batchTagClipProducts(clipIds: number[], productId: number): Promise<void> {
+  await invoke("batch_tag_clip_products", { clipIds, productId });
+}
+
+export type FetchedProductMediaFile = {
+  kind: "image" | "video";
+  path: string;
+  source_url: string;
+};
+
+export type FetchProductFromUrlResult = {
+  success: boolean;
+  incomplete: boolean;
+  data: {
+    name: string | null;
+    description: string | null;
+    price: number | null;
+    image_url: string | null;
+    category: string | null;
+    tiktok_shop_id: string | null;
+    image_urls: string[];
+    video_urls: string[];
+    media_files: FetchedProductMediaFile[];
+  } | null;
+  error: string | null;
+};
+
+export async function fetchProductFromUrl(
+  url: string,
+  cookiesJson?: string | null,
+  options?: { downloadMedia?: boolean },
+): Promise<FetchProductFromUrlResult> {
+  return sidecarJson<FetchProductFromUrlResult>("/api/products/fetch-from-url", {
+    method: "POST",
+    body: JSON.stringify({
+      url,
+      cookies_json: cookiesJson ?? null,
+      download_media: options?.downloadMedia !== false,
+    }),
+  });
+}
+
+export type ProductEmbeddingMediaItem = {
+  kind: "image" | "video";
+  path: string;
+  source_url?: string;
+};
+
+export type IndexProductEmbeddingsResult = {
+  indexed: number;
+  skipped: number;
+  errors: string[];
+  message: string | null;
+};
+
+export async function indexProductEmbeddings(
+  productId: number,
+  body: {
+    product_name: string;
+    product_description?: string;
+    items: ProductEmbeddingMediaItem[];
+  },
+): Promise<IndexProductEmbeddingsResult> {
+  return sidecarJson<IndexProductEmbeddingsResult>("/api/products/embeddings/index", {
+    method: "POST",
+    body: JSON.stringify({
+      product_id: productId,
+      product_name: body.product_name,
+      product_description: body.product_description ?? "",
+      items: body.items.map((x) => ({
+        kind: x.kind,
+        path: x.path,
+        source_url: x.source_url ?? "",
+      })),
+    }),
+  });
+}
+
+export async function deleteProductEmbeddings(productId: number): Promise<void> {
+  await sidecarJson<{ ok: boolean }>("/api/products/embeddings/delete", {
+    method: "POST",
+    body: JSON.stringify({ product_id: productId }),
+  });
+}
+
+export type ClipSuggestImageEvidenceHit = {
+  product_id: number;
+  score: number;
+  product_name: string | null;
+  product_description: string | null;
+  /** Ảnh/video catalog đã index, đường dẫn tương đối storage (cặp với query = media_relative_path của frame row). */
+  catalog_media_relative_path?: string | null;
+  catalog_source_url?: string | null;
+  catalog_modality?: "image" | "video" | null;
+};
+
+export type ClipSuggestFrameRow = {
+  index: number;
+  source: "thumbnail" | "extracted";
+  media_relative_path: string;
+  outcome: "hit" | "no_hit" | "error";
+  error: string | null;
+  top_product_id: number | null;
+  top_score: number | null;
+  top_product_name: string | null;
+  matched_product_description?: string | null;
+  image_evidence_hits?: ClipSuggestImageEvidenceHit[];
+};
+
+export type ClipSuggestVoteRow = {
+  product_id: number;
+  vote_count: number;
+};
+
+export type ClipSuggestTextHit = {
+  product_id: number;
+  score: number;
+  product_name: string | null;
+  product_description?: string | null;
+};
+
+export type ClipSuggestTranscriptSegmentRow = {
+  segment_index: number;
+  segment_text: string;
+  outcome: "hit" | "no_hit" | "error";
+  error: string | null;
+  best_product_id: number | null;
+  best_score: number | null;
+  best_product_name: string | null;
+  matched_product_description: string | null;
+};
+
+export type ClipSuggestProductRankRow = {
+  product_id: number;
+  product_name: string | null;
+  frame_hit_count: number;
+  /** Mean best-per-frame cosine distance (lower = closer). */
+  avg_frame_distance: number | null;
+  /** 1 - avg_frame_distance; 0 khi không có frame hit. [0,1] */
+  image_score: number;
+  /** Raw score từ full-transcript text search (higher = better). */
+  transcript_text_score: number | null;
+  /** = transcript_text_score hoặc 0. [0,1] */
+  text_score: number;
+  /** w_img * image_score + w_txt * text_score. Xếp hạng giảm dần. */
+  final_score: number;
+};
+
+export type ClipSuggestProductResult = {
+  matched: boolean;
+  product_id: number | null;
+  product_name: string | null;
+  best_score: number | null;
+  frames_used: number;
+  skipped_reason: string | null;
+  video_relative_path: string | null;
+  thumbnail_used: boolean;
+  extracted_frame_count: number;
+  frames_searched: number;
+  config_target_extracted_frames: number;
+  config_max_score_threshold: number;
+  suggest_weight_image: number;
+  suggest_weight_text: number;
+  suggest_min_fused_score: number;
+  /** Prompt đang dùng kèm ảnh khi embed frame (echo từ cấu hình). */
+  suggest_image_embed_focus_prompt?: string;
+  pick_method: "majority_vote" | "min_distance_tiebreak" | "weighted_fusion" | "unified_score" | null;
+  votes_by_product: ClipSuggestVoteRow[];
+  product_ranks?: ClipSuggestProductRankRow[];
+  transcript_segment_evidence?: ClipSuggestTranscriptSegmentRow[];
+  candidate_product_id: number | null;
+  candidate_product_name: string | null;
+  candidate_score: number | null;
+  frame_rows: ClipSuggestFrameRow[];
+  text_search_hits: ClipSuggestTextHit[];
+  text_search_used: boolean;
+  fusion_method: string | null;
+  /** Khi bật lưu frame debug: đường dẫn tương đối từ thư mục lưu trữ tới thư mục chứa frame_*.jpg */
+  debug_extracted_frames_dir?: string | null;
+};
+
+export async function suggestProductForClip(body: {
+  video_path: string;
+  thumbnail_path?: string | null;
+  transcript_text?: string | null;
+}): Promise<ClipSuggestProductResult> {
+  return sidecarJson<ClipSuggestProductResult>("/api/clips/suggest-product", {
+    method: "POST",
+    body: JSON.stringify({
+      video_path: body.video_path,
+      thumbnail_path: body.thumbnail_path ?? null,
+      transcript_text: body.transcript_text ?? null,
+    }),
+  });
 }
 
 function normalizeAccount(row: AccountInvokeRow): Account {
@@ -307,8 +613,62 @@ export type DashboardStats = {
 
 export async function getDashboardStats(): Promise<DashboardStats> {
   return invoke<DashboardStats>("get_dashboard_stats", {
-    today_ymd: hcmDateYmd(),
+    todayYmd: hcmDateYmd(),
   });
+}
+
+export type StorageStats = {
+  recordings_bytes: number;
+  recordings_count: number;
+  clips_bytes: number;
+  clips_count: number;
+  products_bytes: number;
+  total_bytes: number;
+  quota_bytes: number | null;
+  usage_percent: number;
+};
+
+export async function getStorageStats(): Promise<StorageStats> {
+  return sidecarJson<StorageStats>("/api/storage/stats");
+}
+
+export type StorageCleanupSummary = {
+  deleted_recordings: number;
+  deleted_clips: number;
+  freed_bytes: number;
+};
+
+export async function runStorageCleanupNow(input: {
+  raw_retention_days: number;
+  archive_retention_days: number;
+}): Promise<StorageCleanupSummary> {
+  return sidecarJson<StorageCleanupSummary>("/api/storage/cleanup-run", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteRecordingFiles(recordingId: number): Promise<void> {
+  await invoke("delete_recording_files", { recordingId });
+}
+
+export async function listRecordingsForCleanup(retentionDays: number): Promise<unknown[]> {
+  return invoke<unknown[]>("list_recordings_for_cleanup", { retentionDays });
+}
+
+export type ActivityFeedItem = {
+  id: number;
+  type: string;
+  title: string;
+  message: string;
+  account_id: number | null;
+  recording_id: number | null;
+  clip_id: number | null;
+  created_at: string;
+};
+
+export async function listActivityFeed(limit = 10): Promise<ActivityFeedItem[]> {
+  return invoke<ActivityFeedItem[]>("list_activity_feed", { limit });
 }
 
 /** Row from `notifications` table (camelCase from Tauri). */

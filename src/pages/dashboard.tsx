@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityFeed } from "@/components/dashboard/activity-feed";
 import { StatCards } from "@/components/dashboard/stat-cards";
 import { RecordingProgress } from "@/components/recordings/recording-progress";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getDashboardStats, type DashboardStats } from "@/lib/api";
+import { getDashboardStats, getStorageStats, type DashboardStats } from "@/lib/api";
 import { useAppStore } from "@/stores/app-store";
 import { useAccountStore } from "@/stores/account-store";
 import { useClipStore } from "@/stores/clip-store";
@@ -10,12 +11,16 @@ import { countActiveRecordings, useRecordingStore } from "@/stores/recording-sto
 
 export function DashboardPage() {
   const sidecarConnected = useAppStore((s) => s.sidecarConnected);
+  const dashboardRevision = useAppStore((s) => s.dashboardRevision);
   const recordings = useRecordingStore((s) => s.recordings);
   const accounts = useAccountStore((s) => s.accounts);
   const fetchAccounts = useAccountStore((s) => s.fetchAccounts);
   const accountsLoading = useAccountStore((s) => s.loading);
   const clipsRevision = useClipStore((s) => s.clipsRevision);
   const [dashStats, setDashStats] = useState<DashboardStats | null>(null);
+  const [sidecarUsagePct, setSidecarUsagePct] = useState<number | null>(null);
+  /** Sidecar filesystem scan — matches debug log; preferred for Storage card when connected. */
+  const [sidecarTotalBytes, setSidecarTotalBytes] = useState<number | null>(null);
 
   const loadDashboardStats = useCallback(async () => {
     try {
@@ -28,6 +33,25 @@ export function DashboardPage() {
       setDashStats(null);
     }
   }, []);
+
+  const loadSidecarStorageStats = useCallback(async () => {
+    if (!sidecarConnected) {
+      setSidecarUsagePct(null);
+      setSidecarTotalBytes(null);
+      return;
+    }
+    try {
+      const s = await getStorageStats();
+      setSidecarUsagePct(s.usage_percent);
+      setSidecarTotalBytes(s.total_bytes);
+    } catch (e) {
+      if (import.meta.env.DEV) {
+        console.warn("[TikClip] getStorageStats failed", e);
+      }
+      setSidecarUsagePct(null);
+      setSidecarTotalBytes(null);
+    }
+  }, [sidecarConnected]);
 
   /** Refetch stats when sidecar updates recording progress / finish (not only clip_revision). */
   const recordingsSnapshot = useMemo(
@@ -53,19 +77,41 @@ export function DashboardPage() {
   useEffect(() => {
     const t = window.setTimeout(() => {
       void loadDashboardStats();
+      void loadSidecarStorageStats();
     }, 500);
     return () => window.clearTimeout(t);
-  }, [loadDashboardStats, clipsRevision, sidecarConnected, recordingsSnapshot]);
+  }, [
+    loadDashboardStats,
+    loadSidecarStorageStats,
+    clipsRevision,
+    dashboardRevision,
+    sidecarConnected,
+    recordingsSnapshot,
+  ]);
 
+  /** Refresh storage card when user returns to the app (sidecar totals change while away). */
   useEffect(() => {
     const onVis = () => {
       if (document.visibilityState === "visible") {
         void loadDashboardStats();
+        void loadSidecarStorageStats();
       }
     };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
-  }, [loadDashboardStats]);
+  }, [loadDashboardStats, loadSidecarStorageStats]);
+
+  /** Periodic refresh: DB-backed stat can lag vs disk; sidecar scan picks up new recordings/clips. */
+  useEffect(() => {
+    if (!sidecarConnected) {
+      return;
+    }
+    const id = window.setInterval(() => {
+      void loadDashboardStats();
+      void loadSidecarStorageStats();
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, [sidecarConnected, loadDashboardStats, loadSidecarStorageStats]);
 
   const activeList = Object.values(recordings).filter(
     (r) => r.status === "pending" || r.status === "recording",
@@ -73,14 +119,20 @@ export function DashboardPage() {
   const activeCount = countActiveRecordings(recordings);
   const liveAccounts = accounts.filter((a) => a.is_live);
 
+  const storageDisplayBytes =
+    sidecarConnected && sidecarTotalBytes != null
+      ? sidecarTotalBytes
+      : (dashStats?.storageUsedBytes ?? 0);
+
   return (
     <div className="flex flex-col gap-8">
       <StatCards
         activeRecordings={activeCount}
         accountCount={accounts.length}
         clipsToday={dashStats?.clipsToday ?? 0}
-        storageUsedBytes={dashStats?.storageUsedBytes ?? 0}
+        storageUsedBytes={storageDisplayBytes}
         storageQuotaGb={dashStats?.storageQuotaGb ?? null}
+        storageSidecarUsagePercent={sidecarUsagePct}
       />
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -132,6 +184,8 @@ export function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      <ActivityFeed dashboardRevision={dashboardRevision} />
     </div>
   );
 }

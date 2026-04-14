@@ -58,20 +58,24 @@ fn push_bool_setting(
 ) -> Result<(), String> {
     if let Some(t) = get_setting_trimmed(conn, db_key).map_err(|e| e.to_string())? {
         let lower = t.to_ascii_lowercase();
-        let enabled = matches!(
-            lower.as_str(),
-            "1" | "true" | "yes" | "on"
-        );
+        let enabled = matches!(lower.as_str(), "1" | "true" | "yes" | "on");
         env.push((
             tikclip_key.to_string(),
-            if enabled { "true".to_string() } else { "false".to_string() },
+            if enabled {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            },
         ));
     }
     Ok(())
 }
 
 /// Environment variables passed to the Python sidecar. Always includes `TIKCLIP_STORAGE_PATH`.
-pub fn build_sidecar_env(conn: &Connection, storage_path: &Path) -> Result<Vec<(String, String)>, String> {
+pub fn build_sidecar_env(
+    conn: &Connection,
+    storage_path: &Path,
+) -> Result<Vec<(String, String)>, String> {
     let resolved = storage_path
         .canonicalize()
         .unwrap_or_else(|_| storage_path.to_path_buf());
@@ -92,12 +96,18 @@ pub fn build_sidecar_env(conn: &Connection, storage_path: &Path) -> Result<Vec<(
         "max_concurrent",
         "TIKCLIP_MAX_CONCURRENT_RECORDINGS",
     )?;
-    if let Some(t) = get_setting_trimmed(conn, "recording_max_minutes").map_err(|e| e.to_string())? {
+    if let Some(t) =
+        get_setting_trimmed(conn, "recording_max_minutes").map_err(|e| e.to_string())?
+    {
         if t.parse::<i64>().is_err() {
-            return Err(format!("recording_max_minutes must be an integer, got {t:?}"));
+            return Err(format!(
+                "recording_max_minutes must be an integer, got {t:?}"
+            ));
         }
         env.push(("TIKCLIP_MAX_DURATION_MINUTES".to_string(), t));
-    } else if let Some(h) = get_setting_trimmed(conn, "recording_max_hours").map_err(|e| e.to_string())? {
+    } else if let Some(h) =
+        get_setting_trimmed(conn, "recording_max_hours").map_err(|e| e.to_string())?
+    {
         // Legacy Settings key (hours) → minutes for sidecar env.
         if let Ok(hours) = h.parse::<i64>() {
             if hours > 0 {
@@ -122,18 +132,145 @@ pub fn build_sidecar_env(conn: &Connection, storage_path: &Path) -> Result<Vec<(
         "clip_max_duration",
         "TIKCLIP_CLIP_MAX_DURATION",
     )?;
-    push_float_if_valid(
-        &mut env,
-        conn,
-        "max_storage_gb",
-        "TIKCLIP_STORAGE_QUOTA_GB",
-    )?;
+    push_float_if_valid(&mut env, conn, "max_storage_gb", "TIKCLIP_STORAGE_QUOTA_GB")?;
     push_bool_setting(
         &mut env,
         conn,
         "auto_process_after_record",
         "TIKCLIP_AUTO_PROCESS_AFTER_RECORD",
     )?;
+    push_int_if_valid(
+        &mut env,
+        conn,
+        "TIKCLIP_RAW_RETENTION_DAYS",
+        "TIKCLIP_RAW_RETENTION_DAYS",
+    )?;
+    push_int_if_valid(
+        &mut env,
+        conn,
+        "TIKCLIP_ARCHIVE_RETENTION_DAYS",
+        "TIKCLIP_ARCHIVE_RETENTION_DAYS",
+    )?;
+    push_int_if_valid(
+        &mut env,
+        conn,
+        "TIKCLIP_STORAGE_WARN_PERCENT",
+        "TIKCLIP_STORAGE_WARN_PERCENT",
+    )?;
+    push_int_if_valid(
+        &mut env,
+        conn,
+        "TIKCLIP_STORAGE_CLEANUP_PERCENT",
+        "TIKCLIP_STORAGE_CLEANUP_PERCENT",
+    )?;
+
+    push_bool_setting(
+        &mut env,
+        conn,
+        "product_vector_enabled",
+        "TIKCLIP_PRODUCT_VECTOR_ENABLED",
+    )?;
+    if let Some(t) = get_setting_trimmed(conn, "gemini_api_key").map_err(|e| e.to_string())? {
+        env.push(("TIKCLIP_GEMINI_API_KEY".to_string(), t));
+    }
+    if let Some(t) =
+        get_setting_trimmed(conn, "gemini_embedding_model").map_err(|e| e.to_string())?
+    {
+        env.push(("TIKCLIP_GEMINI_EMBEDDING_MODEL".to_string(), t));
+    }
+    push_int_if_valid(
+        &mut env,
+        conn,
+        "gemini_embedding_dimensions",
+        "TIKCLIP_GEMINI_EMBEDDING_DIMENSIONS",
+    )?;
+
+    push_bool_setting(
+        &mut env,
+        conn,
+        "auto_tag_clip_product_enabled",
+        "TIKCLIP_AUTO_TAG_CLIP_PRODUCT_ENABLED",
+    )?;
+    push_int_if_valid(
+        &mut env,
+        conn,
+        "auto_tag_clip_frame_count",
+        "TIKCLIP_AUTO_TAG_CLIP_FRAME_COUNT",
+    )?;
+    push_float_if_valid(
+        &mut env,
+        conn,
+        "auto_tag_clip_max_score",
+        "TIKCLIP_AUTO_TAG_CLIP_MAX_SCORE",
+    )?;
+    push_float_if_valid(
+        &mut env,
+        conn,
+        "suggest_weight_image",
+        "TIKCLIP_SUGGEST_WEIGHT_IMAGE",
+    )?;
+    push_float_if_valid(
+        &mut env,
+        conn,
+        "suggest_weight_text",
+        "TIKCLIP_SUGGEST_WEIGHT_TEXT",
+    )?;
+    push_float_if_valid(
+        &mut env,
+        conn,
+        "suggest_min_fused_score",
+        "TIKCLIP_SUGGEST_MIN_FUSED_SCORE",
+    )?;
+    push_bool_setting(
+        &mut env,
+        conn,
+        "debug_keep_suggest_clip_frames",
+        "TIKCLIP_DEBUG_KEEP_SUGGEST_CLIP_FRAMES",
+    )?;
+    if let Some(t) =
+        get_setting_trimmed(conn, "suggest_image_embed_focus_prompt").map_err(|e| e.to_string())?
+    {
+        env.push(("TIKCLIP_SUGGEST_IMAGE_EMBED_FOCUS_PROMPT".to_string(), t));
+    }
+
+    push_bool_setting(
+        &mut env,
+        conn,
+        "audio_processing_enabled",
+        "TIKCLIP_AUDIO_PROCESSING_ENABLED",
+    )?;
+    push_float_if_valid(
+        &mut env,
+        conn,
+        "speech_merge_gap_sec",
+        "TIKCLIP_SPEECH_MERGE_GAP_SEC",
+    )?;
+    push_float_if_valid(
+        &mut env,
+        conn,
+        "speech_cut_tolerance_sec",
+        "TIKCLIP_SPEECH_CUT_TOLERANCE_SEC",
+    )?;
+    push_int_if_valid(&mut env, conn, "stt_num_threads", "TIKCLIP_STT_NUM_THREADS")?;
+    push_stt_quantize(&mut env, conn)?;
 
     Ok(env)
+}
+
+fn push_stt_quantize(env: &mut Vec<(String, String)>, conn: &Connection) -> Result<(), String> {
+    if let Some(t) = get_setting_trimmed(conn, "stt_quantize").map_err(|e| e.to_string())? {
+        let lower = t.to_ascii_lowercase();
+        let v = match lower.as_str() {
+            "auto" => "auto",
+            "fp32" | "float32" => "fp32",
+            "int8" => "int8",
+            _ => {
+                return Err(format!(
+                    "stt_quantize must be auto, fp32, or int8, got {t:?}"
+                ));
+            }
+        };
+        env.push(("TIKCLIP_STT_QUANTIZE".to_string(), v.to_string()));
+    }
+    Ok(())
 }

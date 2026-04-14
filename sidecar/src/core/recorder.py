@@ -27,8 +27,7 @@ class RecordingManager:
         """True while a worker for this account is pending or actively recording."""
         async with self._lock:
             return any(
-                self._account_ids.get(rid) == account_id
-                and w.status in ("pending", "recording")
+                self._account_ids.get(rid) == account_id and w.status in ("pending", "recording")
                 for rid, w in self._workers.items()
             )
 
@@ -106,11 +105,7 @@ class RecordingManager:
                 **worker.to_dict(),
             },
         )
-        if (
-            worker.status == "completed"
-            and settings.auto_process_after_record
-            and worker.file_path
-        ):
+        if worker.status == "completed" and settings.auto_process_after_record and worker.file_path:
             try:
                 from routes.clips import try_schedule_video_processing
 

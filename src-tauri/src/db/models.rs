@@ -60,8 +60,20 @@ pub struct Clip {
     pub scene_type: Option<String>,
     pub ai_tags_json: Option<String>,
     pub notes: Option<String>,
+    pub transcript_text: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SpeechSegment {
+    pub id: i64,
+    pub recording_id: i64,
+    pub start_time: f64,
+    pub end_time: f64,
+    pub text: String,
+    pub confidence: Option<f64>,
+    pub created_at: String,
 }
 
 #[allow(dead_code)]
@@ -76,4 +88,20 @@ pub struct Notification {
     pub clip_id: Option<i64>,
     pub is_read: bool,
     pub created_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Product {
+    pub id: i64,
+    pub name: String,
+    pub description: Option<String>,
+    pub sku: Option<String>,
+    pub image_url: Option<String>,
+    pub tiktok_shop_id: Option<String>,
+    pub tiktok_url: Option<String>,
+    pub price: Option<f64>,
+    pub category: Option<String>,
+    pub media_files_json: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }

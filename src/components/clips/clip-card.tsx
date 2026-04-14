@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
+import { ClipStatusBadge } from "@/components/clips/clip-status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import type { Clip } from "@/types";
 
 function formatDuration(totalSeconds: number): string {
@@ -22,9 +24,17 @@ function formatBytes(n: number): string {
 
 interface ClipCardProps {
   clip: Clip;
+  selected?: boolean;
+  onToggleSelect?: () => void;
+  onOpen?: () => void;
 }
 
-export function ClipCard({ clip }: ClipCardProps) {
+export function ClipCard({
+  clip,
+  selected = false,
+  onToggleSelect,
+  onOpen,
+}: ClipCardProps) {
   const [thumbFailed, setThumbFailed] = useState(false);
 
   useEffect(() => {
@@ -63,7 +73,36 @@ export function ClipCard({ clip }: ClipCardProps) {
   const showVideoPoster = thumbFailed || !thumbSrc;
 
   return (
-    <Card className="overflow-hidden border-[var(--color-border)] bg-[var(--color-surface)]">
+    <Card
+      className={cn(
+        "relative cursor-pointer overflow-hidden border-[var(--color-border)] bg-[var(--color-surface)] ring-1 ring-transparent transition-colors",
+        selected && "ring-primary/60",
+      )}
+      onClick={() => onOpen?.()}
+      onKeyDown={(e) => {
+        if (!onOpen) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+      role={onOpen ? "button" : undefined}
+      tabIndex={onOpen ? 0 : undefined}
+    >
+      <div
+        className="absolute left-2 top-2 z-10"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
+        <input
+          type="checkbox"
+          className="size-4 rounded border border-white/40 bg-black/50 shadow-sm"
+          checked={selected}
+          onChange={() => onToggleSelect?.()}
+          aria-label={`Select clip ${clip.id}`}
+        />
+      </div>
+
       <div className="relative aspect-video w-full bg-black/40">
         {thumbSrc && !thumbFailed ? (
           <img
@@ -89,6 +128,9 @@ export function ClipCard({ clip }: ClipCardProps) {
         <div className="pointer-events-none absolute bottom-2 right-2 rounded bg-black/60 px-2 py-0.5 font-mono text-[10px] text-white">
           {formatDuration(clip.duration_seconds)}
         </div>
+        <div className="pointer-events-none absolute bottom-2 left-2">
+          <ClipStatusBadge status={clip.status} />
+        </div>
       </div>
       <CardHeader className="space-y-1 pb-2">
         <div className="line-clamp-2 text-sm font-semibold text-[var(--color-text)]">
@@ -99,11 +141,8 @@ export function ClipCard({ clip }: ClipCardProps) {
         )}
       </CardHeader>
       <CardContent className="pb-2">
-        {/* <Badge variant="outline" className="text-[10px]">
-          {clip.status}
-        </Badge> */}
         {clip.scene_type && (
-          <Badge variant="secondary" className="ml-2 text-[10px]">
+          <Badge variant="secondary" className="text-[10px]">
             {clip.scene_type}
           </Badge>
         )}

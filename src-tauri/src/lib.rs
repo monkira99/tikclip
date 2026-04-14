@@ -2,8 +2,8 @@ mod app_paths;
 mod commands;
 mod db;
 mod sidecar;
-mod time_hcm;
 mod sidecar_env;
+mod time_hcm;
 mod tray;
 
 use db::init::initialize_database;
@@ -46,7 +46,26 @@ pub fn run() {
             commands::accounts::update_account_live_status,
             commands::accounts::sync_accounts_live_status,
             commands::clips::insert_clip_from_sidecar,
+            commands::clips::insert_speech_segment,
+            commands::clips::list_speech_segments,
             commands::clips::list_clips,
+            commands::clips::list_clips_filtered,
+            commands::clips::get_clip_by_id,
+            commands::clips::update_clip_status,
+            commands::clips::update_clip_title,
+            commands::clips::update_clip_notes,
+            commands::clips::batch_update_clip_status,
+            commands::clips::batch_delete_clips,
+            commands::clips::insert_trimmed_clip,
+            commands::products::list_products,
+            commands::products::get_product_by_id,
+            commands::products::create_product,
+            commands::products::update_product,
+            commands::products::delete_product,
+            commands::products::list_clip_products,
+            commands::products::tag_clip_product,
+            commands::products::untag_clip_product,
+            commands::products::batch_tag_clip_products,
             commands::dashboard::get_dashboard_stats,
             commands::notifications::insert_notification,
             commands::notifications::list_notifications,
@@ -55,6 +74,9 @@ pub fn run() {
             commands::recordings::sync_recording_from_sidecar,
             commands::settings::get_setting,
             commands::settings::set_setting,
+            commands::storage::delete_recording_files,
+            commands::storage::list_recordings_for_cleanup,
+            commands::storage::list_activity_feed,
             commands::paths::get_app_data_paths,
             commands::paths::open_path,
             commands::paths::storage_root_is_custom,
@@ -72,8 +94,9 @@ pub fn run() {
                 .path()
                 .app_config_dir()
                 .expect("failed to get app config dir");
-            let storage_path = app_paths::resolve_storage_root(home_dir, app_data_dir, app_config_dir)
-                .expect("failed to resolve storage path");
+            let storage_path =
+                app_paths::resolve_storage_root(home_dir, app_data_dir, app_config_dir)
+                    .expect("failed to resolve storage path");
             std::fs::create_dir_all(&storage_path).ok();
 
             let db_path = storage_path.join("data").join("app.db");

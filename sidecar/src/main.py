@@ -1,10 +1,50 @@
+import io
+import os
 import socket
+import sys
 
 import uvicorn
 
+import onnx_runtime_preload
 from app import create_app
 from config import settings
 from logging_config import setup_sidecar_logging
+
+onnx_runtime_preload.preload_onnxruntime_shared_lib()
+
+
+def rebind_stdout_to_stderr_after_port_line() -> None:
+    """Tauri spawns the sidecar with stdout piped only to read ``SIDECAR_PORT=``.
+
+    After that line the reader may stop; fd 1 still pointed at the pipe, so
+    ``uvicorn.access`` (stdout) raises BrokenPipeError. Share fd 1 with stderr
+    (inherited by the parent) for all later output.
+    """
+    out = sys.__stdout__
+    err = sys.__stderr__
+    if out is None or err is None:
+        return
+    try:
+        out_fd = out.fileno()
+        err_fd = err.fileno()
+    except OSError:
+        return
+    if out_fd == err_fd:
+        return
+    try:
+        sys.stdout.flush()
+    except (BrokenPipeError, OSError):
+        pass
+    try:
+        os.dup2(err_fd, out_fd)
+    except OSError:
+        return
+    sys.stdout = io.TextIOWrapper(
+        io.FileIO(out_fd, mode="w", closefd=False),
+        encoding="utf-8",
+        errors="replace",
+        line_buffering=True,
+    )
 
 
 def bind_sidecar_socket() -> tuple[socket.socket, int]:
@@ -51,6 +91,7 @@ def main():
     setup_sidecar_logging()
     sock, port = bind_sidecar_socket()
     print(f"SIDECAR_PORT={port}", flush=True)
+    rebind_stdout_to_stderr_after_port_line()
 
     app = create_app()
     try:

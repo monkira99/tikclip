@@ -8,7 +8,8 @@ use tauri::State;
 #[serde(rename_all = "camelCase")]
 pub struct DashboardStats {
     pub clips_today: i64,
-    /// Max of DB column sums, bytes at stored paths, and recursive size of `{root}/clips` + `{root}/records`.
+    /// Max of DB column sums, bytes at stored paths, and recursive size under `clips/`, `records/`,
+    /// legacy `recordings/`, and `products/`.
     pub storage_used_bytes: i64,
     /// From `app_settings.max_storage_gb` when set and positive; otherwise null (no quota in UI).
     pub storage_quota_gb: Option<f64>,
@@ -80,7 +81,12 @@ fn sum_files_recursive(root: &Path) -> i64 {
 fn layout_media_usage_bytes(storage_root: &Path) -> i64 {
     let clips = storage_root.join("clips");
     let records = storage_root.join("records");
-    sum_files_recursive(&clips).saturating_add(sum_files_recursive(&records))
+    let recordings_legacy = storage_root.join("recordings");
+    let products = storage_root.join("products");
+    sum_files_recursive(&clips)
+        .saturating_add(sum_files_recursive(&records))
+        .saturating_add(sum_files_recursive(&recordings_legacy))
+        .saturating_add(sum_files_recursive(&products))
 }
 
 #[tauri::command]
@@ -95,26 +101,21 @@ pub fn get_dashboard_stats(
 
     let storage_root: PathBuf = state.storage_path.clone();
 
-    let (
-        clips_today,
-        sum_columns,
-        sum_disk,
-        storage_quota_gb,
-    ): (i64, i64, i64, Option<f64>) = {
+    let (clips_today, sum_columns, sum_disk, storage_quota_gb): (i64, i64, i64, Option<f64>) = {
         let conn = state.db.lock().map_err(|e| e.to_string())?;
 
         // Match "today" by DB timestamp prefix OR by folder segment in file_path (sidecar uses
         // `YYYY-MM-DD` in paths; `created_at` is stored as GMT+7 wall clock).
         let needle = format!("/{today}/");
         let clips_today: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM clips WHERE substr(created_at, 1, 10) = ?1 \
+            .query_row(
+                "SELECT COUNT(*) FROM clips WHERE substr(created_at, 1, 10) = ?1 \
              OR instr(file_path, ?2) > 0 \
              OR instr(replace(file_path, '\\', '/'), ?2) > 0",
-            params![today, &needle],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
+                params![today, &needle],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
 
         let clip_bytes: i64 = conn
             .query_row(
@@ -155,18 +156,11 @@ pub fn get_dashboard_stats(
             }
         });
 
-        (
-            clips_today,
-            sum_columns,
-            sum_disk,
-            storage_quota_gb,
-        )
+        (clips_today, sum_columns, sum_disk, storage_quota_gb)
     };
 
     let layout_bytes = layout_media_usage_bytes(&storage_root);
-    let storage_used_bytes = sum_columns
-        .max(sum_disk)
-        .max(layout_bytes);
+    let storage_used_bytes = sum_columns.max(sum_disk).max(layout_bytes);
 
     log::info!(
         "dashboard_stats: clips_today={} storage_used_bytes={} (db_sum={} disk_paths_sum={} layout_clips_records_sum={})",

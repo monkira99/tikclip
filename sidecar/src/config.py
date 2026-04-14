@@ -15,8 +15,17 @@ class Settings(BaseSettings):
     # Desktop app uses ~/.tikclip by default; CLI / standalone may set TIKCLIP_STORAGE_PATH or .env.
     storage_path: Path = Path.home() / ".tikclip"
     log_level: str = "info"
-    # TIKCLIP_DEBUG_TIKTOK=1 — log short HTML snippet when room_id parse fails (no secrets).
-    debug_tiktok: bool = False
+    # TIKCLIP_DEBUG_TIKTOK=1 — save live-page HTML only on HTTP errors or suspected WAF/block HTML
+    # under {TIKCLIP_STORAGE_PATH}/debug/tiktok_live_html/ (log path; no secrets in logs).
+    debug_tiktok: bool = True
+    # TikTok HTTP: curl_cffi = Chrome TLS impersonation (see tiktok-live-recorder); httpx = legacy.
+    tiktok_http_backend: str = "curl_cffi"
+    tiktok_curl_impersonate: str = "chrome131"
+    # Opt-in third-party sign API (e.g. tikrec): sends unique_id off-device; then TikTok JSON.
+    tiktok_room_sign_enabled: bool = True
+    tiktok_room_sign_base_url: str = "https://tikrec.com"
+    # TikTok HTTP request timeout (curl_cffi / httpx), seconds.
+    tiktok_http_timeout_seconds: float = 45.0
     poll_interval_seconds: int = 30
     max_concurrent_recordings: int = 5
     # Max length of one live recording if API omits max_duration_seconds (Settings, minutes).
@@ -31,6 +40,48 @@ class Settings(BaseSettings):
     auto_process_after_record: bool = True
     auto_cleanup_raw: bool = True
     raw_retention_days: int = 7
+    # No clip DB here: default 0 skips age-based deletion under clips/.
+    archive_retention_days: int = 0
+    storage_warn_percent: int = 80
+    storage_cleanup_percent: int = 95
+    cleanup_interval_minutes: int = 30
+
+    # Product media vector index (zvec + Gemini Embedding API). Driven by Tauri Settings → env.
+    product_vector_enabled: bool = False
+    gemini_api_key: str | None = None
+    gemini_embedding_model: str = "gemini-embedding-2-preview"
+    gemini_embedding_dimensions: int = 1536
+    # Appended after product name for Gemini multimodal embed when indexing product images/videos.
+    # Full caption: "{product_name} {product_media_embed_suffix}" (skipped if name is empty).
+    product_media_embed_suffix: str = "đang được mặc hoặc cầm trên tay giới thiệu"
+
+    # After each new clip: extract frames → Gemini image embed → zvec; tag clip if match is strong.
+    auto_tag_clip_product_enabled: bool = False
+    auto_tag_clip_frame_count: int = 4
+    auto_tag_clip_max_score: float = 0.35
+    # Weighted fusion for hybrid suggest (image frames + STT text). Used when transcript is present.
+    # Zero disables that branch: no frame extract/embed, or no transcript vector search.
+    suggest_weight_image: float = 0.6
+    suggest_weight_text: float = 0.4
+    # Minimum normalized fused score (0-1) to accept a hybrid match.
+    suggest_min_fused_score: float = 0.25
+    # Prepended to clip frame/thumbnail as text part in Gemini multimodal embed (suggest-product
+    # image search only). Empty = image bytes only. Not the STT transcript.
+    suggest_image_embed_focus_prompt: str = (
+        "Focus on the main product in this image for similarity to product catalog photos."
+    )
+    # When true: keep JPEG frames from suggest-product under
+    # {storage_path}/debug/suggest_clip_frames/<timestamp>_<id>/ (see API response field).
+    debug_keep_suggest_clip_frames: bool = False
+
+    # Audio: VAD + STT (sherpa-onnx, gipformer ONNX). Models under models_path.
+    audio_processing_enabled: bool = True
+    speech_merge_gap_sec: float = 0.5
+    speech_cut_tolerance_sec: float = 1.5
+    stt_num_threads: int = 4
+    # auto: fp32 when CUDA ExecutionProvider available, else int8.
+    stt_quantize: str = "auto"
+    models_path: Path = Path.home() / ".tikclip" / "models"
 
     model_config = SettingsConfigDict(
         env_prefix="TIKCLIP_",

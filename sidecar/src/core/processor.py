@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from config import settings
+from core.audio_processor import AudioProcessor, SpeechSpan
 from core.time_hcm import today_ymd_hcm
 from ws.manager import ws_manager
 
@@ -42,6 +43,7 @@ class ClipInfo:
     start_sec: float
     end_sec: float
     duration_sec: float
+    transcript_text: str | None = None
 
 
 @dataclass
@@ -57,6 +59,7 @@ class VideoProcessor:
     status: str = "pending"
     progress_percent: float = 0.0
     clips: list[ClipInfo] = field(default_factory=list)
+    speech_segments: list[SpeechSpan] = field(default_factory=list)
     error_message: str | None = None
 
     @staticmethod
@@ -67,6 +70,7 @@ class VideoProcessor:
         self.status = "processing"
         self.progress_percent = 0.0
         self.clips.clear()
+        self.speech_segments.clear()
         self.error_message = None
 
         if not self.source_path.is_file():
@@ -77,9 +81,19 @@ class VideoProcessor:
 
         try:
             total_duration = await asyncio.to_thread(_probe_duration_seconds, self.source_path)
+
+            if settings.audio_processing_enabled:
+                audio = AudioProcessor(
+                    recording_id=self.recording_id,
+                    username=self.username,
+                    source_path=self.source_path,
+                    account_id=self.account_id,
+                )
+                self.speech_segments = await audio.process()
+
             scenes = await self._detect_scenes()
             segments = [(s, e) for s, e in scenes]
-            grouped = self._group_scenes(segments, total_duration)
+            grouped = self._group_scenes_with_speech(segments, total_duration)
             n = len(grouped)
             if n == 0:
                 self.status = "completed"
@@ -113,6 +127,7 @@ class VideoProcessor:
                     duration,
                 )
 
+                transcript = self._transcript_for_clip_range(start_sec, end_sec)
                 info = ClipInfo(
                     index=file_index,
                     path=clip_path,
@@ -120,26 +135,27 @@ class VideoProcessor:
                     start_sec=start_sec,
                     end_sec=end_sec,
                     duration_sec=duration,
+                    transcript_text=transcript,
                 )
                 self.clips.append(info)
 
                 pct = 100.0 * (i + 1) / n
                 self.progress_percent = pct
                 await self._broadcast_progress(pct, i + 1, n)
-                await ws_manager.broadcast(
-                    "clip_ready",
-                    {
-                        "recording_id": self.recording_id,
-                        "account_id": self.account_id,
-                        "username": self.username,
-                        "clip_index": info.index,
-                        "path": str(info.path),
-                        "thumbnail_path": str(info.thumbnail_path),
-                        "start_sec": info.start_sec,
-                        "end_sec": info.end_sec,
-                        "duration_sec": info.duration_sec,
-                    },
-                )
+                clip_payload: dict = {
+                    "recording_id": self.recording_id,
+                    "account_id": self.account_id,
+                    "username": self.username,
+                    "clip_index": info.index,
+                    "path": str(info.path),
+                    "thumbnail_path": str(info.thumbnail_path),
+                    "start_sec": info.start_sec,
+                    "end_sec": info.end_sec,
+                    "duration_sec": info.duration_sec,
+                }
+                if transcript:
+                    clip_payload["transcript_text"] = transcript
+                await ws_manager.broadcast("clip_ready", clip_payload)
 
             self.status = "completed"
             self.progress_percent = 100.0
@@ -187,6 +203,119 @@ class VideoProcessor:
             start_in_scene=True,
         )
         return [(start.get_seconds(), end.get_seconds()) for start, end in scene_list]
+
+    def _speech_gap_intervals(
+        self,
+        spans: list[SpeechSpan],
+        total_duration: float,
+    ) -> list[tuple[float, float]]:
+        if total_duration <= 0:
+            return []
+        if not spans:
+            return [(0.0, total_duration)]
+        ordered = sorted(spans, key=lambda s: s.start_sec)
+        gaps: list[tuple[float, float]] = []
+        if ordered[0].start_sec > 1e-3:
+            gaps.append((0.0, ordered[0].start_sec))
+        for i in range(len(ordered) - 1):
+            gaps.append((ordered[i].end_sec, ordered[i + 1].start_sec))
+        if ordered[-1].end_sec < total_duration - 1e-3:
+            gaps.append((ordered[-1].end_sec, total_duration))
+        return [(a, b) for a, b in gaps if b - a > 1e-3]
+
+    @staticmethod
+    def _raw_scene_boundary_times(segments: list[tuple[float, float]]) -> list[float]:
+        if len(segments) < 2:
+            return []
+        return sorted({segments[i][1] for i in range(len(segments) - 1)})
+
+    def _hybrid_internal_cuts(
+        self,
+        scene_bounds: list[float],
+        gaps: list[tuple[float, float]],
+        tol: float,
+    ) -> list[float]:
+        min_overlap = 0.02
+        out: list[float] = []
+        for t in scene_bounds:
+            for g0, g1 in gaps:
+                lo, hi = t - tol, t + tol
+                overlap = min(g1, hi) - max(g0, lo)
+                if overlap >= min_overlap:
+                    out.append(t)
+                    break
+        return sorted(set(out))
+
+    @staticmethod
+    def _intervals_from_internal_cuts(
+        cuts: list[float],
+        total_duration: float,
+    ) -> list[tuple[float, float]]:
+        inner = sorted({c for c in cuts if 0.0 < c < total_duration})
+        points = [0.0, *inner, total_duration]
+        out: list[tuple[float, float]] = []
+        for i in range(len(points) - 1):
+            a, b = points[i], points[i + 1]
+            if b > a:
+                out.append((a, b))
+        return out
+
+    def _group_consecutive_ranges(
+        self,
+        parts: list[tuple[float, float]],
+    ) -> list[tuple[float, float]]:
+        """Same merge/split rules as scene grouping, for a consecutive partition."""
+        if not parts:
+            return []
+        merged: list[tuple[float, float]] = []
+        i = 0
+        n = len(parts)
+        while i < n:
+            start = parts[i][0]
+            end = parts[i][1]
+            i += 1
+            while i < n and end - start < self.clip_min_duration:
+                end = parts[i][1]
+                i += 1
+            while i < n and parts[i][1] - start <= self.clip_max_duration:
+                end = parts[i][1]
+                i += 1
+            merged.extend(self._split_long_segment(start, end))
+        return merged
+
+    def _group_scenes_with_speech(
+        self,
+        segments: list[tuple[float, float]],
+        total_duration: float,
+    ) -> list[tuple[float, float]]:
+        visual = self._group_scenes(segments, total_duration)
+        if not self.speech_segments or total_duration <= 0:
+            return visual
+        gaps = self._speech_gap_intervals(self.speech_segments, total_duration)
+        bounds = self._raw_scene_boundary_times(segments)
+        tol = settings.speech_cut_tolerance_sec
+        safe = self._hybrid_internal_cuts(bounds, gaps, tol)
+        if not safe:
+            return visual
+        raw_parts = self._intervals_from_internal_cuts(safe, total_duration)
+        if not raw_parts:
+            return visual
+        hybrid = self._group_consecutive_ranges(raw_parts)
+        return hybrid or visual
+
+    def _transcript_for_clip_range(self, start_sec: float, end_sec: float) -> str | None:
+        if not self.speech_segments:
+            return None
+        texts: list[str] = []
+        for sp in self.speech_segments:
+            if sp.end_sec <= start_sec or sp.start_sec >= end_sec:
+                continue
+            t = sp.text.strip()
+            if t:
+                texts.append(t)
+        if not texts:
+            return None
+        return " ".join(texts)
 
     def _group_scenes(
         self,

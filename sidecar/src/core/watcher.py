@@ -181,7 +181,7 @@ class AccountWatcher:
                 pass
 
     async def on_autorecord_segment_end(self, account_id: int) -> None:
-        """After a segment ends on max duration (`completed`), immediately re-check and record if still live."""
+        """After max-duration segment (`completed`), re-check and record if still live."""
         acc = self._accounts.get(account_id)
         if acc is None or not acc.auto_record:
             return
@@ -238,12 +238,11 @@ class AccountWatcher:
                     e,
                 )
                 cookies = None
-            recording_active = await recording_manager.has_active_recording_for_account(
-                account_id
-            )
+            recording_active = await recording_manager.has_active_recording_for_account(account_id)
             if recording_active:
-                # Active recording ⇒ host was live when we started; skip TikTok until the worker ends.
-                # Reuse last known room/stream for logs and edge broadcasts (not required for normal flow).
+                # Active recording ⇒ host was live when we started; skip TikTok until the worker
+                # ends.
+                # Reuse last known room/stream for logs and edge broadcasts (optional for flow).
                 is_live = True
                 result = {
                     "username": acc.username,
@@ -253,8 +252,10 @@ class AccountWatcher:
                     "viewer_count": None,
                 }
                 logger.info(
-                    "poll account_id=%s username=%s is_live=%s room_id=%s (skip API: recording active; "
-                    "room_id=last_seen_if_any) cookies=%s",
+                    (
+                        "poll account_id=%s username=%s is_live=%s room_id=%s "
+                        "(skip API: recording active; room_id=last_seen_if_any) cookies=%s"
+                    ),
                     account_id,
                     acc.username,
                     is_live,
@@ -285,9 +286,7 @@ class AccountWatcher:
                     },
                 )
                 if acc.auto_record and room_id:
-                    await self._start_autorecord_from_result(
-                        account_id, acc, result, cookies
-                    )
+                    await self._start_autorecord_from_result(account_id, acc, result, cookies)
             if recording_active:
                 acc = replace(acc, was_live=is_live)
             elif is_live:

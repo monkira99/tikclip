@@ -11,9 +11,11 @@ import { AccountsPage } from "@/pages/accounts";
 import { ClipsPage } from "@/pages/clips";
 import { DashboardPage } from "@/pages/dashboard";
 import { RecordingsPage } from "@/pages/recordings";
+import { ProductsPage } from "@/pages/products";
 import { SettingsPage } from "@/pages/settings";
 import {
   insertClipFromSidecarWsPayload,
+  insertSpeechSegmentFromWsPayload,
   syncRecordingFromSidecarWsPayload,
 } from "@/lib/sidecar-db-sync";
 import { hydrateNotificationsFromDb } from "@/lib/notifications-sync";
@@ -34,6 +36,7 @@ type PageId =
   | "accounts"
   | "recordings"
   | "clips"
+  | "products"
   | "statistics"
   | "settings";
 
@@ -42,6 +45,7 @@ const pageMeta: Record<PageId, { title: string; subtitle: string }> = {
   accounts: { title: "Accounts", subtitle: "Manage TikTok accounts" },
   recordings: { title: "Recordings", subtitle: "Active and completed recordings" },
   clips: { title: "Clips", subtitle: "Generated video clips" },
+  products: { title: "Products", subtitle: "Product catalog and tagging" },
   statistics: { title: "Statistics", subtitle: "Analytics and reports" },
   settings: { title: "Settings", subtitle: "App configuration" },
 };
@@ -51,6 +55,7 @@ const pageComponents: Record<PageId, ComponentType> = {
   accounts: AccountsPage,
   recordings: RecordingsPage,
   clips: ClipsPage,
+  products: ProductsPage,
   statistics: () => (
     <p className="text-[var(--color-text-muted)]">Statistics coming in Phase 3.</p>
   ),
@@ -64,6 +69,52 @@ const LIVE_HTTP_SYNC_MS = 5000;
 function logSidecarDbSyncError(context: string, err: unknown): void {
   if (import.meta.env.DEV) {
     console.warn(`[TikClip] ${context}`, err);
+  }
+}
+
+function parseAutoTagClipProductEnabled(raw: string | null): boolean {
+  if (raw === null || raw.trim() === "") {
+    return false;
+  }
+  const t = raw.trim().toLowerCase();
+  return t === "1" || t === "true" || t === "yes" || t === "on";
+}
+
+async function maybeAutoTagClipAfterInsert(
+  clipId: number,
+  data: Record<string, unknown>,
+): Promise<void> {
+  try {
+    if (!api.getSidecarBaseUrl()) {
+      return;
+    }
+    const raw = await api.getSetting("auto_tag_clip_product_enabled");
+    if (!parseAutoTagClipProductEnabled(raw)) {
+      return;
+    }
+    const videoPath = typeof data.path === "string" ? data.path : "";
+    if (!videoPath) {
+      return;
+    }
+    const thumbnailPath =
+      typeof data.thumbnail_path === "string" && data.thumbnail_path.trim() !== ""
+        ? data.thumbnail_path
+        : null;
+    const transcriptText =
+      typeof data.transcript_text === "string" && data.transcript_text.trim() !== ""
+        ? data.transcript_text
+        : null;
+    const res = await api.suggestProductForClip({
+      video_path: videoPath,
+      thumbnail_path: thumbnailPath,
+      transcript_text: transcriptText,
+    });
+    if (res.product_id != null) {
+      await api.tagClipProduct(clipId, res.product_id);
+      useClipStore.getState().bumpClipsRevision();
+    }
+  } catch {
+    /* sidecar/Gemini optional */
   }
 }
 
@@ -88,6 +139,7 @@ export function AppShell() {
   const [currentPage, setCurrentPage] = useState<PageId>("dashboard");
   const sidecarPort = useAppStore((s) => s.sidecarPort);
   const sidecarConnected = useAppStore((s) => s.sidecarConnected);
+  const navigationTarget = useAppStore((s) => s.navigationTarget);
   const activeRecordings = useAppStore((s) => s.activeRecordings);
   const setActiveRecordings = useAppStore((s) => s.setActiveRecordings);
   const activeRecordingCount = useRecordingStore((s) => countActiveRecordings(s.recordings));
@@ -96,6 +148,28 @@ export function AppShell() {
   useEffect(() => {
     setActiveRecordings(activeRecordingCount);
   }, [activeRecordingCount, setActiveRecordings]);
+
+  useEffect(() => {
+    if (!navigationTarget) {
+      return;
+    }
+    const p = navigationTarget.page;
+    if (
+      p === "dashboard" ||
+      p === "accounts" ||
+      p === "recordings" ||
+      p === "clips" ||
+      p === "products" ||
+      p === "statistics" ||
+      p === "settings"
+    ) {
+      setCurrentPage(p);
+    }
+    if (navigationTarget.clipId != null) {
+      useClipStore.getState().setActiveClipId(navigationTarget.clipId);
+    }
+    useAppStore.getState().clearNavigationTarget();
+  }, [navigationTarget]);
 
   useEffect(() => {
     void hydrateNotificationsFromDb();
@@ -139,6 +213,7 @@ export function AppShell() {
         logSidecarDbSyncError("recording_finished → SQLite sync failed", err),
       );
       dispatchSidecarNotification("recording_finished", data);
+      useAppStore.getState().bumpDashboardRevision();
       const id = data.recording_id;
       if (typeof id === "string") {
         window.setTimeout(() => {
@@ -167,6 +242,7 @@ export function AppShell() {
 
     const unsubLive = wsClient.on("account_live", (data) => {
       dispatchSidecarNotification("account_live", data);
+      useAppStore.getState().bumpDashboardRevision();
       const rawId = data.account_id;
       const id = typeof rawId === "number" ? rawId : Number(rawId);
       if (Number.isFinite(id)) {
@@ -185,17 +261,41 @@ export function AppShell() {
         return;
       }
       persistLive(id, isLive, "account_status");
+      useAppStore.getState().bumpDashboardRevision();
     });
     const unsubClip = wsClient.on("clip_ready", (data) => {
       dispatchSidecarNotification("clip_ready", data);
+      useAppStore.getState().bumpDashboardRevision();
       void (async () => {
         try {
-          await insertClipFromSidecarWsPayload(data);
+          const clipId = await insertClipFromSidecarWsPayload(data);
           useClipStore.getState().bumpClipsRevision();
+          if (clipId != null) {
+            void maybeAutoTagClipAfterInsert(clipId, data);
+          }
         } catch (err) {
           logSidecarDbSyncError("clip_ready → SQLite insert failed", err);
         }
       })();
+    });
+
+    const unsubSpeechSeg = wsClient.on("speech_segment_ready", (data) => {
+      void (async () => {
+        try {
+          await insertSpeechSegmentFromWsPayload(data);
+        } catch (err) {
+          logSidecarDbSyncError("speech_segment_ready → SQLite insert failed", err);
+        }
+      })();
+    });
+
+    const unsubCleanup = wsClient.on("cleanup_completed", (data) => {
+      dispatchSidecarNotification("cleanup_completed", data);
+      useAppStore.getState().bumpDashboardRevision();
+    });
+    const unsubStorageWarn = wsClient.on("storage_warning", (data) => {
+      dispatchSidecarNotification("storage_warning", data);
+      useAppStore.getState().bumpDashboardRevision();
     });
 
     wsClient.connect(sidecarPort);
@@ -207,6 +307,9 @@ export function AppShell() {
       unsubLive();
       unsubAccountStatus();
       unsubClip();
+      unsubSpeechSeg();
+      unsubCleanup();
+      unsubStorageWarn();
       wsClient.disconnect();
     };
   }, [sidecarPort]);
