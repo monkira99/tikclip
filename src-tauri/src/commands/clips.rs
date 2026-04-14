@@ -247,6 +247,50 @@ pub fn update_clip_notes(
 }
 
 #[tauri::command]
+pub fn update_clip_caption(
+    state: State<'_, AppState>,
+    clip_id: i64,
+    caption_text: Option<String>,
+    caption_status: String,
+    caption_error: Option<String>,
+) -> Result<(), String> {
+    let status = caption_status.trim();
+    let valid = ["pending", "generating", "completed", "failed"];
+    if !valid.contains(&status) {
+        return Err(format!("Invalid caption_status: {caption_status}"));
+    }
+
+    let text_norm = caption_text
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let err_norm = caption_error
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let changed = conn
+        .execute(
+            &format!(
+                "UPDATE clips SET \
+                 caption_text = ?1, \
+                 caption_status = ?2, \
+                 caption_error = ?3, \
+                 caption_generated_at = CASE WHEN ?2 = 'completed' THEN {} ELSE caption_generated_at END, \
+                 updated_at = {} \
+                 WHERE id = ?4",
+                SQL_NOW_HCM, SQL_NOW_HCM
+            ),
+            params![text_norm, status, err_norm, clip_id],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err(format!("Clip {clip_id} not found"));
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 pub fn batch_update_clip_status(
     state: State<'_, AppState>,
     clip_ids: Vec<i64>,
