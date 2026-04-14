@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # sidecar/src/config.py -> repo sidecar/ (where pyproject.toml and .env live)
@@ -15,8 +16,13 @@ class Settings(BaseSettings):
     # Desktop app uses ~/.tikclip by default; CLI / standalone may set TIKCLIP_STORAGE_PATH or .env.
     storage_path: Path = Path.home() / ".tikclip"
     log_level: str = "info"
-    # TIKCLIP_DEBUG_TIKTOK=1 — log short HTML snippet when room_id parse fails (no secrets).
-    debug_tiktok: bool = False
+    debug_tiktok: bool = Field(
+        default=False,
+        description=(
+            "If true, log a truncated HTML snippet when the live page has no room_id "
+            "(stderr only; does not write files)."
+        ),
+    )
     poll_interval_seconds: int = 30
     max_concurrent_recordings: int = 5
     # Max length of one live recording if API omits max_duration_seconds (Settings, minutes).
