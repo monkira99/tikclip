@@ -6,6 +6,7 @@ import type {
   AccountType,
   AutoRecordSchedule,
   Clip,
+  ClipCaptionStatus,
   ClipFilters,
   CreateFlowInput,
   CreateAccountInput,
@@ -252,7 +253,7 @@ export async function updateClipNotes(clipId: number, notes: string): Promise<vo
 export async function updateClipCaption(
   clipId: number,
   captionText: string | null,
-  captionStatus: "pending" | "generating" | "completed" | "failed",
+  captionStatus: ClipCaptionStatus,
   captionError?: string | null,
 ): Promise<void> {
   await invoke("update_clip_caption", {

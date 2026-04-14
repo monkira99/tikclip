@@ -30,6 +30,7 @@ type FlowStore = {
   view: FlowView;
   selectedNode: FlowNodeKey | null;
   loading: boolean;
+  error: string | null;
   filters: FlowFilters;
 
   fetchFlows: () => Promise<void>;
@@ -52,6 +53,69 @@ const DEFAULT_FILTERS: FlowFilters = {
   status: "all",
 };
 
+let pendingFetchRequests = 0;
+let fetchFlowsToken = 0;
+let fetchFlowDetailToken = 0;
+
+function beginFetch(set: (partial: Partial<FlowStore>) => void): () => void {
+  pendingFetchRequests += 1;
+  set({ loading: true });
+  return () => {
+    pendingFetchRequests = Math.max(0, pendingFetchRequests - 1);
+    set({ loading: pendingFetchRequests > 0 });
+  };
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
+function normalizeFlowStatus(status: FlowStatus, enabled: boolean): FlowStatus {
+  if (!enabled) {
+    return "disabled";
+  }
+  if (status === "disabled") {
+    return "idle";
+  }
+  return status;
+}
+
+function normalizeFlowSummary(flow: FlowSummary): FlowSummary {
+  return {
+    ...flow,
+    status: normalizeFlowStatus(flow.status, flow.enabled),
+  };
+}
+
+function normalizeFlowDetail(detail: FlowDetail): FlowDetail {
+  return {
+    ...detail,
+    flow: {
+      ...detail.flow,
+      status: normalizeFlowStatus(detail.flow.status, detail.flow.enabled),
+    },
+  };
+}
+
+function applyEnabledToFlowSummary(flow: FlowSummary, enabled: boolean): FlowSummary {
+  return {
+    ...flow,
+    enabled,
+    status: normalizeFlowStatus(flow.status, enabled),
+  };
+}
+
+function applyEnabledToFlowDetail(detail: FlowDetail, enabled: boolean): FlowDetail {
+  return {
+    ...detail,
+    flow: {
+      ...detail.flow,
+      enabled,
+      status: normalizeFlowStatus(detail.flow.status, enabled),
+    },
+  };
+}
+
 export const useFlowStore = create<FlowStore>((set, get) => ({
   flows: [],
   activeFlowId: null,
@@ -59,30 +123,50 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
   view: "list",
   selectedNode: null,
   loading: false,
+  error: null,
   filters: { ...DEFAULT_FILTERS },
 
   fetchFlows: async () => {
-    set({ loading: true });
+    const token = ++fetchFlowsToken;
+    const endFetch = beginFetch(set);
     try {
       const flows = await listFlows();
-      set({ flows, loading: false });
-    } catch {
-      set({ flows: [], loading: false });
+      if (token !== fetchFlowsToken) {
+        return;
+      }
+      set({ flows: flows.map(normalizeFlowSummary), error: null });
+    } catch (error) {
+      if (token !== fetchFlowsToken) {
+        return;
+      }
+      set({ error: getErrorMessage(error, "Failed to load flows") });
+    } finally {
+      endFetch();
     }
   },
 
   fetchFlowDetail: async (flowId) => {
+    const token = ++fetchFlowDetailToken;
     const targetId = flowId ?? get().activeFlowId;
     if (!targetId) {
-      set({ activeFlow: null });
+      set({ activeFlow: null, error: null });
       return;
     }
-    set({ loading: true });
+
+    const endFetch = beginFetch(set);
     try {
       const detail = await getFlowDetail(targetId);
-      set({ activeFlow: detail, activeFlowId: targetId, loading: false });
-    } catch {
-      set({ activeFlow: null, loading: false });
+      if (token !== fetchFlowDetailToken) {
+        return;
+      }
+      set({ activeFlow: normalizeFlowDetail(detail), activeFlowId: targetId, error: null });
+    } catch (error) {
+      if (token !== fetchFlowDetailToken) {
+        return;
+      }
+      set({ error: getErrorMessage(error, "Failed to load flow detail") });
+    } finally {
+      endFetch();
     }
   },
 
@@ -114,14 +198,30 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
   },
 
   toggleFlowEnabled: async (flowId, enabled) => {
-    await setFlowEnabled(flowId, enabled);
+    const previousFlows = get().flows;
+    const previousActiveFlow = get().activeFlow;
+
     set((state) => ({
-      flows: state.flows.map((flow) => (flow.id === flowId ? { ...flow, enabled } : flow)),
+      flows: state.flows.map((flow) =>
+        flow.id === flowId ? applyEnabledToFlowSummary(flow, enabled) : flow,
+      ),
       activeFlow:
         state.activeFlow && state.activeFlow.flow.id === flowId
-          ? { ...state.activeFlow, flow: { ...state.activeFlow.flow, enabled } }
+          ? applyEnabledToFlowDetail(state.activeFlow, enabled)
           : state.activeFlow,
+      error: null,
     }));
+
+    try {
+      await setFlowEnabled(flowId, enabled);
+    } catch (error) {
+      set({
+        flows: previousFlows,
+        activeFlow: previousActiveFlow,
+        error: getErrorMessage(error, "Failed to update flow state"),
+      });
+      throw error;
+    }
   },
 
   createFlow: async (input) => {
