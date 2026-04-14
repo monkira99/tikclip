@@ -5,6 +5,7 @@ import { ClipStatusBadge } from "@/components/clips/clip-status-badge";
 import { TrimControls } from "@/components/clips/trim-controls";
 import { VideoPlayer, type VideoPlayerHandle } from "@/components/clips/video-player";
 import { Button } from "@/components/ui/button";
+import { ProductMediaThumb } from "@/components/products/product-media-thumb";
 import { ProductPicker } from "@/components/products/product-picker";
 import {
   batchDeleteClips,
@@ -319,13 +320,10 @@ export function ClipDetail({ clipId }: { clipId: number }) {
                     key={p.id}
                     className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-background py-1 pl-1 pr-1 text-sm"
                   >
-                    {p.image_url ? (
-                      <img src={p.image_url} alt="" className="h-6 w-6 rounded-full object-cover" />
-                    ) : (
-                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px]">
-                        📦
-                      </span>
-                    )}
+                    <ProductMediaThumb
+                      imageUrl={p.image_url}
+                      frameClassName="h-6 w-6 rounded-full text-[10px]"
+                    />
                     <span className="max-w-[140px] truncate text-[var(--color-text)]">{p.name}</span>
                     <button
                       type="button"
