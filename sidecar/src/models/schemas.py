@@ -251,6 +251,25 @@ class ProductEmbeddingSearchResponse(BaseModel):
     hits: list[ProductEmbeddingSearchHit] = Field(default_factory=list)
 
 
+class ProductEmbeddingIndexedProductRow(BaseModel):
+    product_id: int = Field(ge=0)
+    image_doc_count: int = Field(default=0, ge=0)
+    video_doc_count: int = Field(default=0, ge=0)
+    text_doc_count: int = Field(default=0, ge=0)
+    product_name: str | None = None
+
+
+class ProductEmbeddingsIndexedSummaryResponse(BaseModel):
+    product_vector_enabled: bool = True
+    store_ready: bool = False
+    vector_store_relative: str = "vector/product_media"
+    total_documents_scanned: int = 0
+    scan_truncated: bool = False
+    product_count: int = 0
+    products: list[ProductEmbeddingIndexedProductRow] = Field(default_factory=list)
+    message: str | None = None
+
+
 class ClipSuggestProductRequest(BaseModel):
     video_path: str
     thumbnail_path: str | None = None

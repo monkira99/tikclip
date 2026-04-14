@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -13,23 +12,10 @@ import {
 } from "@/components/ui/dialog";
 import { deleteProduct, deleteProductEmbeddings, getSidecarBaseUrl } from "@/lib/api";
 import { formatInvokeError } from "@/lib/invoke-error";
+import { productImageSrc } from "@/lib/product-image";
 import { useProductStore } from "@/stores/product-store";
 import type { Product } from "@/types";
 import { cn } from "@/lib/utils";
-
-function productImageSrc(url: string | null): string | null {
-  const u = url?.trim();
-  if (!u) {
-    return null;
-  }
-  if (u.startsWith("http://") || u.startsWith("https://")) {
-    return u;
-  }
-  if (isTauri()) {
-    return convertFileSrc(u);
-  }
-  return u;
-}
 
 function formatPrice(price: number | null): string {
   if (price == null || Number.isNaN(price)) {

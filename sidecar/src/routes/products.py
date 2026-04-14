@@ -2,7 +2,7 @@ import asyncio
 import logging
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import ValidationError
 
 from embeddings.product_vector import (
@@ -12,6 +12,7 @@ from embeddings.product_vector import (
     index_product_text,
     search_by_media_path,
     search_by_text,
+    summarize_indexed_products_sync,
 )
 from models.schemas import (
     DeleteProductEmbeddingsRequest,
@@ -26,6 +27,7 @@ from models.schemas import (
     ProductEmbeddingSearchHit,
     ProductEmbeddingSearchRequest,
     ProductEmbeddingSearchResponse,
+    ProductEmbeddingsIndexedSummaryResponse,
 )
 from tiktok.product_scraper import fetch_product_from_url
 
@@ -92,6 +94,28 @@ async def fetch_product(body: FetchProductRequest):
         data=data,
         error=None if ok else (result.error or "Could not read product from this page."),
     )
+
+
+@router.get(
+    "/api/products/embeddings/indexed-summary",
+    response_model=ProductEmbeddingsIndexedSummaryResponse,
+)
+async def get_embeddings_indexed_summary(
+    max_docs: int = Query(
+        100,
+        ge=1,
+        le=500_000,
+        description="Max zvec documents to scan (higher = slower; cap avoids huge scans).",
+    ),
+):
+    """List product IDs present in the local zvec index with per-modality document counts."""
+    logger.debug("embeddings/indexed-summary max_docs=%s", max_docs)
+
+    def _run() -> dict:
+        return summarize_indexed_products_sync(max_docs=max_docs)
+
+    raw = await asyncio.to_thread(_run)
+    return ProductEmbeddingsIndexedSummaryResponse.model_validate(raw)
 
 
 @router.post(

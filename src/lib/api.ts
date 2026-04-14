@@ -401,6 +401,36 @@ export async function deleteProductEmbeddings(productId: number): Promise<void> 
   });
 }
 
+export type ProductEmbeddingIndexedProductRow = {
+  product_id: number;
+  image_doc_count: number;
+  video_doc_count: number;
+  text_doc_count: number;
+  product_name: string | null;
+};
+
+export type ProductEmbeddingsIndexedSummary = {
+  product_vector_enabled: boolean;
+  store_ready: boolean;
+  vector_store_relative: string;
+  total_documents_scanned: number;
+  scan_truncated: boolean;
+  product_count: number;
+  products: ProductEmbeddingIndexedProductRow[];
+  message: string | null;
+};
+
+export async function getProductEmbeddingsIndexedSummary(options?: {
+  maxDocs?: number;
+}): Promise<ProductEmbeddingsIndexedSummary> {
+  const max = options?.maxDocs ?? 100_000;
+  const q = new URLSearchParams({ max_docs: String(max) });
+  return sidecarJson<ProductEmbeddingsIndexedSummary>(
+    `/api/products/embeddings/indexed-summary?${q.toString()}`,
+    { method: "GET" },
+  );
+}
+
 export type ClipSuggestImageEvidenceHit = {
   product_id: number;
   score: number;

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import logging
+import shutil
 import threading
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -180,6 +181,31 @@ def invalidate_bm25_cache() -> None:
         _bm25_corpus_size = 0
 
 
+def _is_recoverable_zvec_corruption(exc: BaseException) -> bool:
+    """Heuristic: RocksDB/zvec on-disk state is broken (not schema mismatch)."""
+    msg = str(exc).lower()
+    return (
+        "recovery idmap" in msg
+        or "failed to open idmap" in msg
+        or ("rocksdb" in msg and ("corruption" in msg or "no such file" in msg))
+        or ("while open a file for random read" in msg and ".ldb" in msg)
+        or ("corruption" in msg and ("idmap" in msg or "ldb" in msg or "manifest" in msg))
+    )
+
+
+def _purge_corrupted_vector_root_unlocked(root: Path, path_str: str, dim: int) -> None:
+    """Drop cached handle and remove on-disk index. Caller must hold ``_coll_lock``."""
+    invalidate_bm25_cache()
+    rwk = _rw_cache_key(path_str, dim)
+    _coll_cache.pop(rwk, None)
+    if root.exists():
+        shutil.rmtree(root, ignore_errors=True)
+    logger.warning(
+        "Removed corrupted product vector store at %s; re-index product media to restore search.",
+        root,
+    )
+
+
 def ensure_bm25_ready(coll: zvec.Collection) -> tuple[Any, Any]:
     _require_hybrid_schema(coll)
     if not _HAS_DASHTEXT:
@@ -197,7 +223,28 @@ def ensure_bm25_ready(coll: zvec.Collection) -> tuple[Any, Any]:
 
 
 def _open_existing_rw_collection(path_str: str, dim: int) -> zvec.Collection:
-    coll = zvec.open(path_str, option=_COLLECTION_RW)
+    """Open non-empty on-disk collection, or recreate empty if RocksDB/zvec is corrupt.
+
+    Must be called with ``_coll_lock`` held.
+    """
+    root = _vector_root()
+    try:
+        coll = zvec.open(path_str, option=_COLLECTION_RW)
+    except RuntimeError as exc:
+        if not _is_recoverable_zvec_corruption(exc):
+            raise
+        logger.warning(
+            "Product vector store at %s failed to open (%s); recreating empty index.",
+            root,
+            exc,
+        )
+        _purge_corrupted_vector_root_unlocked(root, path_str, dim)
+        root.parent.mkdir(parents=True, exist_ok=True)
+        return zvec.create_and_open(
+            path_str,
+            _build_schema(dim),
+            option=_COLLECTION_RW,
+        )
     got = _embedding_dimension_from_schema(coll.schema)
     if got != dim:
         msg = (
@@ -293,6 +340,137 @@ def get_or_open_collection_for_query_sync() -> zvec.Collection:
         return coll
 
 
+def summarize_indexed_products_sync(*, max_docs: int) -> dict[str, Any]:
+    """Scan zvec documents and aggregate counts per ``product_id`` (no Gemini API calls).
+
+    Returns a dict suitable for ``ProductEmbeddingsIndexedSummaryResponse``.
+    """
+    rel = VECTOR_SUBDIR.as_posix()
+    if not settings.product_vector_enabled:
+        return {
+            "product_vector_enabled": False,
+            "store_ready": False,
+            "vector_store_relative": rel,
+            "total_documents_scanned": 0,
+            "scan_truncated": False,
+            "product_count": 0,
+            "products": [],
+            "message": "Product vector indexing is disabled in settings",
+        }
+
+    dim = settings.gemini_embedding_dimensions
+    if dim < 1 or dim > 8192:
+        return {
+            "product_vector_enabled": True,
+            "store_ready": False,
+            "vector_store_relative": rel,
+            "total_documents_scanned": 0,
+            "scan_truncated": False,
+            "product_count": 0,
+            "products": [],
+            "message": "gemini_embedding_dimensions must be between 1 and 8192",
+        }
+
+    root = _vector_root()
+    path_str = str(root)
+    rwk = _rw_cache_key(path_str, dim)
+
+    with _coll_lock:
+        coll = _coll_cache.get(rwk)
+        if coll is None:
+            if not root.exists() or not any(root.iterdir()):
+                return {
+                    "product_vector_enabled": True,
+                    "store_ready": False,
+                    "vector_store_relative": rel,
+                    "total_documents_scanned": 0,
+                    "scan_truncated": False,
+                    "product_count": 0,
+                    "products": [],
+                    "message": "Product vector store is empty; index product media first",
+                }
+            try:
+                coll = _open_existing_rw_collection(path_str, dim)
+            except (RuntimeError, ValueError) as exc:
+                return {
+                    "product_vector_enabled": True,
+                    "store_ready": False,
+                    "vector_store_relative": rel,
+                    "total_documents_scanned": 0,
+                    "scan_truncated": False,
+                    "product_count": 0,
+                    "products": [],
+                    "message": str(exc),
+                }
+            _coll_cache[rwk] = coll
+
+    try:
+        docs = coll.query(
+            topk=max_docs,
+            output_fields=["product_id", "modality", "product_name"],
+        )
+    except Exception as exc:
+        logger.warning("indexed-products scan query failed: %s", exc)
+        return {
+            "product_vector_enabled": True,
+            "store_ready": False,
+            "vector_store_relative": rel,
+            "total_documents_scanned": 0,
+            "scan_truncated": False,
+            "product_count": 0,
+            "products": [],
+            "message": str(exc),
+        }
+
+    scanned = len(docs)
+    truncated = scanned >= max_docs
+    agg: dict[int, dict[str, Any]] = {}
+    for d in docs:
+        fields = d.fields or {}
+        raw_pid = fields.get("product_id")
+        if raw_pid is None:
+            continue
+        pid = int(raw_pid)
+        mod = str(fields.get("modality") or "").strip().lower()
+        row = agg.setdefault(
+            pid,
+            {"image_doc_count": 0, "video_doc_count": 0, "text_doc_count": 0, "product_name": None},
+        )
+        if mod == "image":
+            row["image_doc_count"] += 1
+        elif mod == "video":
+            row["video_doc_count"] += 1
+        elif mod == "text":
+            row["text_doc_count"] += 1
+        pname = fields.get("product_name")
+        if row["product_name"] is None and pname is not None and str(pname).strip():
+            row["product_name"] = str(pname).strip()
+
+    products = [
+        {
+            "product_id": pid,
+            "image_doc_count": v["image_doc_count"],
+            "video_doc_count": v["video_doc_count"],
+            "text_doc_count": v["text_doc_count"],
+            "product_name": v["product_name"],
+        }
+        for pid, v in sorted(agg.items(), key=lambda x: x[0])
+    ]
+
+    return {
+        "product_vector_enabled": True,
+        "store_ready": True,
+        "vector_store_relative": rel,
+        "total_documents_scanned": scanned,
+        "scan_truncated": truncated,
+        "product_count": len(products),
+        "products": products,
+        "message": (
+            f"Scan capped at max_docs={max_docs}; counts may be incomplete." if truncated else None
+        ),
+    }
+
+
 def delete_vectors_for_product_sync(product_id: int) -> None:
     if not settings.product_vector_enabled:
         return
@@ -304,12 +482,13 @@ def delete_vectors_for_product_sync(product_id: int) -> None:
     rwk = _rw_cache_key(path_str, dim)
     with _coll_lock:
         coll = _coll_cache.get(rwk)
-    if coll is None:
-        try:
-            coll = zvec.open(path_str, option=_COLLECTION_RW)
-        except Exception as exc:
-            logger.debug("skip vector delete: could not open zvec collection: %s", exc)
-            return
+        if coll is None:
+            try:
+                coll = _open_existing_rw_collection(path_str, dim)
+            except (RuntimeError, ValueError) as exc:
+                logger.debug("skip vector delete: could not open zvec collection: %s", exc)
+                return
+        _coll_cache[rwk] = coll
     try:
         coll.delete_by_filter(f"product_id = {int(product_id)}")
         coll.flush()
