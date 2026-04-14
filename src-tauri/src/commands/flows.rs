@@ -7,9 +7,21 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 const FLOW_NODE_KEYS: [&str; 5] = ["start", "record", "clip", "caption", "upload"];
+const FLOW_STATUS_KEYS: [&str; 6] = [
+    "idle",
+    "watching",
+    "recording",
+    "processing",
+    "error",
+    "disabled",
+];
 
 fn is_valid_flow_node(node_key: &str) -> bool {
     FLOW_NODE_KEYS.contains(&node_key)
+}
+
+fn is_valid_flow_status(status: &str) -> bool {
+    FLOW_STATUS_KEYS.contains(&status)
 }
 
 fn map_flow_row(row: &Row) -> SqlResult<Flow> {
@@ -326,6 +338,9 @@ pub fn update_flow(
         if trimmed.is_empty() {
             return Err("status cannot be empty".to_string());
         }
+        if !is_valid_flow_status(trimmed) {
+            return Err(format!("invalid status: {trimmed}"));
+        }
         sets.push(format!("status = ?{idx}"));
         params_vec.push(Box::new(trimmed.to_string()));
         idx += 1;
@@ -442,6 +457,8 @@ pub fn save_flow_node_config(
     if config_json.is_empty() {
         return Err("config_json is required".to_string());
     }
+    serde_json::from_str::<serde_json::Value>(config_json)
+        .map_err(|e| format!("config_json must be valid JSON: {e}"))?;
 
     let conn = state.db.lock().map_err(|e| e.to_string())?;
     let flow_exists: i64 = conn

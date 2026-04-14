@@ -267,6 +267,10 @@ pub fn update_clip_caption(
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
 
+    if status == "completed" && text_norm.is_none() {
+        return Err("caption_text is required when caption_status is completed".to_string());
+    }
+
     let conn = state.db.lock().map_err(|e| e.to_string())?;
     let changed = conn
         .execute(
@@ -274,8 +278,16 @@ pub fn update_clip_caption(
                 "UPDATE clips SET \
                  caption_text = ?1, \
                  caption_status = ?2, \
-                 caption_error = ?3, \
-                 caption_generated_at = CASE WHEN ?2 = 'completed' THEN {} ELSE caption_generated_at END, \
+                 caption_error = CASE \
+                    WHEN ?2 IN ('pending', 'generating', 'completed') THEN NULL \
+                    WHEN ?2 = 'failed' THEN COALESCE(?3, caption_error) \
+                    ELSE caption_error \
+                 END, \
+                 caption_generated_at = CASE \
+                    WHEN ?2 = 'completed' THEN {} \
+                    WHEN caption_status = 'completed' THEN NULL \
+                    ELSE caption_generated_at \
+                 END, \
                  updated_at = {} \
                  WHERE id = ?4",
                 SQL_NOW_HCM, SQL_NOW_HCM
@@ -445,16 +457,16 @@ pub fn insert_clip_from_sidecar(
 
     let conn = state.db.lock().map_err(|e| e.to_string())?;
 
-    let mut rec_id: Option<i64> = conn
+    let mut recording_row: Option<(i64, Option<i64>)> = conn
         .query_row(
-            "SELECT id FROM recordings WHERE sidecar_recording_id = ?1",
+            "SELECT id, flow_id FROM recordings WHERE sidecar_recording_id = ?1",
             [&input.sidecar_recording_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()
         .map_err(|e| e.to_string())?;
 
-    if rec_id.is_none() {
+    if recording_row.is_none() {
         sync_recording_from_sidecar_conn(
             &conn,
             &SyncRecordingFromSidecarInput {
@@ -467,17 +479,17 @@ pub fn insert_clip_from_sidecar(
                 error_message: None,
             },
         )?;
-        rec_id = Some(
+        recording_row = Some(
             conn.query_row(
-                "SELECT id FROM recordings WHERE sidecar_recording_id = ?1",
+                "SELECT id, flow_id FROM recordings WHERE sidecar_recording_id = ?1",
                 [&input.sidecar_recording_id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .map_err(|e| e.to_string())?,
         );
     }
 
-    let recording_id = rec_id.expect("recording row must exist after upsert");
+    let (recording_id, flow_id) = recording_row.expect("recording row must exist after upsert");
 
     let existing: Option<i64> = conn
         .query_row(
@@ -509,8 +521,8 @@ pub fn insert_clip_from_sidecar(
         &format!(
             "INSERT INTO clips (\
                recording_id, account_id, title, file_path, thumbnail_path, \
-               duration_seconds, file_size_bytes, start_time, end_time, status, transcript_text, created_at, updated_at\
-             ) VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, ?7, ?8, 'ready', ?9, {}, {})",
+               duration_seconds, file_size_bytes, start_time, end_time, status, flow_id, transcript_text, created_at, updated_at\
+             ) VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, ?7, ?8, 'ready', ?9, ?10, {}, {})",
             SQL_NOW_HCM, SQL_NOW_HCM
         ),
         params![
@@ -522,6 +534,7 @@ pub fn insert_clip_from_sidecar(
             file_size_bytes,
             input.start_sec,
             input.end_sec,
+            flow_id,
             transcript,
         ],
     )
