@@ -8,9 +8,8 @@ import { useSidecar } from "@/hooks/use-sidecar";
 import * as api from "@/lib/api";
 import { wsClient } from "@/lib/ws";
 import { AccountsPage } from "@/pages/accounts";
-import { ClipsPage } from "@/pages/clips";
 import { DashboardPage } from "@/pages/dashboard";
-import { RecordingsPage } from "@/pages/recordings";
+import { FlowsPage } from "@/pages/flows";
 import { ProductsPage } from "@/pages/products";
 import { SettingsPage } from "@/pages/settings";
 import {
@@ -34,8 +33,7 @@ import { TopBar } from "./top-bar";
 type PageId =
   | "dashboard"
   | "accounts"
-  | "recordings"
-  | "clips"
+  | "flows"
   | "products"
   | "statistics"
   | "settings";
@@ -43,8 +41,7 @@ type PageId =
 const pageMeta: Record<PageId, { title: string; subtitle: string }> = {
   dashboard: { title: "Dashboard", subtitle: "Overview of all activities" },
   accounts: { title: "Accounts", subtitle: "Manage TikTok accounts" },
-  recordings: { title: "Recordings", subtitle: "Active and completed recordings" },
-  clips: { title: "Clips", subtitle: "Generated video clips" },
+  flows: { title: "Flows", subtitle: "Monitor and control account automation flows" },
   products: { title: "Products", subtitle: "Product catalog and tagging" },
   statistics: { title: "Statistics", subtitle: "Analytics and reports" },
   settings: { title: "Settings", subtitle: "App configuration" },
@@ -53,8 +50,7 @@ const pageMeta: Record<PageId, { title: string; subtitle: string }> = {
 const pageComponents: Record<PageId, ComponentType> = {
   dashboard: DashboardPage,
   accounts: AccountsPage,
-  recordings: RecordingsPage,
-  clips: ClipsPage,
+  flows: FlowsPage,
   products: ProductsPage,
   statistics: () => (
     <p className="text-[var(--color-text-muted)]">Statistics coming in Phase 3.</p>
@@ -157,8 +153,7 @@ export function AppShell() {
     if (
       p === "dashboard" ||
       p === "accounts" ||
-      p === "recordings" ||
-      p === "clips" ||
+      p === "flows" ||
       p === "products" ||
       p === "statistics" ||
       p === "settings"

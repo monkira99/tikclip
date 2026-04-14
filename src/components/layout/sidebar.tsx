@@ -3,9 +3,8 @@ import { cn } from "@/lib/utils";
 import {
   BarChart3,
   Boxes,
-  Film,
+  Network,
   LayoutDashboard,
-  Radio,
   Settings,
   Users,
 } from "lucide-react";
@@ -13,8 +12,7 @@ import {
 const navItems = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "accounts", label: "Accounts", icon: Users },
-  { id: "recordings", label: "Recordings", icon: Radio },
-  { id: "clips", label: "Clips", icon: Film },
+  { id: "flows", label: "Flows", icon: Network },
   { id: "products", label: "Products", icon: Boxes },
   { id: "statistics", label: "Statistics", icon: BarChart3 },
 ] as const;
@@ -76,7 +74,7 @@ export function Sidebar({
               <item.icon className="size-4" aria-hidden />
             </span>
             <span className="flex-1 text-left font-medium">{item.label}</span>
-            {item.id === "recordings" && activeRecordings > 0 && (
+            {item.id === "flows" && activeRecordings > 0 && (
               <Badge variant="destructive" className="ml-auto min-w-6 justify-center px-2">
                 {activeRecordings}
               </Badge>
