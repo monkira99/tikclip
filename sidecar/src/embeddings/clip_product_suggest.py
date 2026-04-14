@@ -15,7 +15,9 @@ import httpx
 
 from config import settings
 from embeddings.product_vector import (
+    VECTOR_SUBDIR,
     SearchHit,
+    get_or_open_collection_for_query_sync,
     resolve_storage_media_path,
     search_by_media_path,
     search_by_transcript,
@@ -364,6 +366,32 @@ async def suggest_product_for_clip(
                 product_ranks=_build_rankings([], text_hits, w_img, w_txt),
             )
 
+        if w_img > 0:
+            vec_dir = (settings.storage_path / VECTOR_SUBDIR).resolve()
+            try:
+                await asyncio.to_thread(get_or_open_collection_for_query_sync)
+            except (RuntimeError, ValueError) as exc:
+                logger.warning("suggest_product_for_clip: product vector unavailable: %s", exc)
+                detail = str(exc).strip()
+                if len(detail) > 400:
+                    detail = detail[:400] + "..."
+                skipped = (
+                    "Product vector store could not be opened. "
+                    "This often means RocksDB/zvec corruption (e.g. missing files under idmap.*). "
+                    f"Quit the app, delete folder {vec_dir}, then re-index product media. "
+                    f"Detail: {detail}"
+                )
+                return _resp(
+                    skipped_reason=skipped,
+                    video_relative_path=video_rel,
+                    thumbnail_used=thumb_included,
+                    extracted_frame_count=len(extracted),
+                    text_search_hits=text_hit_rows,
+                    text_search_used=text_search_used,
+                    transcript_segment_evidence=segment_rows,
+                    product_ranks=_build_rankings([], text_hits, w_img, w_txt),
+                )
+
         frame_rows: list[ClipSuggestFrameRow] = []
         frames_searched = 0
         focus_prompt = (settings.suggest_image_embed_focus_prompt or "").strip()
@@ -381,7 +409,7 @@ async def suggest_product_for_clip(
                     http=http,
                     companion_text=image_companion,
                 )
-            except (OSError, ValueError, FileNotFoundError) as exc:
+            except (OSError, ValueError, FileNotFoundError, RuntimeError) as exc:
                 logger.debug("frame search skip %s: %s", fp, exc)
                 frame_rows.append(
                     ClipSuggestFrameRow(

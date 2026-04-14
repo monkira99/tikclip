@@ -496,7 +496,7 @@ async def index_product_text(
             http,
             api_key=api_key,
             model=model,
-            text=desc,
+            text=raw_text,
             output_dimensionality=dim,
             role="document",
             title=name or None,
