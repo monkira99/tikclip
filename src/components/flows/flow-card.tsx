@@ -117,7 +117,9 @@ export function FlowCard({ flow, busy = false, onOpen, onToggleEnabled }: FlowCa
           <span className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1">
             Clips {flow.clips_count}
           </span>
-          <span className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1">Captions --</span>
+          <span className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1">
+            Captions {flow.captions_count}
+          </span>
         </div>
         <div className="ml-auto flex items-center gap-3">
           <label className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">

@@ -93,6 +93,7 @@ pub struct FlowListItem {
     pub last_error: Option<String>,
     pub recordings_count: i64,
     pub clips_count: i64,
+    pub captions_count: i64,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -160,6 +161,7 @@ pub fn list_flows(state: State<'_, AppState>) -> Result<Vec<FlowListItem>, Strin
              f.last_live_at, f.last_run_at, f.last_error, \
              (SELECT COUNT(*) FROM recordings r WHERE r.flow_id = f.id), \
              (SELECT COUNT(*) FROM clips c WHERE c.flow_id = f.id), \
+             (SELECT COUNT(*) FROM clips c WHERE c.flow_id = f.id AND c.caption_text IS NOT NULL AND trim(c.caption_text) <> ''), \
              f.created_at, f.updated_at \
              FROM flows f \
              INNER JOIN accounts a ON a.id = f.account_id \
@@ -182,8 +184,9 @@ pub fn list_flows(state: State<'_, AppState>) -> Result<Vec<FlowListItem>, Strin
                 last_error: row.get(9)?,
                 recordings_count: row.get(10)?,
                 clips_count: row.get(11)?,
-                created_at: row.get(12)?,
-                updated_at: row.get(13)?,
+                captions_count: row.get(12)?,
+                created_at: row.get(13)?,
+                updated_at: row.get(14)?,
             })
         })
         .map_err(|e| e.to_string())?;

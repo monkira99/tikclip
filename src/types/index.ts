@@ -110,6 +110,7 @@ export interface FlowSummary {
   last_error: string | null;
   recordings_count: number;
   clips_count: number;
+  captions_count: number;
   created_at: string;
   updated_at: string;
 }
