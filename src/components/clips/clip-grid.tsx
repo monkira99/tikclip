@@ -33,6 +33,7 @@ type ClipGridProps = {
   emptyMessage?: string;
   queueTitle?: string;
   queueDescription?: string;
+  selectable?: boolean;
 };
 
 export function ClipGrid({
@@ -42,6 +43,7 @@ export function ClipGrid({
   emptyMessage = "No clips match the current filters.",
   queueTitle = "Review queue",
   queueDescription = "Browse clips by day and account to keep review sessions compact.",
+  selectable = true,
 }: ClipGridProps = {}) {
   const clipsFromStore = useClipStore((s) => s.clips);
   const loadingFromStore = useClipStore((s) => s.loading);
@@ -207,9 +209,10 @@ export function ClipGrid({
                               <ClipCard
                                 key={c.id}
                                 clip={c}
-                                selected={selectedClipIds.has(c.id)}
-                                onToggleSelect={() => toggleSelect(c.id)}
+                                selected={selectable ? selectedClipIds.has(c.id) : false}
+                                onToggleSelect={selectable ? () => toggleSelect(c.id) : undefined}
                                 onOpen={() => setActiveClipId(c.id)}
+                                selectable={selectable}
                               />
                             ))}
                           </div>

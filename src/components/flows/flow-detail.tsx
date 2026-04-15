@@ -6,7 +6,7 @@ import { FlowPipeline } from "@/components/flows/flow-pipeline";
 import { FlowRecordingsPanel } from "@/components/flows/flow-recordings-panel";
 import { Button } from "@/components/ui/button";
 import { useFlowStore } from "@/stores/flow-store";
-import type { FlowNodeKey } from "@/types";
+import type { Clip, FlowNodeKey } from "@/types";
 
 type FlowDetailProps = {
   flowId: number;
@@ -24,6 +24,9 @@ export function FlowDetail({ flowId, onBack }: FlowDetailProps) {
 
   const [savingNodeConfig, setSavingNodeConfig] = useState(false);
   const [nodeConfigDirty, setNodeConfigDirty] = useState(false);
+  const [flowClips, setFlowClips] = useState<Clip[]>([]);
+  const [flowClipsLoading, setFlowClipsLoading] = useState(false);
+  const [flowClipsError, setFlowClipsError] = useState<string | null>(null);
 
   useEffect(() => {
     void fetchFlowDetail(flowId);
@@ -96,8 +99,21 @@ export function FlowDetail({ flowId, onBack }: FlowDetailProps) {
               selectedNode={selectedNode}
               recordingsCountHint={flow?.recordings_count}
             />
-            <FlowClipsPanel flowId={flowId} selectedNode={selectedNode} clipsCountHint={flow?.clips_count} />
-            <FlowCaptionsPanel flowId={flowId} selectedNode={selectedNode} />
+            <FlowClipsPanel
+              flowId={flowId}
+              selectedNode={selectedNode}
+              clipsCountHint={flow?.clips_count}
+              onClipsChange={setFlowClips}
+              onLoadingChange={setFlowClipsLoading}
+              onErrorChange={setFlowClipsError}
+            />
+            <FlowCaptionsPanel
+              flowId={flowId}
+              selectedNode={selectedNode}
+              clips={flowClips}
+              loading={flowClipsLoading}
+              error={flowClipsError}
+            />
           </div>
         </section>
 

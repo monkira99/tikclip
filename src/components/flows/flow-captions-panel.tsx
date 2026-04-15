@@ -7,6 +7,9 @@ import type { Clip, ClipCaptionStatus, FlowNodeKey } from "@/types";
 type FlowCaptionsPanelProps = {
   flowId: number;
   selectedNode: FlowNodeKey | null;
+  clips?: Clip[];
+  loading?: boolean;
+  error?: string | null;
 };
 
 type CaptionGroup = {
@@ -44,41 +47,56 @@ function captionPreview(clips: Clip[]): Clip[] {
     .slice(0, 6);
 }
 
-export function FlowCaptionsPanel({ flowId, selectedNode }: FlowCaptionsPanelProps) {
-  const [clips, setClips] = useState<Clip[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+export function FlowCaptionsPanel({
+  flowId,
+  selectedNode,
+  clips: controlledClips,
+  loading: controlledLoading,
+  error: controlledError,
+}: FlowCaptionsPanelProps) {
+  const [localClips, setLocalClips] = useState<Clip[]>([]);
+  const [localLoading, setLocalLoading] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  const controlled = controlledClips != null;
+  const rows = controlledClips ?? localClips;
+  const loadingState = controlledLoading ?? localLoading;
+  const errorState = controlledError ?? localError;
 
   useEffect(() => {
+    if (controlled) {
+      return;
+    }
+
     let cancelled = false;
-    setLoading(true);
-    setError(null);
+    setLocalLoading(true);
+    setLocalError(null);
 
     void listClipsByFlow(flowId)
       .then((rows) => {
         if (!cancelled) {
-          setClips(rows);
+          setLocalClips(rows);
         }
       })
       .catch((e) => {
         if (!cancelled) {
-          setClips([]);
-          setError(e instanceof Error ? e.message : String(e));
+          setLocalClips([]);
+          setLocalError(e instanceof Error ? e.message : String(e));
         }
       })
       .finally(() => {
         if (!cancelled) {
-          setLoading(false);
+          setLocalLoading(false);
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [flowId]);
+  }, [flowId, controlled]);
 
-  const groups = useMemo(() => summarizeCaptionStatuses(clips), [clips]);
-  const preview = useMemo(() => captionPreview(clips), [clips]);
+  const groups = useMemo(() => summarizeCaptionStatuses(rows), [rows]);
+  const preview = useMemo(() => captionPreview(rows), [rows]);
   const focused = selectedNode === "caption";
 
   return (
@@ -98,10 +116,10 @@ export function FlowCaptionsPanel({ flowId, selectedNode }: FlowCaptionsPanelPro
         {focused ? <Badge variant="secondary">Selected node</Badge> : null}
       </div>
 
-      {loading ? <p className="text-sm text-[var(--color-text-muted)]">Loading captions...</p> : null}
-      {error ? <p className="text-sm text-[var(--color-primary)]">{error}</p> : null}
+      {loadingState ? <p className="text-sm text-[var(--color-text-muted)]">Loading captions...</p> : null}
+      {errorState ? <p className="text-sm text-[var(--color-primary)]">{errorState}</p> : null}
 
-      {!loading && !error ? (
+      {!loadingState && !errorState ? (
         <>
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
             {groups.map((group) => (

@@ -42,9 +42,10 @@ type ClipDetailProps = {
   clipId: number;
   onBack?: () => void;
   backLabel?: string;
+  onMutated?: () => void;
 };
 
-export function ClipDetail({ clipId, onBack, backLabel = "Back" }: ClipDetailProps) {
+export function ClipDetail({ clipId, onBack, backLabel = "Back", onMutated }: ClipDetailProps) {
   const setActiveClipId = useClipStore((s) => s.setActiveClipId);
   const clipsRevision = useClipStore((s) => s.clipsRevision);
   const bumpClipsRevision = useClipStore((s) => s.bumpClipsRevision);
@@ -160,7 +161,8 @@ export function ClipDetail({ clipId, onBack, backLabel = "Back" }: ClipDetailPro
     patchLocalClip({ title: next });
     setTitleEdit(false);
     bumpClipsRevision();
-  }, [clip, titleDraft, bumpClipsRevision, patchLocalClip]);
+    onMutated?.();
+  }, [clip, titleDraft, bumpClipsRevision, onMutated, patchLocalClip]);
 
   const saveNotes = useCallback(async () => {
     if (!clip) {
@@ -169,7 +171,8 @@ export function ClipDetail({ clipId, onBack, backLabel = "Back" }: ClipDetailPro
     await updateClipNotes(clip.id, notesDraft);
     patchLocalClip({ notes: notesDraft });
     bumpClipsRevision();
-  }, [clip, notesDraft, bumpClipsRevision, patchLocalClip]);
+    onMutated?.();
+  }, [clip, notesDraft, bumpClipsRevision, onMutated, patchLocalClip]);
 
   const onStatusChange = async (status: ClipStatus) => {
     if (!clip) {
@@ -178,6 +181,7 @@ export function ClipDetail({ clipId, onBack, backLabel = "Back" }: ClipDetailPro
     await updateClipStatus(clip.id, status);
     patchLocalClip({ status });
     bumpClipsRevision();
+    onMutated?.();
   };
 
   const onDelete = async () => {
@@ -189,11 +193,13 @@ export function ClipDetail({ clipId, onBack, backLabel = "Back" }: ClipDetailPro
     }
     await batchDeleteClips([clip.id]);
     bumpClipsRevision();
+    onMutated?.();
     setActiveClipId(null);
   };
 
   const onTrimComplete = (newId: number) => {
     bumpClipsRevision();
+    onMutated?.();
     setActiveClipId(newId);
   };
 
