@@ -133,6 +133,18 @@ class TrimClipResponse(BaseModel):
     duration_sec: float
 
 
+class GenerateCaptionRequest(BaseModel):
+    clip_id: int = Field(ge=1)
+    username: str
+    transcript_text: str | None = None
+    clip_title: str | None = None
+
+
+class GenerateCaptionResponse(BaseModel):
+    clip_id: int
+    caption_text: str
+
+
 class FetchProductRequest(BaseModel):
     url: str
     cookies_json: str | None = None

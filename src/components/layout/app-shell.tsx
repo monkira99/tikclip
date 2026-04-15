@@ -15,6 +15,7 @@ import { SettingsPage } from "@/pages/settings";
 import {
   insertClipFromSidecarWsPayload,
   insertSpeechSegmentFromWsPayload,
+  syncClipCaptionFromWsPayload,
   syncRecordingFromSidecarWsPayload,
 } from "@/lib/sidecar-db-sync";
 import { hydrateNotificationsFromDb } from "@/lib/notifications-sync";
@@ -111,6 +112,46 @@ async function maybeAutoTagClipAfterInsert(
     }
   } catch {
     /* sidecar/Gemini optional */
+  }
+}
+
+async function maybeGenerateCaptionAfterInsert(
+  clipId: number,
+  data: Record<string, unknown>,
+): Promise<void> {
+  try {
+    if (!api.getSidecarBaseUrl()) {
+      return;
+    }
+    const usernameRaw = data.username;
+    const username = typeof usernameRaw === "string" ? usernameRaw.trim() : "";
+    if (!username) {
+      return;
+    }
+
+    const transcriptTextRaw = data.transcript_text;
+    const transcriptText =
+      typeof transcriptTextRaw === "string" && transcriptTextRaw.trim() !== ""
+        ? transcriptTextRaw
+        : null;
+
+    const clipIndexRaw = data.clip_index;
+    const clipIndex =
+      typeof clipIndexRaw === "number"
+        ? Math.trunc(clipIndexRaw)
+        : typeof clipIndexRaw === "string"
+          ? Math.trunc(Number(clipIndexRaw))
+          : NaN;
+    const clipTitle = Number.isFinite(clipIndex) && clipIndex > 0 ? `Clip ${clipIndex}` : null;
+
+    await api.generateCaptionForClip({
+      clip_id: clipId,
+      username,
+      transcript_text: transcriptText,
+      clip_title: clipTitle,
+    });
+  } catch {
+    /* optional runtime enhancement */
   }
 }
 
@@ -266,10 +307,22 @@ export function AppShell() {
           const clipId = await insertClipFromSidecarWsPayload(data);
           useClipStore.getState().bumpClipsRevision();
           if (clipId != null) {
+            void maybeGenerateCaptionAfterInsert(clipId, data);
             void maybeAutoTagClipAfterInsert(clipId, data);
           }
         } catch (err) {
           logSidecarDbSyncError("clip_ready → SQLite insert failed", err);
+        }
+      })();
+    });
+
+    const unsubCaptionReady = wsClient.on("caption_ready", (data) => {
+      void (async () => {
+        try {
+          await syncClipCaptionFromWsPayload(data);
+          useClipStore.getState().bumpClipsRevision();
+        } catch (err) {
+          logSidecarDbSyncError("caption_ready → SQLite update failed", err);
         }
       })();
     });
@@ -302,6 +355,7 @@ export function AppShell() {
       unsubLive();
       unsubAccountStatus();
       unsubClip();
+      unsubCaptionReady();
       unsubSpeechSeg();
       unsubCleanup();
       unsubStorageWarn();

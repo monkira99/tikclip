@@ -6,6 +6,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 
 from config import settings
+from core.captioner import generate_caption
 from core.model_manager import ModelManager
 from core.processor import VideoProcessor
 from embeddings.clip_product_suggest import suggest_product_for_clip
@@ -13,12 +14,15 @@ from models.schemas import (
     ClipOutput,
     ClipSuggestProductRequest,
     ClipSuggestProductResponse,
+    GenerateCaptionRequest,
+    GenerateCaptionResponse,
     ModelStatusResponse,
     ProcessingStatusResponse,
     ProcessVideoAcceptedResponse,
     ProcessVideoRequest,
     SpeechSegmentOutput,
 )
+from ws.manager import ws_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -203,3 +207,23 @@ async def suggest_product_for_clip_route(body: ClipSuggestProductRequest):
         result.skipped_reason,
     )
     return result
+
+
+@router.post(
+    "/api/captions/generate",
+    response_model=GenerateCaptionResponse,
+)
+async def generate_caption_route(body: GenerateCaptionRequest):
+    transcript = (body.transcript_text or "").strip()
+    title = (body.clip_title or "").strip()
+    caption_text = generate_caption(
+        username=body.username,
+        transcript_text=transcript,
+        clip_title=title,
+    )
+    payload = {
+        "clip_id": body.clip_id,
+        "caption_text": caption_text,
+    }
+    await ws_manager.broadcast("caption_ready", payload)
+    return GenerateCaptionResponse(clip_id=body.clip_id, caption_text=caption_text)

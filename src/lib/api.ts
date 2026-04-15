@@ -655,6 +655,28 @@ export async function suggestProductForClip(body: {
   });
 }
 
+export type GenerateCaptionResult = {
+  clip_id: number;
+  caption_text: string;
+};
+
+export async function generateCaptionForClip(body: {
+  clip_id: number;
+  username: string;
+  transcript_text?: string | null;
+  clip_title?: string | null;
+}): Promise<GenerateCaptionResult> {
+  return sidecarJson<GenerateCaptionResult>("/api/captions/generate", {
+    method: "POST",
+    body: JSON.stringify({
+      clip_id: body.clip_id,
+      username: body.username,
+      transcript_text: body.transcript_text ?? null,
+      clip_title: body.clip_title ?? null,
+    }),
+  });
+}
+
 function normalizeAccount(row: AccountInvokeRow): Account {
   const raw = row.auto_record_schedule;
   let auto_record_schedule: AutoRecordSchedule | null = null;
