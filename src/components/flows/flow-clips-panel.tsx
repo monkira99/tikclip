@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ClipDetail } from "@/components/clips/clip-detail";
 import { ClipGrid } from "@/components/clips/clip-grid";
 import { ClipList } from "@/components/clips/clip-list";
@@ -29,31 +29,49 @@ export function FlowClipsPanel({
   const [flowClips, setFlowClips] = useState<Clip[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const latestRequestRef = useRef(0);
+  const mountedRef = useRef(true);
 
   const activeClipId = useClipStore((s) => s.activeClipId);
   const setActiveClipId = useClipStore((s) => s.setActiveClipId);
   const viewMode = useClipStore((s) => s.viewMode);
 
   const loadClips = useCallback(async () => {
+    const requestId = ++latestRequestRef.current;
     setLoading(true);
     onLoadingChange?.(true);
     setError(null);
     onErrorChange?.(null);
     try {
       const next = await listClipsByFlow(flowId);
+      if (!mountedRef.current || requestId !== latestRequestRef.current) {
+        return;
+      }
       setFlowClips(next);
       onClipsChange?.(next);
     } catch (e) {
+      if (!mountedRef.current || requestId !== latestRequestRef.current) {
+        return;
+      }
       const message = e instanceof Error ? e.message : String(e);
       setFlowClips([]);
       setError(message);
       onClipsChange?.([]);
       onErrorChange?.(message);
     } finally {
-      setLoading(false);
-      onLoadingChange?.(false);
+      if (mountedRef.current && requestId === latestRequestRef.current) {
+        setLoading(false);
+        onLoadingChange?.(false);
+      }
     }
   }, [flowId, onClipsChange, onErrorChange, onLoadingChange]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     void loadClips();
