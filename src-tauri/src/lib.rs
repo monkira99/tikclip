@@ -72,6 +72,7 @@ pub fn run() {
             commands::flows::get_flow_detail,
             commands::flows::create_flow,
             commands::flows::update_flow,
+            commands::flows::update_flow_runtime_by_account,
             commands::flows::set_flow_enabled,
             commands::flows::save_flow_node_config,
             commands::flows::list_recordings_by_flow,

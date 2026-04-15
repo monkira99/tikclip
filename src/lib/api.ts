@@ -327,6 +327,14 @@ export type UpdateFlowInput = {
   last_error?: string | null;
 };
 
+export type UpdateFlowRuntimeByAccountInput = {
+  status?: FlowStatus;
+  current_node?: FlowNodeKey | null;
+  last_live_at?: string | null;
+  last_run_at?: string | null;
+  last_error?: string | null;
+};
+
 export async function listFlows(): Promise<FlowSummary[]> {
   return invoke<FlowSummary[]>("list_flows");
 }
@@ -344,6 +352,42 @@ export async function updateFlow(flowId: number, input: UpdateFlowInput): Promis
     flowId,
     input: {
       name: input.name,
+      status: input.status,
+      current_node:
+        input.current_node === undefined
+          ? undefined
+          : input.current_node === null
+            ? ""
+            : input.current_node,
+      last_live_at:
+        input.last_live_at === undefined
+          ? undefined
+          : input.last_live_at === null
+            ? ""
+            : input.last_live_at,
+      last_run_at:
+        input.last_run_at === undefined
+          ? undefined
+          : input.last_run_at === null
+            ? ""
+            : input.last_run_at,
+      last_error:
+        input.last_error === undefined
+          ? undefined
+          : input.last_error === null
+            ? ""
+            : input.last_error,
+    },
+  });
+}
+
+export async function updateFlowRuntimeByAccount(
+  accountId: number,
+  input: UpdateFlowRuntimeByAccountInput,
+): Promise<void> {
+  await invoke("update_flow_runtime_by_account", {
+    accountId,
+    input: {
       status: input.status,
       current_node:
         input.current_node === undefined

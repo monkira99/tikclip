@@ -236,6 +236,16 @@ pub struct UpdateFlowInput {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub struct UpdateFlowRuntimeByAccountInput {
+    pub status: Option<String>,
+    pub current_node: Option<String>,
+    pub last_live_at: Option<String>,
+    pub last_run_at: Option<String>,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct SaveFlowNodeConfigInput {
     pub flow_id: i64,
     pub node_key: String,
@@ -580,6 +590,109 @@ pub fn update_flow(
     if changed == 0 {
         return Err(format!("flow {flow_id} not found"));
     }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn update_flow_runtime_by_account(
+    state: State<'_, AppState>,
+    account_id: i64,
+    input: UpdateFlowRuntimeByAccountInput,
+) -> Result<(), String> {
+    if account_id <= 0 {
+        return Err("account_id must be positive".to_string());
+    }
+
+    let mut sets: Vec<String> = Vec::new();
+    let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut idx: usize = 1;
+
+    if let Some(status) = input.status {
+        let trimmed = status.trim();
+        if trimmed.is_empty() {
+            return Err("status cannot be empty".to_string());
+        }
+        if !is_valid_flow_status(trimmed) {
+            return Err(format!("invalid status: {trimmed}"));
+        }
+        sets.push(format!("status = ?{idx}"));
+        params_vec.push(Box::new(trimmed.to_string()));
+        idx += 1;
+    }
+
+    if let Some(current_node) = input.current_node {
+        let trimmed = current_node.trim().to_string();
+        if trimmed.is_empty() {
+            sets.push("current_node = NULL".to_string());
+        } else {
+            if !is_valid_flow_node(trimmed.as_str()) {
+                return Err(format!("invalid current_node: {}", trimmed));
+            }
+            sets.push(format!("current_node = ?{idx}"));
+            params_vec.push(Box::new(trimmed));
+            idx += 1;
+        }
+    }
+
+    if let Some(last_live_at) = input.last_live_at {
+        let value = last_live_at.trim().to_string();
+        if value.is_empty() {
+            sets.push("last_live_at = NULL".to_string());
+        } else {
+            sets.push(format!("last_live_at = ?{idx}"));
+            params_vec.push(Box::new(value));
+            idx += 1;
+        }
+    }
+
+    if let Some(last_run_at) = input.last_run_at {
+        let value = last_run_at.trim().to_string();
+        if value.is_empty() {
+            sets.push("last_run_at = NULL".to_string());
+        } else {
+            sets.push(format!("last_run_at = ?{idx}"));
+            params_vec.push(Box::new(value));
+            idx += 1;
+        }
+    }
+
+    if let Some(last_error) = input.last_error {
+        let value = last_error.trim().to_string();
+        if value.is_empty() {
+            sets.push("last_error = NULL".to_string());
+        } else {
+            sets.push(format!("last_error = ?{idx}"));
+            params_vec.push(Box::new(value));
+            idx += 1;
+        }
+    }
+
+    if sets.is_empty() {
+        return Ok(());
+    }
+
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let flow_id: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM flows WHERE account_id = ?1",
+            [account_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+
+    let Some(flow_id) = flow_id else {
+        return Ok(());
+    };
+
+    sets.push(format!("updated_at = {SQL_NOW_HCM}"));
+    let sql = format!("UPDATE flows SET {} WHERE id = ?{idx}", sets.join(", "));
+    params_vec.push(Box::new(flow_id));
+
+    let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+        params_vec.iter().map(|p| p.as_ref()).collect();
+    conn.execute(sql.as_str(), params_refs.as_slice())
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 

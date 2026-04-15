@@ -225,6 +225,13 @@ async function syncLiveFromSidecarHttp(): Promise<void> {
     useAccountStore.getState().applyLiveFlagsFromSidecar(
       rows.map((r) => ({ id: r.account_id, isLive: r.is_live })),
     );
+    for (const row of rows) {
+      persistFlowRuntimeByAccount(row.account_id, {
+        status: row.is_live ? "watching" : "idle",
+        current_node: row.is_live ? "start" : null,
+        last_live_at: row.is_live ? isoNow() : undefined,
+      });
+    }
   } catch (e) {
     if (import.meta.env.DEV) {
       console.warn("[TikClip] syncLiveFromSidecarHttp failed", e);
@@ -291,7 +298,7 @@ function patchRuntimeFlowState(flowId: number, patch: {
   }));
 }
 
-function updateFlowRuntimeByAccount(
+function patchRuntimeFlowStateByAccount(
   accountId: number,
   patch: {
     status?: FlowStatus;
@@ -305,12 +312,25 @@ function updateFlowRuntimeByAccount(
   if (flowId == null) {
     return;
   }
-  void api.updateFlow(flowId, patch).catch((err) => {
+  patchRuntimeFlowState(flowId, patch);
+}
+
+function persistFlowRuntimeByAccount(
+  accountId: number,
+  patch: {
+    status?: FlowStatus;
+    current_node?: "start" | "record" | "clip" | "caption" | "upload" | null;
+    last_live_at?: string | null;
+    last_run_at?: string | null;
+    last_error?: string | null;
+  },
+): void {
+  void api.updateFlowRuntimeByAccount(accountId, patch).catch((err) => {
     if (import.meta.env.DEV) {
-      console.warn("[TikClip] flow runtime sync failed", { accountId, flowId, patch, err });
+      console.warn("[TikClip] flow runtime sync failed", { accountId, patch, err });
     }
   });
-  patchRuntimeFlowState(flowId, patch);
+  patchRuntimeFlowStateByAccount(accountId, patch);
 }
 
 export function AppShell() {
@@ -385,7 +405,7 @@ export function AppShell() {
       );
       const accountId = parseAccountId(data.account_id);
       if (accountId != null) {
-        updateFlowRuntimeByAccount(accountId, {
+        persistFlowRuntimeByAccount(accountId, {
           status: "recording",
           current_node: "record",
           last_run_at: isoNow(),
@@ -415,21 +435,21 @@ export function AppShell() {
             ? data.error_message
             : null;
         if (workerStatus === "error" || workerStatus === "failed") {
-          updateFlowRuntimeByAccount(accountId, {
+          persistFlowRuntimeByAccount(accountId, {
             status: "error",
             current_node: "record",
             last_run_at: isoNow(),
             last_error: errorMessage ?? "Recording failed",
           });
         } else if (workerStatus === "completed" || workerStatus === "done") {
-          updateFlowRuntimeByAccount(accountId, {
+          persistFlowRuntimeByAccount(accountId, {
             status: "processing",
             current_node: "record",
             last_run_at: isoNow(),
             last_error: null,
           });
         } else {
-          updateFlowRuntimeByAccount(accountId, {
+          persistFlowRuntimeByAccount(accountId, {
             status: "idle",
             current_node: null,
             last_run_at: isoNow(),
@@ -463,7 +483,7 @@ export function AppShell() {
       const id = parseAccountId(data.account_id);
       if (id != null) {
         persistLive(id, true, "account_live");
-        updateFlowRuntimeByAccount(id, {
+        persistFlowRuntimeByAccount(id, {
           status: "watching",
           current_node: "start",
           last_live_at: isoNow(),
@@ -483,7 +503,7 @@ export function AppShell() {
         return;
       }
       persistLive(id, isLive, "account_status");
-      updateFlowRuntimeByAccount(id, {
+      persistFlowRuntimeByAccount(id, {
         status: isLive ? "watching" : "idle",
         current_node: isLive ? "start" : null,
         last_live_at: isLive ? isoNow() : undefined,
@@ -507,7 +527,7 @@ export function AppShell() {
       })();
       const accountId = parseAccountId(data.account_id);
       if (accountId != null) {
-        updateFlowRuntimeByAccount(accountId, {
+        persistFlowRuntimeByAccount(accountId, {
           status: "processing",
           current_node: "clip",
           last_run_at: isoNow(),
@@ -538,7 +558,7 @@ export function AppShell() {
       })();
       const accountId = parseAccountId(data.account_id);
       if (accountId != null) {
-        updateFlowRuntimeByAccount(accountId, {
+        persistFlowRuntimeByAccount(accountId, {
           status: "processing",
           current_node: "caption",
           last_run_at: isoNow(),
