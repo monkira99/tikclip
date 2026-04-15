@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
+import { FlowCaptionsPanel } from "@/components/flows/flow-captions-panel";
+import { FlowClipsPanel } from "@/components/flows/flow-clips-panel";
 import { FlowNodeInspector } from "@/components/flows/flow-node-inspector";
 import { FlowPipeline } from "@/components/flows/flow-pipeline";
+import { FlowRecordingsPanel } from "@/components/flows/flow-recordings-panel";
 import { Button } from "@/components/ui/button";
 import { useFlowStore } from "@/stores/flow-store";
 import type { FlowNodeKey } from "@/types";
@@ -87,9 +90,15 @@ export function FlowDetail({ flowId, onBack }: FlowDetailProps) {
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
             Workspace
           </p>
-          <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-            Task 5 shell only. Node data panels and operational controls will be added in Task 6.
-          </p>
+          <div className="mt-3 space-y-4">
+            <FlowRecordingsPanel
+              flowId={flowId}
+              selectedNode={selectedNode}
+              recordingsCountHint={flow?.recordings_count}
+            />
+            <FlowClipsPanel flowId={flowId} selectedNode={selectedNode} clipsCountHint={flow?.clips_count} />
+            <FlowCaptionsPanel flowId={flowId} selectedNode={selectedNode} />
+          </div>
         </section>
 
         <FlowNodeInspector

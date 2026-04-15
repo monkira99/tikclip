@@ -38,7 +38,13 @@ function formatDuration(totalSeconds: number): string {
 
 const STATUS_OPTIONS: ClipStatus[] = ["draft", "ready", "posted", "archived"];
 
-export function ClipDetail({ clipId }: { clipId: number }) {
+type ClipDetailProps = {
+  clipId: number;
+  onBack?: () => void;
+  backLabel?: string;
+};
+
+export function ClipDetail({ clipId, onBack, backLabel = "Back" }: ClipDetailProps) {
   const setActiveClipId = useClipStore((s) => s.setActiveClipId);
   const clipsRevision = useClipStore((s) => s.clipsRevision);
   const bumpClipsRevision = useClipStore((s) => s.bumpClipsRevision);
@@ -56,6 +62,14 @@ export function ClipDetail({ clipId }: { clipId: number }) {
   const playerRef = useRef<VideoPlayerHandle | null>(null);
   const [clipProducts, setClipProducts] = useState<Product[]>([]);
   const [productPickerOpen, setProductPickerOpen] = useState(false);
+
+  const handleBack = useCallback(() => {
+    if (onBack) {
+      onBack();
+      return;
+    }
+    setActiveClipId(null);
+  }, [onBack, setActiveClipId]);
 
   const refreshClipProducts = useCallback(async () => {
     try {
@@ -186,8 +200,8 @@ export function ClipDetail({ clipId }: { clipId: number }) {
   if (!clip) {
     return (
       <div className="space-y-4">
-        <Button type="button" variant="outline" size="sm" onClick={() => setActiveClipId(null)}>
-          Back
+        <Button type="button" variant="outline" size="sm" onClick={handleBack}>
+          {backLabel}
         </Button>
         {!fetchDone ? (
           <p className="text-sm text-[var(--color-text-muted)]">Loading clip…</p>
@@ -205,8 +219,8 @@ export function ClipDetail({ clipId }: { clipId: number }) {
 
   return (
     <div className="space-y-4">
-      <Button type="button" variant="outline" size="sm" onClick={() => setActiveClipId(null)}>
-        Back
+      <Button type="button" variant="outline" size="sm" onClick={handleBack}>
+        {backLabel}
       </Button>
 
       <div className="flex flex-col gap-6 lg:flex-row">

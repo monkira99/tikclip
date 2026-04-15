@@ -35,7 +35,11 @@ const SORT_OPTIONS: { value: ClipFilters["sortBy"]; label: string }[] = [
 
 const BATCH_STATUSES: ClipStatus[] = ["draft", "ready", "posted", "archived"];
 
-export function ClipToolbar() {
+type ClipToolbarProps = {
+  hideAccountFilter?: boolean;
+};
+
+export function ClipToolbar({ hideAccountFilter = false }: ClipToolbarProps = {}) {
   const filters = useClipStore((s) => s.filters);
   const setFilter = useClipStore((s) => s.setFilter);
   const viewMode = useClipStore((s) => s.viewMode);
@@ -109,22 +113,24 @@ export function ClipToolbar() {
           ))}
         </select>
 
-        <select
-          className={selectClass}
-          value={filters.accountId ?? ""}
-          onChange={(e) => {
-            const v = e.target.value;
-            setFilter({ accountId: v === "" ? null : Number(v) });
-          }}
-          aria-label="Filter by account"
-        >
-          <option value="">All accounts</option>
-          {accounts.map((a) => (
-            <option key={a.id} value={a.id}>
-              @{a.username}
-            </option>
-          ))}
-        </select>
+        {hideAccountFilter ? null : (
+          <select
+            className={selectClass}
+            value={filters.accountId ?? ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              setFilter({ accountId: v === "" ? null : Number(v) });
+            }}
+            aria-label="Filter by account"
+          >
+            <option value="">All accounts</option>
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                @{a.username}
+              </option>
+            ))}
+          </select>
+        )}
 
         <select
           className={selectClass}

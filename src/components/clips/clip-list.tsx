@@ -68,9 +68,21 @@ function ClipRowThumb({ clip }: { clip: Clip }) {
   );
 }
 
-export function ClipList() {
-  const clips = useClipStore((s) => s.clips);
-  const loading = useClipStore((s) => s.loading);
+type ClipListProps = {
+  clips?: Clip[];
+  loading?: boolean;
+  onRefresh?: () => void | Promise<void>;
+  emptyMessage?: string;
+};
+
+export function ClipList({
+  clips,
+  loading,
+  onRefresh,
+  emptyMessage = "No clips match the current filters.",
+}: ClipListProps = {}) {
+  const clipsFromStore = useClipStore((s) => s.clips);
+  const loadingFromStore = useClipStore((s) => s.loading);
   const selectedClipIds = useClipStore((s) => s.selectedClipIds);
   const toggleSelect = useClipStore((s) => s.toggleSelect);
   const selectAll = useClipStore((s) => s.selectAll);
@@ -78,11 +90,20 @@ export function ClipList() {
   const setActiveClipId = useClipStore((s) => s.setActiveClipId);
   const fetchClips = useClipStore((s) => s.fetchClips);
 
+  const data = clips ?? clipsFromStore;
+  const isLoading = loading ?? loadingFromStore;
+  const handleRefresh = () => {
+    if (onRefresh) {
+      return onRefresh();
+    }
+    return fetchClips();
+  };
+
   const headerRef = useRef<HTMLInputElement>(null);
 
   const allSelected =
-    clips.length > 0 && clips.every((c) => selectedClipIds.has(c.id));
-  const someSelected = clips.some((c) => selectedClipIds.has(c.id));
+    data.length > 0 && data.every((c) => selectedClipIds.has(c.id));
+  const someSelected = data.some((c) => selectedClipIds.has(c.id));
 
   useEffect(() => {
     const el = headerRef.current;
@@ -91,15 +112,15 @@ export function ClipList() {
     }
   }, [someSelected, allSelected]);
 
-  if (loading) {
+  if (isLoading) {
     return <p className="text-sm text-[var(--color-text-muted)]">Loading clips…</p>;
   }
 
-  if (clips.length === 0) {
+  if (data.length === 0) {
     return (
       <div className="space-y-2">
-        <p className="text-sm text-[var(--color-text-muted)]">No clips match the current filters.</p>
-        <Button type="button" variant="outline" size="sm" onClick={() => void fetchClips()}>
+        <p className="text-sm text-[var(--color-text-muted)]">{emptyMessage}</p>
+        <Button type="button" variant="outline" size="sm" onClick={() => void handleRefresh()}>
           Refresh
         </Button>
       </div>
@@ -118,9 +139,25 @@ export function ClipList() {
               checked={allSelected}
               onChange={() => {
                 if (allSelected) {
-                  clearSelection();
+                  if (clips) {
+                    data.forEach((clip) => {
+                      if (selectedClipIds.has(clip.id)) {
+                        toggleSelect(clip.id);
+                      }
+                    });
+                  } else {
+                    clearSelection();
+                  }
                 } else {
-                  selectAll();
+                  if (clips) {
+                    data.forEach((clip) => {
+                      if (!selectedClipIds.has(clip.id)) {
+                        toggleSelect(clip.id);
+                      }
+                    });
+                  } else {
+                    selectAll();
+                  }
                 }
               }}
               aria-label="Select all clips"
@@ -137,7 +174,7 @@ export function ClipList() {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {clips.map((clip) => (
+        {data.map((clip) => (
           <ClipTableRow
             key={clip.id}
             clip={clip}
