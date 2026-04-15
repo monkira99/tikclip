@@ -1,6 +1,7 @@
 use crate::db::models::{Clip, Flow, FlowNodeConfig};
 use crate::time_hcm::SQL_NOW_HCM;
 use crate::AppState;
+use log::warn;
 use rusqlite::Result as SqlResult;
 use rusqlite::{params, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
@@ -97,28 +98,75 @@ fn get_setting_trimmed(conn: &rusqlite::Connection, key: &str) -> Result<Option<
 }
 
 fn get_int_setting_or_default(conn: &rusqlite::Connection, key: &str, default: i64) -> i64 {
-    get_setting_trimmed(conn, key)
-        .ok()
-        .flatten()
-        .and_then(|s| s.parse::<i64>().ok())
-        .unwrap_or(default)
+    match get_setting_trimmed(conn, key) {
+        Ok(Some(raw)) => match raw.parse::<i64>() {
+            Ok(value) => value,
+            Err(_) => {
+                warn!(
+                    "invalid integer app_settings value for key '{}': '{}'; using default {}",
+                    key, raw, default
+                );
+                default
+            }
+        },
+        Ok(None) => default,
+        Err(err) => {
+            warn!(
+                "failed to read app_settings key '{}': {}; using default {}",
+                key, err, default
+            );
+            default
+        }
+    }
 }
 
 fn get_float_setting_or_default(conn: &rusqlite::Connection, key: &str, default: f64) -> f64 {
-    get_setting_trimmed(conn, key)
-        .ok()
-        .flatten()
-        .and_then(|s| s.parse::<f64>().ok())
-        .unwrap_or(default)
+    match get_setting_trimmed(conn, key) {
+        Ok(Some(raw)) => match raw.parse::<f64>() {
+            Ok(value) => value,
+            Err(_) => {
+                warn!(
+                    "invalid float app_settings value for key '{}': '{}'; using default {}",
+                    key, raw, default
+                );
+                default
+            }
+        },
+        Ok(None) => default,
+        Err(err) => {
+            warn!(
+                "failed to read app_settings key '{}': {}; using default {}",
+                key, err, default
+            );
+            default
+        }
+    }
 }
 
 fn get_bool_setting_or_default(conn: &rusqlite::Connection, key: &str, default: bool) -> bool {
-    match get_setting_trimmed(conn, key).ok().flatten() {
-        Some(raw) => {
+    match get_setting_trimmed(conn, key) {
+        Ok(Some(raw)) => {
             let t = raw.trim().to_ascii_lowercase();
-            matches!(t.as_str(), "1" | "true" | "yes" | "on")
+            if matches!(t.as_str(), "1" | "true" | "yes" | "on") {
+                true
+            } else if matches!(t.as_str(), "0" | "false" | "no" | "off") {
+                false
+            } else {
+                warn!(
+                    "invalid boolean app_settings value for key '{}': '{}'; using default {}",
+                    key, raw, default
+                );
+                default
+            }
         }
-        None => default,
+        Ok(None) => default,
+        Err(err) => {
+            warn!(
+                "failed to read app_settings key '{}': {}; using default {}",
+                key, err, default
+            );
+            default
+        }
     }
 }
 
@@ -334,21 +382,23 @@ pub fn create_flow(state: State<'_, AppState>, input: CreateFlowInput) -> Result
         ));
     }
 
-    let record_poll_interval_sec = get_int_setting_or_default(&conn, "poll_interval", 30);
-    let record_max_concurrent = get_int_setting_or_default(&conn, "max_concurrent", 5);
-    let record_max_duration_minutes = get_int_setting_or_default(&conn, "recording_max_minutes", 5);
+    let record_poll_interval_sec = get_int_setting_or_default(&conn, "poll_interval", 30).max(1);
+    let record_max_concurrent = get_int_setting_or_default(&conn, "max_concurrent", 5).max(1);
+    let record_max_duration_minutes =
+        get_int_setting_or_default(&conn, "recording_max_minutes", 5).max(1);
 
-    let clip_min_duration_sec = get_int_setting_or_default(&conn, "clip_min_duration", 15);
-    let clip_max_duration_sec = get_int_setting_or_default(&conn, "clip_max_duration", 90);
+    let clip_min_duration_sec = get_int_setting_or_default(&conn, "clip_min_duration", 15).max(1);
+    let clip_max_duration_sec =
+        get_int_setting_or_default(&conn, "clip_max_duration", 90).max(clip_min_duration_sec);
     let clip_auto_process_after_record =
         get_bool_setting_or_default(&conn, "auto_process_after_record", true);
     let clip_audio_processing_enabled =
         get_bool_setting_or_default(&conn, "audio_processing_enabled", true);
     let clip_speech_merge_gap_sec =
-        get_float_setting_or_default(&conn, "speech_merge_gap_sec", 0.5);
+        get_float_setting_or_default(&conn, "speech_merge_gap_sec", 0.5).max(0.0);
     let clip_speech_cut_tolerance_sec =
-        get_float_setting_or_default(&conn, "speech_cut_tolerance_sec", 1.5);
-    let clip_stt_num_threads = get_int_setting_or_default(&conn, "stt_num_threads", 4);
+        get_float_setting_or_default(&conn, "speech_cut_tolerance_sec", 1.5).max(0.0);
+    let clip_stt_num_threads = get_int_setting_or_default(&conn, "stt_num_threads", 4).max(1);
     let clip_stt_quantize = get_setting_trimmed(&conn, "stt_quantize")?
         .map(|q| match q.trim().to_ascii_lowercase().as_str() {
             "fp32" | "float32" => "fp32".to_string(),
