@@ -156,21 +156,21 @@ export async function insertSpeechSegmentFromWsPayload(
  */
 export async function syncClipCaptionFromWsPayload(
   data: Record<string, unknown>,
-): Promise<void> {
+): Promise<boolean> {
   if (!isTauri()) {
-    return;
+    return false;
   }
   const clipIdRaw = data.clip_id;
   const clipId =
     typeof clipIdRaw === "number" ? clipIdRaw : typeof clipIdRaw === "string" ? Number(clipIdRaw) : NaN;
   if (!Number.isFinite(clipId) || clipId <= 0) {
-    return;
+    return false;
   }
   const captionTextRaw = data.caption_text;
   const captionText =
     typeof captionTextRaw === "string" && captionTextRaw.trim() !== "" ? captionTextRaw : null;
   if (!captionText) {
-    return;
+    return false;
   }
 
   await invoke("update_clip_caption", {
@@ -179,4 +179,5 @@ export async function syncClipCaptionFromWsPayload(
     captionStatus: "completed",
     captionError: null,
   });
+  return true;
 }

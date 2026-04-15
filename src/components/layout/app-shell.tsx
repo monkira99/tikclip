@@ -62,6 +62,55 @@ const pageComponents: Record<PageId, ComponentType> = {
 const FINISHED_CLEANUP_MS = 8000;
 /** HTTP backup for live flags; sidecar poll is ~30s, sync often enough for UI without hammering. */
 const LIVE_HTTP_SYNC_MS = 5000;
+const CAPTION_RETRY_BASE_MS = 250;
+const CAPTION_GENERATE_MAX_ATTEMPTS = 3;
+const CAPTION_SYNC_NOT_FOUND_MAX_ATTEMPTS = 4;
+
+function delayMs(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) {
+    return err.message;
+  }
+  return String(err ?? "");
+}
+
+function isTransientCaptionGenerationError(err: unknown): boolean {
+  const message = errorMessage(err).toLowerCase();
+  if (!message) {
+    return false;
+  }
+  if (
+    message.includes("400") ||
+    message.includes("401") ||
+    message.includes("403") ||
+    message.includes("404") ||
+    message.includes("422") ||
+    message.includes("username is required")
+  ) {
+    return false;
+  }
+  return (
+    message.includes("failed to fetch") ||
+    message.includes("network") ||
+    message.includes("timeout") ||
+    message.includes("tempor") ||
+    message.includes("429") ||
+    message.includes("500") ||
+    message.includes("502") ||
+    message.includes("503") ||
+    message.includes("504") ||
+    message.includes("sidecar request failed")
+  );
+}
+
+function isClipCaptionNotFoundError(err: unknown): boolean {
+  return errorMessage(err).toLowerCase().includes("not found");
+}
 
 function logSidecarDbSyncError(context: string, err: unknown): void {
   if (import.meta.env.DEV) {
@@ -144,12 +193,22 @@ async function maybeGenerateCaptionAfterInsert(
           : NaN;
     const clipTitle = Number.isFinite(clipIndex) && clipIndex > 0 ? `Clip ${clipIndex}` : null;
 
-    await api.generateCaptionForClip({
-      clip_id: clipId,
-      username,
-      transcript_text: transcriptText,
-      clip_title: clipTitle,
-    });
+    for (let attempt = 1; attempt <= CAPTION_GENERATE_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        await api.generateCaptionForClip({
+          clip_id: clipId,
+          username,
+          transcript_text: transcriptText,
+          clip_title: clipTitle,
+        });
+        return;
+      } catch (err) {
+        if (attempt >= CAPTION_GENERATE_MAX_ATTEMPTS || !isTransientCaptionGenerationError(err)) {
+          return;
+        }
+      }
+      await delayMs(CAPTION_RETRY_BASE_MS * attempt);
+    }
   } catch {
     /* optional runtime enhancement */
   }
@@ -318,11 +377,22 @@ export function AppShell() {
 
     const unsubCaptionReady = wsClient.on("caption_ready", (data) => {
       void (async () => {
-        try {
-          await syncClipCaptionFromWsPayload(data);
-          useClipStore.getState().bumpClipsRevision();
-        } catch (err) {
-          logSidecarDbSyncError("caption_ready → SQLite update failed", err);
+        for (let attempt = 1; attempt <= CAPTION_SYNC_NOT_FOUND_MAX_ATTEMPTS; attempt += 1) {
+          try {
+            const updated = await syncClipCaptionFromWsPayload(data);
+            if (updated) {
+              useClipStore.getState().bumpClipsRevision();
+            }
+            return;
+          } catch (err) {
+            const canRetry =
+              attempt < CAPTION_SYNC_NOT_FOUND_MAX_ATTEMPTS && isClipCaptionNotFoundError(err);
+            if (!canRetry) {
+              logSidecarDbSyncError("caption_ready → SQLite update failed", err);
+              return;
+            }
+          }
+          await delayMs(CAPTION_RETRY_BASE_MS * attempt);
         }
       })();
     });

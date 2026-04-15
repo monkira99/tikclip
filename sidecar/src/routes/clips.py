@@ -214,10 +214,13 @@ async def suggest_product_for_clip_route(body: ClipSuggestProductRequest):
     response_model=GenerateCaptionResponse,
 )
 async def generate_caption_route(body: GenerateCaptionRequest):
+    username = body.username.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="username is required")
     transcript = (body.transcript_text or "").strip()
     title = (body.clip_title or "").strip()
     caption_text = generate_caption(
-        username=body.username,
+        username=username,
         transcript_text=transcript,
         clip_title=title,
     )
