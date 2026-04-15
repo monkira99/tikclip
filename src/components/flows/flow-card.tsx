@@ -41,6 +41,10 @@ function formatDateTime(value: string | null): string {
   });
 }
 
+function formatCount(value: number): string {
+  return value.toLocaleString("vi-VN");
+}
+
 type FlowCardProps = {
   flow: FlowSummary;
   busy?: boolean;
@@ -112,13 +116,13 @@ export function FlowCard({ flow, busy = false, onOpen, onToggleEnabled }: FlowCa
       <CardFooter className="flex flex-wrap items-center gap-3">
         <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">
           <span className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1">
-            Recordings {flow.recordings_count}
+            Recordings {formatCount(flow.recordings_count)}
           </span>
           <span className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1">
-            Clips {flow.clips_count}
+            Clips {formatCount(flow.clips_count)}
           </span>
           <span className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1">
-            Captions {flow.captions_count}
+            Captions {formatCount(flow.captions_count)}
           </span>
         </div>
         <div className="ml-auto flex items-center gap-3">

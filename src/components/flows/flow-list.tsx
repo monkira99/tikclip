@@ -56,7 +56,7 @@ export function FlowList({ onOpenFlow }: FlowListProps) {
     return <p className="text-sm text-[var(--color-text-muted)]">Loading flows…</p>;
   }
 
-  if (error) {
+  if (error && flows.length === 0) {
     return <p className="text-sm text-[var(--color-primary)]">{error}</p>;
   }
 
@@ -65,16 +65,23 @@ export function FlowList({ onOpenFlow }: FlowListProps) {
   }
 
   return (
-    <div className="grid gap-4 xl:grid-cols-2">
-      {visibleFlows.map((flow) => (
-        <FlowCard
-          key={flow.id}
-          flow={flow}
-          busy={busyFlowIds[flow.id] === true}
-          onOpen={onOpenFlow}
-          onToggleEnabled={handleToggle}
-        />
-      ))}
+    <div className="space-y-3">
+      {error ? (
+        <p className="rounded-lg border border-[rgba(255,99,99,0.22)] bg-[rgba(255,99,99,0.1)] px-3 py-2 text-sm text-[var(--color-primary)]">
+          {error}
+        </p>
+      ) : null}
+      <div className="grid gap-4 xl:grid-cols-2">
+        {visibleFlows.map((flow) => (
+          <FlowCard
+            key={flow.id}
+            flow={flow}
+            busy={busyFlowIds[flow.id] === true}
+            onOpen={onOpenFlow}
+            onToggleEnabled={handleToggle}
+          />
+        ))}
+      </div>
     </div>
   );
 }

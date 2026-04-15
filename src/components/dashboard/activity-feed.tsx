@@ -7,7 +7,6 @@ import {
   type ActivityFeedItem,
 } from "@/lib/api";
 import { useAppStore } from "@/stores/app-store";
-import { useClipStore } from "@/stores/clip-store";
 
 function iconForType(t: string): string {
   switch (t) {
@@ -75,8 +74,7 @@ export function ActivityFeed({ dashboardRevision }: ActivityFeedProps) {
 
   const onItemClick = (row: ActivityFeedItem) => {
     if (row.clip_id != null && Number.isFinite(row.clip_id)) {
-      useClipStore.getState().setActiveClipId(row.clip_id);
-      useAppStore.getState().requestNavigation({ page: "clips", clipId: row.clip_id });
+      useAppStore.getState().requestNavigation({ page: "flows" });
     }
   };
 
