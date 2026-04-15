@@ -27,6 +27,7 @@ interface ClipCardProps {
   selected?: boolean;
   onToggleSelect?: () => void;
   onOpen?: () => void;
+  selectable?: boolean;
 }
 
 export function ClipCard({
@@ -34,6 +35,7 @@ export function ClipCard({
   selected = false,
   onToggleSelect,
   onOpen,
+  selectable = true,
 }: ClipCardProps) {
   const [thumbFailed, setThumbFailed] = useState(false);
 
@@ -76,7 +78,8 @@ export function ClipCard({
     <Card
       className={cn(
         "relative cursor-pointer overflow-hidden transition-opacity hover:opacity-95",
-        selected &&
+        selectable &&
+          selected &&
           "border-[color-mix(in_oklab,var(--color-accent)_30%,var(--color-border))] shadow-[0_0_0_1px_rgba(85,179,255,0.18),inset_0_1px_0_rgba(255,255,255,0.04),0_18px_40px_rgba(0,0,0,0.24)]",
       )}
       onClick={() => onOpen?.()}
@@ -90,19 +93,21 @@ export function ClipCard({
       role={onOpen ? "button" : undefined}
       tabIndex={onOpen ? 0 : undefined}
     >
-      <div
-        className="absolute left-2 top-2 z-10"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.stopPropagation()}
-      >
-        <input
-          type="checkbox"
-          className="size-4 rounded border border-white/20 bg-black/50 shadow-sm"
-          checked={selected}
-          onChange={() => onToggleSelect?.()}
-          aria-label={`Select clip ${clip.id}`}
-        />
-      </div>
+      {selectable ? (
+        <div
+          className="absolute left-2 top-2 z-10"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <input
+            type="checkbox"
+            className="size-4 rounded border border-white/20 bg-black/50 shadow-sm"
+            checked={selected}
+            onChange={() => onToggleSelect?.()}
+            aria-label={`Select clip ${clip.id}`}
+          />
+        </div>
+      ) : null}
 
       <div className="relative aspect-video w-full bg-black/40">
         {thumbSrc && !thumbFailed ? (

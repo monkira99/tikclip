@@ -9,6 +9,7 @@ import {
 } from "@/lib/group-clips";
 import { cn } from "@/lib/utils";
 import { useClipStore } from "@/stores/clip-store";
+import type { Clip } from "@/types";
 
 function applyFirstDateDefaults(grouped: DateClipGroup[]): {
   dates: Set<string>;
@@ -25,19 +26,46 @@ function applyFirstDateDefaults(grouped: DateClipGroup[]): {
   return { dates: new Set([first]), users };
 }
 
-export function ClipGrid() {
-  const clips = useClipStore((s) => s.clips);
-  const loading = useClipStore((s) => s.loading);
+type ClipGridProps = {
+  clips?: Clip[];
+  loading?: boolean;
+  onRefresh?: () => void | Promise<void>;
+  emptyMessage?: string;
+  queueTitle?: string;
+  queueDescription?: string;
+  selectable?: boolean;
+};
+
+export function ClipGrid({
+  clips,
+  loading,
+  onRefresh,
+  emptyMessage = "No clips match the current filters.",
+  queueTitle = "Review queue",
+  queueDescription = "Browse clips by day and account to keep review sessions compact.",
+  selectable = true,
+}: ClipGridProps = {}) {
+  const clipsFromStore = useClipStore((s) => s.clips);
+  const loadingFromStore = useClipStore((s) => s.loading);
   const selectedClipIds = useClipStore((s) => s.selectedClipIds);
   const toggleSelect = useClipStore((s) => s.toggleSelect);
   const setActiveClipId = useClipStore((s) => s.setActiveClipId);
   const fetchClips = useClipStore((s) => s.fetchClips);
 
+  const data = clips ?? clipsFromStore;
+  const isLoading = loading ?? loadingFromStore;
+  const handleRefresh = () => {
+    if (onRefresh) {
+      return onRefresh();
+    }
+    return fetchClips();
+  };
+
   const [openDates, setOpenDates] = useState<Set<string>>(() => new Set());
   const [openUsers, setOpenUsers] = useState<Set<string>>(() => new Set());
   const expansionInitRef = useRef(false);
 
-  const grouped = useMemo(() => groupClipsByDateAndUser(clips), [clips]);
+  const grouped = useMemo(() => groupClipsByDateAndUser(data), [data]);
 
   useEffect(() => {
     return () => {
@@ -46,7 +74,7 @@ export function ClipGrid() {
   }, []);
 
   useEffect(() => {
-    if (clips.length === 0) {
+    if (data.length === 0) {
       expansionInitRef.current = false;
       setOpenDates(new Set());
       setOpenUsers(new Set());
@@ -58,7 +86,7 @@ export function ClipGrid() {
       setOpenUsers(users);
       expansionInitRef.current = true;
     }
-  }, [clips.length, grouped]);
+  }, [data.length, grouped]);
 
   const toggleDate = useCallback((dateKey: string) => {
     setOpenDates((prev) => {
@@ -85,15 +113,15 @@ export function ClipGrid() {
     });
   }, []);
 
-  if (loading) {
+  if (isLoading) {
     return <p className="text-sm text-[var(--color-text-muted)]">Loading clips…</p>;
   }
 
-  if (clips.length === 0) {
+  if (data.length === 0) {
     return (
       <div className="space-y-2">
-        <p className="text-sm text-[var(--color-text-muted)]">No clips match the current filters.</p>
-        <Button type="button" variant="outline" size="sm" onClick={() => void fetchClips()}>
+        <p className="text-sm text-[var(--color-text-muted)]">{emptyMessage}</p>
+        <Button type="button" variant="outline" size="sm" onClick={() => void handleRefresh()}>
           Refresh
         </Button>
       </div>
@@ -105,13 +133,13 @@ export function ClipGrid() {
       <div className="app-panel-subtle flex items-center justify-between rounded-2xl px-4 py-4">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
-            Review queue
+            {queueTitle}
           </p>
           <p className="mt-1 text-sm text-[var(--color-text-soft)]">
-            Browse clips by day and account to keep review sessions compact.
+            {queueDescription}
           </p>
         </div>
-        <Button type="button" variant="outline" size="sm" onClick={() => void fetchClips()}>
+        <Button type="button" variant="outline" size="sm" onClick={() => void handleRefresh()}>
           Refresh
         </Button>
       </div>
@@ -181,9 +209,10 @@ export function ClipGrid() {
                               <ClipCard
                                 key={c.id}
                                 clip={c}
-                                selected={selectedClipIds.has(c.id)}
-                                onToggleSelect={() => toggleSelect(c.id)}
+                                selected={selectable ? selectedClipIds.has(c.id) : false}
+                                onToggleSelect={selectable ? () => toggleSelect(c.id) : undefined}
                                 onOpen={() => setActiveClipId(c.id)}
+                                selectable={selectable}
                               />
                             ))}
                           </div>

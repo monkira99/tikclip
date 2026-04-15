@@ -34,15 +34,18 @@ fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         (4, include_str!("migrations/004_product_enhancements.sql")),
         (5, include_str!("migrations/005_product_media_files.sql")),
         (6, include_str!("migrations/006_speech_segments.sql")),
+        (7, include_str!("migrations/007_flows.sql")),
     ];
 
     for (version, sql) in migrations {
         if version > current_version {
-            conn.execute_batch(sql)?;
-            conn.execute(
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(sql)?;
+            tx.execute(
                 "INSERT INTO schema_version (version) VALUES (?1)",
                 [version],
             )?;
+            tx.commit()?;
         }
     }
 

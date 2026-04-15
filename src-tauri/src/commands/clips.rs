@@ -26,14 +26,19 @@ fn map_clip_row(row: &Row) -> SqlResult<Clip> {
         scene_type: row.get(13)?,
         ai_tags_json: row.get(14)?,
         notes: row.get(15)?,
-        transcript_text: row.get(16)?,
-        created_at: row.get(17)?,
-        updated_at: row.get(18)?,
+        flow_id: row.get(16)?,
+        transcript_text: row.get(17)?,
+        caption_text: row.get(18)?,
+        caption_status: row.get(19)?,
+        caption_error: row.get(20)?,
+        caption_generated_at: row.get(21)?,
+        created_at: row.get(22)?,
+        updated_at: row.get(23)?,
     })
 }
 
 /// Lists clips joined with `accounts.username` as `account_username`.
-/// Column order: clips columns plus `transcript_text` (migration 006), joined username.
+/// Column order: clips columns plus flow/caption fields, joined username.
 #[tauri::command]
 pub fn list_clips(state: State<'_, AppState>) -> Result<Vec<Clip>, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
@@ -43,7 +48,7 @@ pub fn list_clips(state: State<'_, AppState>) -> Result<Vec<Clip>, String> {
              c.id, c.recording_id, c.account_id, a.username, \
              c.title, c.file_path, c.thumbnail_path, c.duration_seconds, c.file_size_bytes, \
              c.start_time, c.end_time, c.status, c.quality_score, c.scene_type, c.ai_tags_json, \
-             c.notes, c.transcript_text, c.created_at, c.updated_at \
+             c.notes, c.flow_id, c.transcript_text, c.caption_text, c.caption_status, c.caption_error, c.caption_generated_at, c.created_at, c.updated_at \
              FROM clips c \
              INNER JOIN accounts a ON a.id = c.account_id \
              ORDER BY c.created_at DESC",
@@ -86,7 +91,7 @@ pub fn list_clips_filtered(
          c.id, c.recording_id, c.account_id, a.username, \
          c.title, c.file_path, c.thumbnail_path, c.duration_seconds, c.file_size_bytes, \
          c.start_time, c.end_time, c.status, c.quality_score, c.scene_type, c.ai_tags_json, \
-         c.notes, c.transcript_text, c.created_at, c.updated_at \
+         c.notes, c.flow_id, c.transcript_text, c.caption_text, c.caption_status, c.caption_error, c.caption_generated_at, c.created_at, c.updated_at \
          FROM clips c \
          INNER JOIN accounts a ON a.id = c.account_id \
          WHERE 1=1",
@@ -169,7 +174,7 @@ pub fn get_clip_by_id(state: State<'_, AppState>, clip_id: i64) -> Result<Clip, 
          c.id, c.recording_id, c.account_id, a.username, \
          c.title, c.file_path, c.thumbnail_path, c.duration_seconds, c.file_size_bytes, \
          c.start_time, c.end_time, c.status, c.quality_score, c.scene_type, c.ai_tags_json, \
-         c.notes, c.transcript_text, c.created_at, c.updated_at \
+         c.notes, c.flow_id, c.transcript_text, c.caption_text, c.caption_status, c.caption_error, c.caption_generated_at, c.created_at, c.updated_at \
          FROM clips c \
          INNER JOIN accounts a ON a.id = c.account_id \
          WHERE c.id = ?1",
@@ -238,6 +243,62 @@ pub fn update_clip_notes(
         params![&notes, clip_id],
     )
     .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn update_clip_caption(
+    state: State<'_, AppState>,
+    clip_id: i64,
+    caption_text: Option<String>,
+    caption_status: String,
+    caption_error: Option<String>,
+) -> Result<(), String> {
+    let status = caption_status.trim();
+    let valid = ["pending", "generating", "completed", "failed"];
+    if !valid.contains(&status) {
+        return Err(format!("Invalid caption_status: {caption_status}"));
+    }
+
+    let text_norm = caption_text
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let err_norm = caption_error
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    if status == "completed" && text_norm.is_none() {
+        return Err("caption_text is required when caption_status is completed".to_string());
+    }
+
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let changed = conn
+        .execute(
+            &format!(
+                "UPDATE clips SET \
+                 caption_text = ?1, \
+                 caption_status = ?2, \
+                 caption_error = CASE \
+                    WHEN ?2 IN ('pending', 'generating', 'completed') THEN NULL \
+                    WHEN ?2 = 'failed' THEN COALESCE(?3, caption_error) \
+                    ELSE caption_error \
+                 END, \
+                 caption_generated_at = CASE \
+                    WHEN ?2 = 'completed' THEN {} \
+                    WHEN caption_status = 'completed' THEN NULL \
+                    ELSE caption_generated_at \
+                 END, \
+                 updated_at = {} \
+                 WHERE id = ?4",
+                SQL_NOW_HCM, SQL_NOW_HCM
+            ),
+            params![text_norm, status, err_norm, clip_id],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err(format!("Clip {clip_id} not found"));
+    }
+
     Ok(())
 }
 
@@ -396,16 +457,16 @@ pub fn insert_clip_from_sidecar(
 
     let conn = state.db.lock().map_err(|e| e.to_string())?;
 
-    let mut rec_id: Option<i64> = conn
+    let mut recording_row: Option<(i64, Option<i64>)> = conn
         .query_row(
-            "SELECT id FROM recordings WHERE sidecar_recording_id = ?1",
+            "SELECT id, flow_id FROM recordings WHERE sidecar_recording_id = ?1",
             [&input.sidecar_recording_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()
         .map_err(|e| e.to_string())?;
 
-    if rec_id.is_none() {
+    if recording_row.is_none() {
         sync_recording_from_sidecar_conn(
             &conn,
             &SyncRecordingFromSidecarInput {
@@ -418,17 +479,17 @@ pub fn insert_clip_from_sidecar(
                 error_message: None,
             },
         )?;
-        rec_id = Some(
+        recording_row = Some(
             conn.query_row(
-                "SELECT id FROM recordings WHERE sidecar_recording_id = ?1",
+                "SELECT id, flow_id FROM recordings WHERE sidecar_recording_id = ?1",
                 [&input.sidecar_recording_id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .map_err(|e| e.to_string())?,
         );
     }
 
-    let recording_id = rec_id.expect("recording row must exist after upsert");
+    let (recording_id, flow_id) = recording_row.expect("recording row must exist after upsert");
 
     let existing: Option<i64> = conn
         .query_row(
@@ -460,8 +521,8 @@ pub fn insert_clip_from_sidecar(
         &format!(
             "INSERT INTO clips (\
                recording_id, account_id, title, file_path, thumbnail_path, \
-               duration_seconds, file_size_bytes, start_time, end_time, status, transcript_text, created_at, updated_at\
-             ) VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, ?7, ?8, 'ready', ?9, {}, {})",
+               duration_seconds, file_size_bytes, start_time, end_time, status, flow_id, transcript_text, created_at, updated_at\
+             ) VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, ?7, ?8, 'ready', ?9, ?10, {}, {})",
             SQL_NOW_HCM, SQL_NOW_HCM
         ),
         params![
@@ -473,6 +534,7 @@ pub fn insert_clip_from_sidecar(
             file_size_bytes,
             input.start_sec,
             input.end_sec,
+            flow_id,
             transcript,
         ],
     )

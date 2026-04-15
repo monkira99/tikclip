@@ -35,7 +35,12 @@ const SORT_OPTIONS: { value: ClipFilters["sortBy"]; label: string }[] = [
 
 const BATCH_STATUSES: ClipStatus[] = ["draft", "ready", "posted", "archived"];
 
-export function ClipToolbar() {
+type ClipToolbarProps = {
+  hideAccountFilter?: boolean;
+  mode?: "default" | "flow";
+};
+
+export function ClipToolbar({ hideAccountFilter = false, mode = "default" }: ClipToolbarProps = {}) {
   const filters = useClipStore((s) => s.filters);
   const setFilter = useClipStore((s) => s.setFilter);
   const viewMode = useClipStore((s) => s.viewMode);
@@ -55,14 +60,18 @@ export function ClipToolbar() {
   }, [filters.search]);
 
   useEffect(() => {
+    if (mode === "flow") {
+      return;
+    }
     const t = window.setTimeout(() => {
       if (searchDraft !== filters.search) {
         setFilter({ search: searchDraft });
       }
     }, 300);
     return () => window.clearTimeout(t);
-  }, [searchDraft, filters.search, setFilter]);
+  }, [mode, searchDraft, filters.search, setFilter]);
 
+  const isFlowMode = mode === "flow";
   const selectedCount = selectedClipIds.size;
   const showBatch = selectedCount > 0;
 
@@ -94,94 +103,100 @@ export function ClipToolbar() {
           </Button>
         </div>
 
-        <select
-          className={selectClass}
-          value={filters.status}
-          onChange={(e) =>
-            setFilter({ status: e.target.value as ClipFilters["status"] })
-          }
-          aria-label="Filter by status"
-        >
-          {STATUS_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
+        {isFlowMode ? null : (
+          <>
+            <select
+              className={selectClass}
+              value={filters.status}
+              onChange={(e) =>
+                setFilter({ status: e.target.value as ClipFilters["status"] })
+              }
+              aria-label="Filter by status"
+            >
+              {STATUS_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
 
-        <select
-          className={selectClass}
-          value={filters.accountId ?? ""}
-          onChange={(e) => {
-            const v = e.target.value;
-            setFilter({ accountId: v === "" ? null : Number(v) });
-          }}
-          aria-label="Filter by account"
-        >
-          <option value="">All accounts</option>
-          {accounts.map((a) => (
-            <option key={a.id} value={a.id}>
-              @{a.username}
-            </option>
-          ))}
-        </select>
+            {hideAccountFilter ? null : (
+              <select
+                className={selectClass}
+                value={filters.accountId ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setFilter({ accountId: v === "" ? null : Number(v) });
+                }}
+                aria-label="Filter by account"
+              >
+                <option value="">All accounts</option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    @{a.username}
+                  </option>
+                ))}
+              </select>
+            )}
 
-        <select
-          className={selectClass}
-          value={filters.sceneType}
-          onChange={(e) =>
-            setFilter({
-              sceneType: e.target.value as SceneType | "all",
-            })
-          }
-          aria-label="Filter by scene type"
-        >
-          {SCENE_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
+            <select
+              className={selectClass}
+              value={filters.sceneType}
+              onChange={(e) =>
+                setFilter({
+                  sceneType: e.target.value as SceneType | "all",
+                })
+              }
+              aria-label="Filter by scene type"
+            >
+              {SCENE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
 
-        <Input
-          className="h-8 max-w-[220px]"
-          placeholder="Search title / notes…"
-          value={searchDraft}
-          onChange={(e) => setSearchDraft(e.target.value)}
-          aria-label="Search clips"
-        />
+            <Input
+              className="h-8 max-w-[220px]"
+              placeholder="Search title / notes…"
+              value={searchDraft}
+              onChange={(e) => setSearchDraft(e.target.value)}
+              aria-label="Search clips"
+            />
 
-        <select
-          className={selectClass}
-          value={filters.sortBy}
-          onChange={(e) =>
-            setFilter({ sortBy: e.target.value as ClipFilters["sortBy"] })
-          }
-          aria-label="Sort by"
-        >
-          {SORT_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
+            <select
+              className={selectClass}
+              value={filters.sortBy}
+              onChange={(e) =>
+                setFilter({ sortBy: e.target.value as ClipFilters["sortBy"] })
+              }
+              aria-label="Sort by"
+            >
+              {SORT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
 
-        <select
-          className={cn(selectClass, "min-w-[5.5rem]")}
-          value={filters.sortOrder}
-          onChange={(e) =>
-            setFilter({
-              sortOrder: e.target.value as ClipFilters["sortOrder"],
-            })
-          }
-          aria-label="Sort order"
-        >
-          <option value="desc">Desc</option>
-          <option value="asc">Asc</option>
-        </select>
+            <select
+              className={cn(selectClass, "min-w-[5.5rem]")}
+              value={filters.sortOrder}
+              onChange={(e) =>
+                setFilter({
+                  sortOrder: e.target.value as ClipFilters["sortOrder"],
+                })
+              }
+              aria-label="Sort order"
+            >
+              <option value="desc">Desc</option>
+              <option value="asc">Asc</option>
+            </select>
+          </>
+        )}
       </div>
 
-      {showBatch ? (
+      {!isFlowMode && showBatch ? (
         <div
           className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2"
           role="region"

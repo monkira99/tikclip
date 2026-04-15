@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+fn default_caption_status() -> String {
+    "pending".to_string()
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Account {
     pub id: i64,
@@ -60,8 +64,38 @@ pub struct Clip {
     pub scene_type: Option<String>,
     pub ai_tags_json: Option<String>,
     pub notes: Option<String>,
+    pub flow_id: Option<i64>,
     pub transcript_text: Option<String>,
+    pub caption_text: Option<String>,
+    #[serde(default = "default_caption_status")]
+    pub caption_status: String,
+    pub caption_error: Option<String>,
+    pub caption_generated_at: Option<String>,
     pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Flow {
+    pub id: i64,
+    pub account_id: i64,
+    pub name: String,
+    pub enabled: bool,
+    pub status: String,
+    pub current_node: Option<String>,
+    pub last_live_at: Option<String>,
+    pub last_run_at: Option<String>,
+    pub last_error: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FlowNodeConfig {
+    pub id: i64,
+    pub flow_id: i64,
+    pub node_key: String,
+    pub config_json: String,
     pub updated_at: String,
 }
 
