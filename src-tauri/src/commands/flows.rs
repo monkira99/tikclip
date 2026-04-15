@@ -4,6 +4,7 @@ use crate::AppState;
 use rusqlite::Result as SqlResult;
 use rusqlite::{params, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use tauri::State;
 
 const FLOW_NODE_KEYS: [&str; 5] = ["start", "record", "clip", "caption", "upload"];
@@ -77,6 +78,48 @@ fn map_clip_row(row: &Row) -> SqlResult<Clip> {
         created_at: row.get(22)?,
         updated_at: row.get(23)?,
     })
+}
+
+fn get_setting_trimmed(conn: &rusqlite::Connection, key: &str) -> Result<Option<String>, String> {
+    let result = conn.query_row(
+        "SELECT value FROM app_settings WHERE key = ?1",
+        [key],
+        |row| row.get::<_, String>(0),
+    );
+    match result {
+        Ok(value) => {
+            let t = value.trim().to_string();
+            Ok(if t.is_empty() { None } else { Some(t) })
+        }
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+fn get_int_setting_or_default(conn: &rusqlite::Connection, key: &str, default: i64) -> i64 {
+    get_setting_trimmed(conn, key)
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(default)
+}
+
+fn get_float_setting_or_default(conn: &rusqlite::Connection, key: &str, default: f64) -> f64 {
+    get_setting_trimmed(conn, key)
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(default)
+}
+
+fn get_bool_setting_or_default(conn: &rusqlite::Connection, key: &str, default: bool) -> bool {
+    match get_setting_trimmed(conn, key).ok().flatten() {
+        Some(raw) => {
+            let t = raw.trim().to_ascii_lowercase();
+            matches!(t.as_str(), "1" | "true" | "yes" | "on")
+        }
+        None => default,
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -263,7 +306,7 @@ pub fn create_flow(state: State<'_, AppState>, input: CreateFlowInput) -> Result
         return Err("name is required".to_string());
     }
 
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let mut conn = state.db.lock().map_err(|e| e.to_string())?;
 
     let account_exists: i64 = conn
         .query_row(
@@ -291,7 +334,31 @@ pub fn create_flow(state: State<'_, AppState>, input: CreateFlowInput) -> Result
         ));
     }
 
-    conn.execute(
+    let record_poll_interval_sec = get_int_setting_or_default(&conn, "poll_interval", 30);
+    let record_max_concurrent = get_int_setting_or_default(&conn, "max_concurrent", 5);
+    let record_max_duration_minutes = get_int_setting_or_default(&conn, "recording_max_minutes", 5);
+
+    let clip_min_duration_sec = get_int_setting_or_default(&conn, "clip_min_duration", 15);
+    let clip_max_duration_sec = get_int_setting_or_default(&conn, "clip_max_duration", 90);
+    let clip_auto_process_after_record =
+        get_bool_setting_or_default(&conn, "auto_process_after_record", true);
+    let clip_audio_processing_enabled =
+        get_bool_setting_or_default(&conn, "audio_processing_enabled", true);
+    let clip_speech_merge_gap_sec =
+        get_float_setting_or_default(&conn, "speech_merge_gap_sec", 0.5);
+    let clip_speech_cut_tolerance_sec =
+        get_float_setting_or_default(&conn, "speech_cut_tolerance_sec", 1.5);
+    let clip_stt_num_threads = get_int_setting_or_default(&conn, "stt_num_threads", 4);
+    let clip_stt_quantize = get_setting_trimmed(&conn, "stt_quantize")?
+        .map(|q| match q.trim().to_ascii_lowercase().as_str() {
+            "fp32" | "float32" => "fp32".to_string(),
+            "int8" => "int8".to_string(),
+            _ => "auto".to_string(),
+        })
+        .unwrap_or_else(|| "auto".to_string());
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    tx.execute(
         &format!(
             "INSERT INTO flows (account_id, name, enabled, status, created_at, updated_at) \
              VALUES (?1, ?2, ?3, 'idle', {}, {})",
@@ -308,8 +375,58 @@ pub fn create_flow(state: State<'_, AppState>, input: CreateFlowInput) -> Result
         ],
     )
     .map_err(|e| e.to_string())?;
+    let flow_id = tx.last_insert_rowid();
 
-    Ok(conn.last_insert_rowid())
+    let start_config = json!({
+        "inherit_global_defaults": true,
+    })
+    .to_string();
+    let record_config = json!({
+        "poll_interval_seconds": record_poll_interval_sec,
+        "max_concurrent": record_max_concurrent,
+        "max_duration_minutes": record_max_duration_minutes,
+    })
+    .to_string();
+    let clip_config = json!({
+        "auto_process_after_record": clip_auto_process_after_record,
+        "clip_min_duration": clip_min_duration_sec,
+        "clip_max_duration": clip_max_duration_sec,
+        "audio_processing_enabled": clip_audio_processing_enabled,
+        "speech_merge_gap_sec": clip_speech_merge_gap_sec,
+        "speech_cut_tolerance_sec": clip_speech_cut_tolerance_sec,
+        "stt_num_threads": clip_stt_num_threads,
+        "stt_quantize": clip_stt_quantize,
+    })
+    .to_string();
+    let caption_config = json!({
+        "inherit_global_defaults": true,
+    })
+    .to_string();
+    let upload_config = json!({
+        "inherit_global_defaults": true,
+    })
+    .to_string();
+
+    for (node_key, config_json) in [
+        ("start", start_config.as_str()),
+        ("record", record_config.as_str()),
+        ("clip", clip_config.as_str()),
+        ("caption", caption_config.as_str()),
+        ("upload", upload_config.as_str()),
+    ] {
+        tx.execute(
+            &format!(
+                "INSERT INTO flow_node_configs (flow_id, node_key, config_json, updated_at) \
+                 VALUES (?1, ?2, ?3, {})",
+                SQL_NOW_HCM
+            ),
+            params![flow_id, node_key, config_json],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(flow_id)
 }
 
 #[tauri::command]

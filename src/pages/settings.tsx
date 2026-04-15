@@ -787,7 +787,7 @@ export function SettingsPage() {
         </p>
       )}
       {paths ? (
-        <Card className="bg-[var(--color-bg-elevated)]">
+        <Card className="order-10 bg-[var(--color-bg-elevated)]">
           <CardHeader>
             <CardTitle>Thư mục gốc dữ liệu</CardTitle>
             <CardDescription>
@@ -826,11 +826,11 @@ export function SettingsPage() {
         </Card>
       ) : null}
 
-      <Card className="bg-[var(--color-bg-elevated)]">
+      <Card className="order-40 bg-[var(--color-bg-subtle)]">
         <CardHeader>
-          <CardTitle>Recording</CardTitle>
+          <CardTitle>Workflow defaults - Recording</CardTitle>
           <CardDescription>
-            Thông tin cấu hình quá trình quay video.
+            Mặc định ghi hình cho flow mới; có thể override theo từng flow trong workspace.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -882,11 +882,11 @@ export function SettingsPage() {
         </CardFooter>
       </Card>
 
-      <Card className="bg-[var(--color-bg-elevated)]">
+      <Card className="order-50 bg-[var(--color-bg-subtle)]">
         <CardHeader>
-          <CardTitle>Clip processing</CardTitle>
+          <CardTitle>Workflow defaults - Clip processing</CardTitle>
           <CardDescription>
-            Cấu hình xử lý clip sau khi ghi hình.
+            Mặc định xử lý clip cho flow mới; chỉnh sâu hơn tại Flow node config khi cần.
           </CardDescription>
           <CardAction>
             <div className="flex items-center gap-2">
@@ -1027,11 +1027,11 @@ export function SettingsPage() {
         </CardFooter>
       </Card>
 
-      <Card className="bg-[var(--color-bg-elevated)]">
+      <Card className="order-30 bg-[var(--color-bg-elevated)]">
         <CardHeader>
-          <CardTitle>Tìm và nhận diện sản phẩm</CardTitle>
+          <CardTitle>API & AI integration</CardTitle>
           <CardDescription>
-            Tìm sản phẩm theo ảnh hoặc chữ; có thể tự gắn vào clip khi khớp.
+            Quản lý Gemini API key và các mặc định nhận diện sản phẩm cho hệ thống.
           </CardDescription>
           <CardAction>
             <div className="flex items-center gap-2">
@@ -1227,7 +1227,7 @@ export function SettingsPage() {
         </CardFooter>
       </Card>
 
-      <Card className="bg-[var(--color-bg-elevated)]">
+      <Card className="order-20 bg-[var(--color-bg-elevated)]">
         <CardHeader>
           <CardTitle>Storage</CardTitle>
           <CardDescription>
