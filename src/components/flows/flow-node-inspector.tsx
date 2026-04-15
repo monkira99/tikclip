@@ -1,42 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
+import {
+  FLOW_NODE_LABEL,
+  getFlowNodeStatus,
+} from "@/components/flows/flow-node-utils";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { FlowDetail, FlowNodeConfig, FlowNodeKey } from "@/types";
-
-const NODE_LABEL: Record<FlowNodeKey, string> = {
-  start: "Start",
-  record: "Record",
-  clip: "Clip",
-  caption: "Caption",
-  upload: "Upload",
-};
 
 type FlowNodeInspectorProps = {
   flow: FlowDetail | null;
   selectedNode: FlowNodeKey | null;
   saving?: boolean;
   onSaveConfig: (input: { nodeKey: FlowNodeKey; configJson: string }) => Promise<void>;
+  onDirtyChange?: (dirty: boolean) => void;
 };
-
-function getNodeStatus(flow: FlowDetail | null, node: FlowNodeKey): "idle" | "done" | "current" {
-  if (!flow || !flow.flow.enabled) {
-    return "idle";
-  }
-
-  const order: FlowNodeKey[] = ["start", "record", "clip", "caption", "upload"];
-  const currentIndex = flow.flow.current_node ? order.indexOf(flow.flow.current_node) : -1;
-  const nodeIndex = order.indexOf(node);
-
-  if (currentIndex === nodeIndex) {
-    return "current";
-  }
-  if (currentIndex > nodeIndex) {
-    return "done";
-  }
-  return "idle";
-}
 
 function findNodeConfig(nodeConfigs: FlowNodeConfig[], nodeKey: FlowNodeKey): string {
   const existing = nodeConfigs.find((item) => item.node_key === nodeKey);
@@ -48,6 +27,7 @@ export function FlowNodeInspector({
   selectedNode,
   saving = false,
   onSaveConfig,
+  onDirtyChange,
 }: FlowNodeInspectorProps) {
   const initialConfig = useMemo(() => {
     if (!flow || !selectedNode) {
@@ -63,6 +43,12 @@ export function FlowNodeInspector({
     setDraftConfig(initialConfig);
     setLocalError(null);
   }, [initialConfig]);
+
+  const isDirty = Boolean(flow && selectedNode && draftConfig !== initialConfig);
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   if (!flow) {
     return (
@@ -82,7 +68,7 @@ export function FlowNodeInspector({
     );
   }
 
-  const nodeStatus = getNodeStatus(flow, selectedNode);
+  const nodeStatus = getFlowNodeStatus(flow?.flow ?? null, selectedNode);
 
   const handleSave = () => {
     setLocalError(null);
@@ -105,7 +91,7 @@ export function FlowNodeInspector({
         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
           Node inspector
         </p>
-        <h3 className="text-base font-semibold text-[var(--color-text)]">{NODE_LABEL[selectedNode]}</h3>
+        <h3 className="text-base font-semibold text-[var(--color-text)]">{FLOW_NODE_LABEL[selectedNode]}</h3>
       </div>
 
       <div className="rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2 text-xs text-[var(--color-text-muted)]">
@@ -126,12 +112,14 @@ export function FlowNodeInspector({
         <Label htmlFor="flow-node-config" className="text-xs uppercase tracking-[0.08em] text-[var(--color-text-muted)]">
           Config JSON
         </Label>
-        <Input
+        <Textarea
           id="flow-node-config"
           value={draftConfig}
           onChange={(event) => setDraftConfig(event.target.value)}
           placeholder='{"enabled": true}'
           disabled={saving}
+          rows={8}
+          className="font-mono text-xs"
         />
       </div>
 

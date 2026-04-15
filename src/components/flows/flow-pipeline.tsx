@@ -1,39 +1,17 @@
 import { Badge } from "@/components/ui/badge";
+import {
+  FLOW_NODE_LABEL,
+  FLOW_NODE_ORDER,
+  getFlowNodeStatus,
+} from "@/components/flows/flow-node-utils";
 import { cn } from "@/lib/utils";
 import type { FlowDetail, FlowNodeKey } from "@/types";
-
-const NODE_ORDER: FlowNodeKey[] = ["start", "record", "clip", "caption", "upload"];
-
-const NODE_LABEL: Record<FlowNodeKey, string> = {
-  start: "Start",
-  record: "Record",
-  clip: "Clip",
-  caption: "Caption",
-  upload: "Upload",
-};
 
 type FlowPipelineProps = {
   flow: FlowDetail["flow"] | null;
   selectedNode: FlowNodeKey | null;
   onSelectNode: (node: FlowNodeKey) => void;
 };
-
-function getNodeState(flow: FlowDetail["flow"] | null, node: FlowNodeKey): "idle" | "done" | "current" {
-  if (!flow || !flow.enabled) {
-    return "idle";
-  }
-
-  const currentIndex = flow.current_node ? NODE_ORDER.indexOf(flow.current_node) : -1;
-  const nodeIndex = NODE_ORDER.indexOf(node);
-
-  if (currentIndex === nodeIndex) {
-    return "current";
-  }
-  if (currentIndex > nodeIndex) {
-    return "done";
-  }
-  return "idle";
-}
 
 export function FlowPipeline({ flow, selectedNode, onSelectNode }: FlowPipelineProps) {
   return (
@@ -58,15 +36,15 @@ export function FlowPipeline({ flow, selectedNode, onSelectNode }: FlowPipelineP
           ) : null}
           {selectedNode ? (
             <Badge variant="secondary" className="text-[10px] capitalize">
-              selected: {NODE_LABEL[selectedNode]}
+              selected: {FLOW_NODE_LABEL[selectedNode]}
             </Badge>
           ) : null}
         </div>
       </div>
 
       <div className="flex items-center gap-1.5">
-        {NODE_ORDER.map((node, index) => {
-          const nodeState = getNodeState(flow, node);
+        {FLOW_NODE_ORDER.map((node, index) => {
+          const nodeState = getFlowNodeStatus(flow, node);
           const selected = selectedNode === node;
 
           return (
@@ -84,9 +62,9 @@ export function FlowPipeline({ flow, selectedNode, onSelectNode }: FlowPipelineP
                 )}
                 aria-pressed={selected}
               >
-                {NODE_LABEL[node]}
+                {FLOW_NODE_LABEL[node]}
               </button>
-              {index === NODE_ORDER.length - 1 ? null : (
+              {index === FLOW_NODE_ORDER.length - 1 ? null : (
                 <span
                   className={cn(
                     "h-px w-3 shrink-0 bg-white/15",
