@@ -30,7 +30,7 @@ export function FlowsPage() {
       <div>
         <h2 className="text-lg font-semibold text-[var(--color-text)]">Operation flows</h2>
         <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-          Monitor each account flow, status, and pipeline stage in one place.
+          Open a flow to edit the canvas, publish versions, and inspect recordings and clips.
         </p>
       </div>
       <FlowList onOpenFlow={openDetail} />

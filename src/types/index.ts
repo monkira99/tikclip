@@ -80,6 +80,7 @@ export interface Clip {
   ai_tags_json: string | null;
   notes: string | null;
   flow_id: number | null;
+  flow_run_id?: number | null;
   transcript_text?: string | null;
   caption_text: string | null;
   caption_status: ClipCaptionStatus;
@@ -108,6 +109,8 @@ export interface FlowSummary {
   last_live_at: string | null;
   last_run_at: string | null;
   last_error: string | null;
+  published_version: number;
+  draft_version: number;
   recordings_count: number;
   clips_count: number;
   captions_count: number;
@@ -115,27 +118,75 @@ export interface FlowSummary {
   updated_at: string;
 }
 
-export interface FlowDetail {
-  flow: {
-    id: number;
-    account_id: number;
-    name: string;
-    enabled: boolean;
-    status: FlowStatus;
-    current_node: FlowNodeKey | null;
-    last_live_at: string | null;
-    last_run_at: string | null;
-    last_error: string | null;
-    created_at: string;
-    updated_at: string;
-  };
-  node_configs: FlowNodeConfig[];
+/** Flow row + resolved account id (from Start node username), aligned with Tauri `Flow`. */
+export type FlowContext = {
+  id: number;
+  account_id: number;
+  name: string;
+  enabled: boolean;
+  status: FlowStatus;
+  current_node: FlowNodeKey | null;
+  last_live_at: string | null;
+  last_run_at: string | null;
+  last_error: string | null;
+  published_version: number;
+  draft_version: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FlowRunStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
+
+export interface FlowNodeDefinition {
+  id: number;
+  flow_id: number;
+  node_key: FlowNodeKey;
+  position: number;
+  draft_config_json: string;
+  published_config_json: string;
+  draft_updated_at: string;
+  published_at: string;
+}
+
+export interface FlowRunRow {
+  id: number;
+  flow_id: number;
+  definition_version: number;
+  status: FlowRunStatus;
+  started_at: string;
+  ended_at: string | null;
+  trigger_reason: string | null;
+  error: string | null;
+}
+
+export interface FlowNodeRunRow {
+  id: number;
+  flow_run_id: number;
+  flow_id: number;
+  node_key: FlowNodeKey;
+  status: string;
+  started_at: string | null;
+  ended_at: string | null;
+  input_json: string | null;
+  output_json: string | null;
+  error: string | null;
+}
+
+export interface FlowEditorPayload {
+  flow: FlowContext;
+  nodes: FlowNodeDefinition[];
+  runs: FlowRunRow[];
+  nodeRuns: FlowNodeRunRow[];
   recordings_count: number;
   clips_count: number;
 }
 
+export interface PublishFlowResult {
+  flowId: number;
+  isRunning: boolean;
+}
+
 export interface CreateFlowInput {
-  account_id: number;
   name: string;
   enabled?: boolean;
 }

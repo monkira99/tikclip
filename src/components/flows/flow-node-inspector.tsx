@@ -7,19 +7,19 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import type { FlowDetail, FlowNodeConfig, FlowNodeKey } from "@/types";
+import type { FlowEditorPayload, FlowNodeKey } from "@/types";
 
 type FlowNodeInspectorProps = {
-  flow: FlowDetail | null;
+  flow: FlowEditorPayload | null;
   selectedNode: FlowNodeKey | null;
   saving?: boolean;
   onSaveConfig: (input: { nodeKey: FlowNodeKey; configJson: string }) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
 };
 
-function findNodeConfig(nodeConfigs: FlowNodeConfig[], nodeKey: FlowNodeKey): string {
-  const existing = nodeConfigs.find((item) => item.node_key === nodeKey);
-  return existing?.config_json ?? "{}";
+function findDraftConfig(nodes: FlowEditorPayload["nodes"], nodeKey: FlowNodeKey): string {
+  const existing = nodes.find((item) => item.node_key === nodeKey);
+  return existing?.draft_config_json ?? "{}";
 }
 
 export function FlowNodeInspector({
@@ -33,7 +33,7 @@ export function FlowNodeInspector({
     if (!flow || !selectedNode) {
       return "";
     }
-    return findNodeConfig(flow.node_configs, selectedNode);
+    return findDraftConfig(flow.nodes, selectedNode);
   }, [flow, selectedNode]);
 
   const [draftConfig, setDraftConfig] = useState(initialConfig);

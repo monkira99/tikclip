@@ -6,16 +6,17 @@ import {
   Network,
   LayoutDashboard,
   Settings,
-  Users,
 } from "lucide-react";
 
 const navItems = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { id: "accounts", label: "Accounts", icon: Users },
   { id: "flows", label: "Flows", icon: Network },
   { id: "products", label: "Products", icon: Boxes },
   { id: "statistics", label: "Statistics", icon: BarChart3 },
 ] as const;
+
+/** Collapsed rail — same horizontal padding as expanded so content does not shift on width tween. */
+const RAIL_W_CLASS = "w-16";
 
 export type SidebarPageId = (typeof navItems)[number]["id"] | "settings";
 
@@ -26,6 +27,30 @@ interface SidebarProps {
   activeRecordings: number;
 }
 
+const easeStandard = "duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]";
+
+const expandedLabel =
+  "flex min-h-0 min-w-0 max-w-0 flex-1 items-center overflow-hidden text-left whitespace-nowrap opacity-0 transition-[max-width,opacity] " +
+  easeStandard +
+  " group-hover:max-w-[11rem] group-hover:opacity-100 group-focus-within:max-w-[11rem] group-focus-within:opacity-100";
+
+/** Icon sits in a fixed w-10 track (matches collapsed rail) so it stays centered; label uses flex-1 when expanded. */
+const navButtonBase =
+  "relative flex h-10 min-h-10 w-full shrink-0 items-stretch justify-start gap-0 rounded-lg border border-transparent text-[var(--color-text-muted)] outline-none " +
+  "group-hover:gap-2 group-focus-within:gap-2 " +
+  "transition-[min-height,border-color,background-color,color,box-shadow,border-radius,padding,gap] " +
+  easeStandard +
+  " group-hover:min-h-[44px] group-hover:rounded-xl group-hover:py-2.5 group-focus-within:min-h-[44px] group-focus-within:rounded-xl group-focus-within:py-2.5";
+
+const navIconSlot =
+  "flex w-10 shrink-0 items-center justify-center self-stretch [&>svg]:size-[18px] [&>svg]:shrink-0";
+
+const navButtonActive =
+  "border-[color-mix(in_oklab,var(--color-accent)_22%,rgba(255,255,255,0.08))] bg-[color-mix(in_oklab,var(--color-accent)_12%,transparent)] text-[var(--color-accent)] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]";
+
+const navButtonIdle =
+  "hover:border-white/[0.08] hover:bg-white/[0.04] hover:text-[var(--color-text)]";
+
 export function Sidebar({
   currentPage,
   onNavigate,
@@ -33,116 +58,173 @@ export function Sidebar({
   activeRecordings,
 }: SidebarProps) {
   return (
-    <aside className="flex w-[248px] flex-col border-r border-white/6 bg-[var(--sidebar)] px-4 py-5 shadow-[inset_-1px_0_0_rgba(255,255,255,0.03)] backdrop-blur-xl">
-      <div className="app-panel-subtle flex items-center gap-3 rounded-2xl px-4 py-4">
-        <div className="relative flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02))] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
-          <span className="absolute -left-1 top-1 h-8 w-2 rotate-[28deg] rounded-full bg-[var(--color-primary)]" />
-          <span className="absolute left-3 top-1 h-8 w-2 rotate-[28deg] rounded-full bg-[var(--color-primary)]" />
-          <span className="absolute left-7 top-1 h-8 w-2 rotate-[28deg] rounded-full bg-[var(--color-primary)]/80" />
-        </div>
-        <div>
-          <div className="text-sm font-semibold tracking-[0.01em] text-white">TikClip</div>
-          <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--color-text-muted)]">
-            Reup Livestream
+    <div className={cn("relative z-30 h-full shrink-0", RAIL_W_CLASS)}>
+      <aside
+        tabIndex={-1}
+        aria-label="Workspace navigation"
+        className={cn(
+          "group absolute inset-y-0 left-0 z-30 flex w-16 flex-col overflow-y-auto overflow-x-visible border-r border-white/6 bg-[var(--sidebar)] py-4 pl-3 pr-3 shadow-[inset_-1px_0_0_rgba(255,255,255,0.04)] backdrop-blur-xl outline-none",
+          "transition-[width,box-shadow] " + easeStandard,
+          "hover:w-[248px] hover:shadow-[6px_0_32px_rgba(0,0,0,0.35)]",
+          "focus-within:w-[248px] focus-within:shadow-[6px_0_32px_rgba(0,0,0,0.35)]",
+          "focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--color-accent)_40%,transparent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--sidebar)]",
+        )}
+      >
+        {/* Brand: stable row; gap only when expanded so 40px rail is not overflowed by flex gap. */}
+        <div
+          className={cn(
+            "flex flex-row items-center justify-start gap-0 transition-[gap] " + easeStandard,
+            "group-hover:gap-3 group-focus-within:gap-3",
+          )}
+        >
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-white/[0.08] bg-[linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.02))] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+            <span className="relative block size-6">
+              <span className="absolute left-0 top-1 h-4 w-1 rotate-[24deg] rounded-full bg-[var(--color-primary)]" />
+              <span className="absolute left-2 top-1 h-4 w-1 rotate-[24deg] rounded-full bg-[var(--color-primary)]" />
+              <span className="absolute left-4 top-1 h-4 w-1 rotate-[24deg] rounded-full bg-[var(--color-primary)]/85" />
+            </span>
           </div>
-        </div>
-      </div>
-
-      <nav className="flex-1 space-y-2 pt-6">
-        <div className="px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
-          Workspace
-        </div>
-        {navItems.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => onNavigate(item.id)}
-            className={cn(
-              "flex w-full items-center gap-3 rounded-xl border px-3.5 py-3 text-sm transition-[border-color,background-color,opacity]",
-              currentPage === item.id
-                ? "border-[color-mix(in_oklab,var(--color-accent)_28%,var(--color-border))] bg-[color-mix(in_oklab,var(--color-accent)_10%,transparent)] text-[var(--color-text)] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
-                : "border-transparent text-[var(--color-text-muted)] hover:border-white/8 hover:bg-white/[0.03] hover:text-[var(--color-text)]",
-            )}
-          >
-            <span
-              className={cn(
-                "flex size-8 items-center justify-center rounded-lg border border-white/8 bg-white/[0.03]",
-                currentPage === item.id &&
-                  "bg-[color-mix(in_oklab,var(--color-accent)_12%,transparent)] text-[var(--color-accent)]",
-              )}
-            >
-              <item.icon className="size-4" aria-hidden />
-            </span>
-            <span className="flex-1 text-left font-medium">{item.label}</span>
-            {item.id === "flows" && activeRecordings > 0 && (
-              <Badge variant="destructive" className="ml-auto min-w-6 justify-center px-2">
-                {activeRecordings}
-              </Badge>
-            )}
-          </button>
-        ))}
-
-        <div className="mt-4 border-t border-white/6 pt-4">
-          <button
-            type="button"
-            onClick={() => onNavigate("settings")}
-            className={cn(
-              "flex w-full items-center gap-3 rounded-xl border px-3.5 py-3 text-sm transition-[border-color,background-color,opacity]",
-              currentPage === "settings"
-                ? "border-[color-mix(in_oklab,var(--color-accent)_28%,var(--color-border))] bg-[color-mix(in_oklab,var(--color-accent)_10%,transparent)] text-[var(--color-text)] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
-                : "border-transparent text-[var(--color-text-muted)] hover:border-white/8 hover:bg-white/[0.03] hover:text-[var(--color-text)]",
-            )}
-          >
-            <span
-              className={cn(
-                "flex size-8 items-center justify-center rounded-lg border border-white/8 bg-white/[0.03]",
-                currentPage === "settings" &&
-                  "bg-[color-mix(in_oklab,var(--color-accent)_12%,transparent)] text-[var(--color-accent)]",
-              )}
-            >
-              <Settings className="size-4" aria-hidden />
-            </span>
-            <span className="font-medium">Settings</span>
-          </button>
-        </div>
-      </nav>
-
-      <div className="app-panel-subtle rounded-2xl p-4 text-xs">
-        <div className="mb-2 flex items-center gap-2">
           <div
             className={cn(
-              "h-2.5 w-2.5 shrink-0 rounded-full shadow-[0_0_10px_currentColor]",
-              sidecarConnected
-                ? "bg-[var(--color-success)] text-[var(--color-success)]"
-                : "bg-[var(--color-primary)] text-[var(--color-primary)]",
-            )}
-          />
-          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
-            Sidecar
-          </span>
-          <Badge
-            variant="outline"
-            className={cn(
-              "ml-auto",
-              sidecarConnected
-                ? "border-[rgba(95,201,146,0.18)] bg-[rgba(95,201,146,0.12)] text-[var(--color-success)]"
-                : "border-[rgba(255,99,99,0.18)] bg-[rgba(255,99,99,0.12)] text-[var(--color-primary)]",
+              "flex min-w-0 flex-col justify-center",
+              "max-w-0 overflow-hidden opacity-0 transition-[max-width,opacity] " + easeStandard,
+              "group-hover:max-w-[10rem] group-hover:opacity-100 group-focus-within:max-w-[10rem] group-focus-within:opacity-100",
             )}
           >
-            {sidecarConnected ? "Connected" : "Disconnected"}
-          </Badge>
-        </div>
-        <p className="text-[13px] leading-relaxed text-[var(--color-text-soft)]">
-          {sidecarConnected
-            ? "Live polling, recording control, and clip processing are available."
-            : "Realtime features pause until the Python sidecar reconnects."}
-        </p>
-        {activeRecordings > 0 && (
-          <div className="mt-2 text-[var(--color-text-muted)]">
-            {activeRecordings} active recordings
+            <div className="whitespace-nowrap text-sm font-semibold tracking-[0.01em] text-white">
+              TikClip
+            </div>
+            <div className="whitespace-nowrap text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--color-text-muted)]">
+              Reup Livestream
+            </div>
           </div>
-        )}
-      </div>
-    </aside>
+        </div>
+
+        <nav className="flex flex-1 flex-col space-y-1.5 pt-5">
+          <div
+            className={cn(
+              "grid min-h-0 transition-[grid-template-rows] " + easeStandard,
+              "grid-rows-[0fr] group-hover:grid-rows-[1fr] group-focus-within:grid-rows-[1fr]",
+            )}
+          >
+            <div className="min-h-0 overflow-hidden">
+              <div className="whitespace-nowrap pb-1 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
+                Workspace
+              </div>
+            </div>
+          </div>
+          {navItems.map((item) => {
+            const active = currentPage === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => onNavigate(item.id)}
+                className={cn(navButtonBase, active ? navButtonActive : navButtonIdle)}
+              >
+                <span className={navIconSlot}>
+                  <item.icon aria-hidden />
+                </span>
+                <span className={cn("font-medium", expandedLabel)}>{item.label}</span>
+                {item.id === "flows" && activeRecordings > 0 ? (
+                  <>
+                    <span
+                      className="absolute right-1 top-1 size-2 rounded-full bg-[var(--color-primary)] ring-2 ring-[var(--sidebar)] group-hover:hidden group-focus-within:hidden"
+                      aria-hidden
+                    />
+                    <Badge
+                      variant="destructive"
+                      className="ml-auto hidden min-w-6 shrink-0 justify-center px-2 group-hover:inline-flex group-focus-within:inline-flex"
+                    >
+                      {activeRecordings}
+                    </Badge>
+                  </>
+                ) : null}
+              </button>
+            );
+          })}
+
+          <div className="mt-3 border-t border-white/[0.06] pt-3">
+            <button
+              type="button"
+              onClick={() => onNavigate("settings")}
+              className={cn(
+                navButtonBase,
+                currentPage === "settings" ? navButtonActive : navButtonIdle,
+              )}
+            >
+              <span className={navIconSlot}>
+                <Settings aria-hidden />
+              </span>
+              <span className={cn("font-medium", expandedLabel)}>Settings</span>
+            </button>
+          </div>
+        </nav>
+
+        <div className="mt-auto w-full shrink-0 pt-3">
+          {/* Chip stays in a fixed slot (absolute); panel crossfades + height tweens so hover does not pop layout. */}
+          <div className="relative z-0 min-h-10 w-full">
+            <div
+              className={cn(
+                "absolute left-0 top-0 z-10 flex size-10 items-center justify-center rounded-xl border border-white/[0.08] bg-[rgb(16_17_17_/0.55)]",
+                "transition-opacity " + easeStandard,
+                "opacity-100 group-hover:pointer-events-none group-hover:opacity-0 group-focus-within:pointer-events-none group-focus-within:opacity-0",
+              )}
+              title={sidecarConnected ? "Sidecar connected" : "Sidecar disconnected"}
+            >
+              <div
+                className={cn(
+                  "size-2.5 rounded-full shadow-[0_0_8px_currentColor]",
+                  sidecarConnected
+                    ? "bg-[var(--color-success)] text-[var(--color-success)]"
+                    : "bg-[var(--color-primary)] text-[var(--color-primary)]",
+                )}
+              />
+            </div>
+
+            <div
+              className={cn(
+                "relative z-20 grid min-h-0 w-full transition-[grid-template-rows,opacity] " + easeStandard,
+                "pointer-events-none grid-rows-[0fr] opacity-0 group-hover:pointer-events-auto group-hover:grid-rows-[1fr] group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:grid-rows-[1fr] group-focus-within:opacity-100",
+              )}
+            >
+              <div className="min-h-0 overflow-hidden">
+                <div className="app-panel-subtle rounded-2xl p-4 text-xs">
+                  <div className="flex flex-nowrap items-center gap-2">
+                <div
+                  className={cn(
+                    "h-2.5 w-2.5 shrink-0 rounded-full shadow-[0_0_10px_currentColor]",
+                    sidecarConnected
+                      ? "bg-[var(--color-success)] text-[var(--color-success)]"
+                      : "bg-[var(--color-primary)] text-[var(--color-primary)]",
+                  )}
+                />
+                <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
+                  Sidecar
+                </span>
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "ml-auto shrink-0",
+                        sidecarConnected
+                          ? "border-[rgba(95,201,146,0.18)] bg-[rgba(95,201,146,0.12)] text-[var(--color-success)]"
+                          : "border-[rgba(255,99,99,0.18)] bg-[rgba(255,99,99,0.12)] text-[var(--color-primary)]",
+                      )}
+                    >
+                      {sidecarConnected ? "Connected" : "Disconnected"}
+                    </Badge>
+                  </div>
+                  {activeRecordings > 0 ? (
+                    <p className="mt-2 whitespace-nowrap text-[var(--color-text-muted)]">
+                      {activeRecordings} active recordings
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
   );
 }

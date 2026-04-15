@@ -5,10 +5,10 @@ import {
   getFlowNodeStatus,
 } from "@/components/flows/flow-node-utils";
 import { cn } from "@/lib/utils";
-import type { FlowDetail, FlowNodeKey } from "@/types";
+import type { FlowContext, FlowNodeKey } from "@/types";
 
 type FlowPipelineProps = {
-  flow: FlowDetail["flow"] | null;
+  flow: FlowContext | null;
   selectedNode: FlowNodeKey | null;
   onSelectNode: (node: FlowNodeKey) => void;
 };

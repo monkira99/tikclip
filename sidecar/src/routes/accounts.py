@@ -1,3 +1,9 @@
+"""HTTP surface for account checks and watcher registration.
+
+Routes stay thin: validate input, delegate to ``account_watcher`` / TikTok helpers.
+Workflow orchestration lives in the Tauri app + SQLite engine, not here.
+"""
+
 import json
 import logging
 from typing import Annotated

@@ -2,7 +2,12 @@ import { create } from "zustand";
 import type { Account, CreateAccountInput } from "@/types";
 import * as api from "@/lib/api";
 
-/** Ignores stale list responses when several fetchAccounts overlap (WS + pages + connect). */
+/**
+ * Global account registry for sidecar watching, dashboard, and clip filters.
+ * Primary account UX for automation is the Start node on each flow (no dedicated Accounts page).
+ *
+ * Ignores stale list responses when several fetchAccounts overlap (WS + pages + connect).
+ */
 let listAccountsGeneration = 0;
 
 interface AccountState {

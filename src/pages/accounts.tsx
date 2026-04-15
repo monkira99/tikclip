@@ -1,5 +1,7 @@
-import { AccountList } from "@/components/accounts/account-list";
-
 export function AccountsPage() {
-  return <AccountList />;
+  return (
+    <p className="text-sm text-[var(--color-text-muted)]">
+      Accounts moved into the Start node of each flow.
+    </p>
+  );
 }

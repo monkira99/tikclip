@@ -1,4 +1,9 @@
-"""Poll watched TikTok accounts for live status; optional auto-record."""
+"""Poll watched TikTok accounts for live status; optional auto-record.
+
+The sidecar watcher is an executor: it resolves streams and drives ``recording_manager``.
+TikClip flow progression (``flow_runs`` / node state in SQLite) is owned by the desktop
+Rust workflow engine; this module does not advance pipeline nodes.
+"""
 
 from __future__ import annotations
 

@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { FlowCard } from "@/components/flows/flow-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useAccountStore } from "@/stores/account-store";
 import { useFlowStore } from "@/stores/flow-store";
 
 type FlowListProps = {
@@ -17,30 +16,15 @@ export function FlowList({ onOpenFlow }: FlowListProps) {
   const createFlow = useFlowStore((s) => s.createFlow);
   const toggleFlowEnabled = useFlowStore((s) => s.toggleFlowEnabled);
   const filters = useFlowStore((s) => s.filters);
-  const accounts = useAccountStore((s) => s.accounts);
-  const fetchAccounts = useAccountStore((s) => s.fetchAccounts);
 
   const [busyFlowIds, setBusyFlowIds] = useState<Record<number, boolean>>({});
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [newFlowName, setNewFlowName] = useState("");
-  const [newFlowAccountId, setNewFlowAccountId] = useState<string>("");
 
   useEffect(() => {
     void fetchFlows();
   }, [fetchFlows]);
-
-  useEffect(() => {
-    if (accounts.length === 0) {
-      void fetchAccounts();
-    }
-  }, [accounts.length, fetchAccounts]);
-
-  useEffect(() => {
-    if (!newFlowAccountId && accounts.length > 0) {
-      setNewFlowAccountId(String(accounts[0].id));
-    }
-  }, [accounts, newFlowAccountId]);
 
   const visibleFlows = useMemo(() => {
     const search = filters.search.trim().toLowerCase();
@@ -75,12 +59,7 @@ export function FlowList({ onOpenFlow }: FlowListProps) {
   };
 
   const handleCreateFlow = () => {
-    const accountId = Number(newFlowAccountId);
     const name = newFlowName.trim();
-    if (!Number.isFinite(accountId) || accountId <= 0) {
-      setCreateError("Please select an account");
-      return;
-    }
     if (!name) {
       setCreateError("Flow name is required");
       return;
@@ -89,7 +68,6 @@ export function FlowList({ onOpenFlow }: FlowListProps) {
     setCreateBusy(true);
     setCreateError(null);
     void createFlow({
-      account_id: accountId,
       name,
       enabled: true,
     })
@@ -117,23 +95,6 @@ export function FlowList({ onOpenFlow }: FlowListProps) {
     <div className="space-y-3">
       <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
         <div className="flex flex-wrap items-end gap-2">
-          <label className="min-w-[12rem] flex-1 text-xs text-[var(--color-text-muted)]">
-            <span className="mb-1 block">Account</span>
-            <select
-              className="h-9 w-full rounded-lg border border-input bg-transparent px-2 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-              value={newFlowAccountId}
-              onChange={(e) => setNewFlowAccountId(e.target.value)}
-              disabled={createBusy || accounts.length === 0}
-              aria-label="Select account for new flow"
-            >
-              {accounts.length === 0 ? <option value="">No accounts available</option> : null}
-              {accounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  @{account.username}
-                </option>
-              ))}
-            </select>
-          </label>
           <label className="min-w-[14rem] flex-1 text-xs text-[var(--color-text-muted)]">
             <span className="mb-1 block">Flow name</span>
             <Input
@@ -144,11 +105,7 @@ export function FlowList({ onOpenFlow }: FlowListProps) {
               aria-label="New flow name"
             />
           </label>
-          <Button
-            type="button"
-            onClick={handleCreateFlow}
-            disabled={createBusy || accounts.length === 0}
-          >
+          <Button type="button" onClick={handleCreateFlow} disabled={createBusy}>
             {createBusy ? "Creating..." : "Create flow"}
           </Button>
         </div>

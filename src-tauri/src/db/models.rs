@@ -43,6 +43,7 @@ pub struct Recording {
     pub bitrate: Option<String>,
     pub error_message: Option<String>,
     pub auto_process: bool,
+    pub flow_run_id: Option<i64>,
     pub created_at: String,
 }
 
@@ -65,6 +66,7 @@ pub struct Clip {
     pub ai_tags_json: Option<String>,
     pub notes: Option<String>,
     pub flow_id: Option<i64>,
+    pub flow_run_id: Option<i64>,
     pub transcript_text: Option<String>,
     pub caption_text: Option<String>,
     #[serde(default = "default_caption_status")]
@@ -86,8 +88,22 @@ pub struct Flow {
     pub last_live_at: Option<String>,
     pub last_run_at: Option<String>,
     pub last_error: Option<String>,
+    pub published_version: i64,
+    pub draft_version: i64,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FlowNodeDefinition {
+    pub id: i64,
+    pub flow_id: i64,
+    pub node_key: String,
+    pub position: i64,
+    pub draft_config_json: String,
+    pub published_config_json: String,
+    pub draft_updated_at: String,
+    pub published_at: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

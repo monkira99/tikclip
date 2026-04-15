@@ -5,6 +5,7 @@ mod sidecar;
 mod sidecar_env;
 mod time_hcm;
 mod tray;
+mod workflow;
 
 use db::init::initialize_database;
 use rusqlite::Connection;
@@ -69,14 +70,18 @@ pub fn run() {
             commands::products::batch_tag_clip_products,
             commands::dashboard::get_dashboard_stats,
             commands::flows::list_flows,
-            commands::flows::get_flow_detail,
             commands::flows::create_flow,
             commands::flows::update_flow,
             commands::flows::update_flow_runtime_by_account,
+            commands::flows::apply_sidecar_flow_runtime_hint,
             commands::flows::set_flow_enabled,
             commands::flows::save_flow_node_config,
             commands::flows::list_recordings_by_flow,
             commands::flows::list_clips_by_flow,
+            commands::flow_engine::get_flow_definition,
+            commands::flow_engine::save_flow_node_draft,
+            commands::flow_engine::publish_flow_definition,
+            commands::flow_engine::restart_flow_run,
             commands::notifications::insert_notification,
             commands::notifications::list_notifications,
             commands::notifications::mark_notification_read,

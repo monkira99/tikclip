@@ -7,7 +7,6 @@ import {
 import { useSidecar } from "@/hooks/use-sidecar";
 import * as api from "@/lib/api";
 import { wsClient } from "@/lib/ws";
-import { AccountsPage } from "@/pages/accounts";
 import { DashboardPage } from "@/pages/dashboard";
 import { FlowsPage } from "@/pages/flows";
 import { ProductsPage } from "@/pages/products";
@@ -29,21 +28,13 @@ import {
   countActiveRecordings,
   useRecordingStore,
 } from "@/stores/recording-store";
-import type { FlowStatus } from "@/types";
 import { Sidebar } from "./sidebar";
 import { TopBar } from "./top-bar";
 
-type PageId =
-  | "dashboard"
-  | "accounts"
-  | "flows"
-  | "products"
-  | "statistics"
-  | "settings";
+type PageId = "dashboard" | "flows" | "products" | "statistics" | "settings";
 
 const pageMeta: Record<PageId, { title: string; subtitle: string }> = {
   dashboard: { title: "Dashboard", subtitle: "Overview of all activities" },
-  accounts: { title: "Accounts", subtitle: "Manage TikTok accounts" },
   flows: { title: "Flows", subtitle: "Monitor and control account automation flows" },
   products: { title: "Products", subtitle: "Product catalog and tagging" },
   statistics: { title: "Statistics", subtitle: "Analytics and reports" },
@@ -52,7 +43,6 @@ const pageMeta: Record<PageId, { title: string; subtitle: string }> = {
 
 const pageComponents: Record<PageId, ComponentType> = {
   dashboard: DashboardPage,
-  accounts: AccountsPage,
   flows: FlowsPage,
   products: ProductsPage,
   statistics: () => (
@@ -225,13 +215,7 @@ async function syncLiveFromSidecarHttp(): Promise<void> {
     useAccountStore.getState().applyLiveFlagsFromSidecar(
       rows.map((r) => ({ id: r.account_id, isLive: r.is_live })),
     );
-    for (const row of rows) {
-      persistFlowRuntimeByAccount(row.account_id, {
-        status: row.is_live ? "watching" : "idle",
-        current_node: row.is_live ? "start" : null,
-        last_live_at: row.is_live ? isoNow() : undefined,
-      });
-    }
+    void useFlowStore.getState().refreshRuntime();
   } catch (e) {
     if (import.meta.env.DEV) {
       console.warn("[TikClip] syncLiveFromSidecarHttp failed", e);
@@ -247,90 +231,12 @@ function parseAccountId(raw: unknown): number | null {
   return id;
 }
 
-function isoNow(): string {
-  return new Date().toISOString();
-}
-
-function findFlowIdByAccount(accountId: number): number | null {
-  const { activeFlow, flows } = useFlowStore.getState();
-  if (activeFlow?.flow.account_id === accountId) {
-    return activeFlow.flow.id;
+function parseClipId(raw: unknown): number | null {
+  const id = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(id) || id <= 0) {
+    return null;
   }
-  const matched = flows.find((flow) => flow.account_id === accountId);
-  return matched?.id ?? null;
-}
-
-function patchRuntimeFlowState(flowId: number, patch: {
-  status?: FlowStatus;
-  current_node?: "start" | "record" | "clip" | "caption" | "upload" | null;
-  last_live_at?: string | null;
-  last_run_at?: string | null;
-  last_error?: string | null;
-}): void {
-  useFlowStore.setState((state) => ({
-    flows: state.flows.map((flow) => {
-      if (flow.id !== flowId) {
-        return flow;
-      }
-      return {
-        ...flow,
-        ...(patch.status !== undefined ? { status: patch.status } : {}),
-        ...(patch.current_node !== undefined ? { current_node: patch.current_node } : {}),
-        ...(patch.last_live_at !== undefined ? { last_live_at: patch.last_live_at } : {}),
-        ...(patch.last_run_at !== undefined ? { last_run_at: patch.last_run_at } : {}),
-        ...(patch.last_error !== undefined ? { last_error: patch.last_error } : {}),
-      };
-    }),
-    activeFlow:
-      state.activeFlow && state.activeFlow.flow.id === flowId
-        ? {
-            ...state.activeFlow,
-            flow: {
-              ...state.activeFlow.flow,
-              ...(patch.status !== undefined ? { status: patch.status } : {}),
-              ...(patch.current_node !== undefined ? { current_node: patch.current_node } : {}),
-              ...(patch.last_live_at !== undefined ? { last_live_at: patch.last_live_at } : {}),
-              ...(patch.last_run_at !== undefined ? { last_run_at: patch.last_run_at } : {}),
-              ...(patch.last_error !== undefined ? { last_error: patch.last_error } : {}),
-            },
-          }
-        : state.activeFlow,
-  }));
-}
-
-function patchRuntimeFlowStateByAccount(
-  accountId: number,
-  patch: {
-    status?: FlowStatus;
-    current_node?: "start" | "record" | "clip" | "caption" | "upload" | null;
-    last_live_at?: string | null;
-    last_run_at?: string | null;
-    last_error?: string | null;
-  },
-): void {
-  const flowId = findFlowIdByAccount(accountId);
-  if (flowId == null) {
-    return;
-  }
-  patchRuntimeFlowState(flowId, patch);
-}
-
-function persistFlowRuntimeByAccount(
-  accountId: number,
-  patch: {
-    status?: FlowStatus;
-    current_node?: "start" | "record" | "clip" | "caption" | "upload" | null;
-    last_live_at?: string | null;
-    last_run_at?: string | null;
-    last_error?: string | null;
-  },
-): void {
-  void api.updateFlowRuntimeByAccount(accountId, patch).catch((err) => {
-    if (import.meta.env.DEV) {
-      console.warn("[TikClip] flow runtime sync failed", { accountId, patch, err });
-    }
-  });
-  patchRuntimeFlowStateByAccount(accountId, patch);
+  return Math.trunc(id);
 }
 
 export function AppShell() {
@@ -352,15 +258,18 @@ export function AppShell() {
     if (!navigationTarget) {
       return;
     }
-    const p = navigationTarget.page;
-    if (
-      p === "dashboard" ||
-      p === "accounts" ||
-      p === "flows" ||
-      p === "products" ||
-      p === "statistics" ||
-      p === "settings"
-    ) {
+    const raw = navigationTarget.page;
+    const p =
+      raw === "accounts"
+        ? "flows"
+        : raw === "dashboard" ||
+            raw === "flows" ||
+            raw === "products" ||
+            raw === "statistics" ||
+            raw === "settings"
+          ? raw
+          : null;
+    if (p) {
       setCurrentPage(p);
     }
     if (navigationTarget.clipId != null) {
@@ -400,25 +309,26 @@ export function AppShell() {
 
     const onRecordingEvent = (data: Record<string, unknown>) => {
       applyRecordingWsPayload(data);
-      void syncRecordingFromSidecarWsPayload(data).catch((err) =>
-        logSidecarDbSyncError("recording → SQLite sync failed", err),
-      );
-      const accountId = parseAccountId(data.account_id);
-      if (accountId != null) {
-        persistFlowRuntimeByAccount(accountId, {
-          status: "recording",
-          current_node: "record",
-          last_run_at: isoNow(),
-          last_error: null,
-        });
-      }
+      void (async () => {
+        try {
+          await syncRecordingFromSidecarWsPayload(data);
+          const accountId = parseAccountId(data.account_id);
+          if (accountId != null) {
+            await api.applySidecarFlowRuntimeHint({
+              account_id: accountId,
+              hint: "recording_started",
+            });
+          }
+        } catch (err) {
+          logSidecarDbSyncError("recording → SQLite sync failed", err);
+        } finally {
+          void useFlowStore.getState().refreshRuntime();
+        }
+      })();
     };
 
     const onFinished = (data: Record<string, unknown>) => {
       applyRecordingWsPayload(data);
-      void syncRecordingFromSidecarWsPayload(data).catch((err) =>
-        logSidecarDbSyncError("recording_finished → SQLite sync failed", err),
-      );
       dispatchSidecarNotification("recording_finished", data);
       useAppStore.getState().bumpDashboardRevision();
       const id = data.recording_id;
@@ -427,36 +337,29 @@ export function AppShell() {
           useRecordingStore.getState().removeRecording(id);
         }, FINISHED_CLEANUP_MS);
       }
-      const accountId = parseAccountId(data.account_id);
-      if (accountId != null) {
-        const workerStatus = typeof data.status === "string" ? data.status.toLowerCase() : "";
-        const errorMessage =
-          typeof data.error_message === "string" && data.error_message.trim() !== ""
-            ? data.error_message
-            : null;
-        if (workerStatus === "error" || workerStatus === "failed") {
-          persistFlowRuntimeByAccount(accountId, {
-            status: "error",
-            current_node: "record",
-            last_run_at: isoNow(),
-            last_error: errorMessage ?? "Recording failed",
-          });
-        } else if (workerStatus === "completed" || workerStatus === "done") {
-          persistFlowRuntimeByAccount(accountId, {
-            status: "processing",
-            current_node: "record",
-            last_run_at: isoNow(),
-            last_error: null,
-          });
-        } else {
-          persistFlowRuntimeByAccount(accountId, {
-            status: "idle",
-            current_node: null,
-            last_run_at: isoNow(),
-            last_error: errorMessage,
-          });
+      void (async () => {
+        try {
+          await syncRecordingFromSidecarWsPayload(data);
+          const accountId = parseAccountId(data.account_id);
+          if (accountId != null) {
+            const workerStatus = typeof data.status === "string" ? data.status : "";
+            const errorMessage =
+              typeof data.error_message === "string" && data.error_message.trim() !== ""
+                ? data.error_message
+                : null;
+            await api.applySidecarFlowRuntimeHint({
+              account_id: accountId,
+              hint: "recording_finished",
+              worker_status: workerStatus,
+              error_message: errorMessage,
+            });
+          }
+        } catch (err) {
+          logSidecarDbSyncError("recording_finished → SQLite sync failed", err);
+        } finally {
+          void useFlowStore.getState().refreshRuntime();
         }
-      }
+      })();
     };
 
     const unsubStart = wsClient.on("recording_started", onRecordingEvent);
@@ -483,13 +386,18 @@ export function AppShell() {
       const id = parseAccountId(data.account_id);
       if (id != null) {
         persistLive(id, true, "account_live");
-        persistFlowRuntimeByAccount(id, {
-          status: "watching",
-          current_node: "start",
-          last_live_at: isoNow(),
-          last_error: null,
-        });
       }
+      void (async () => {
+        try {
+          if (id != null) {
+            await api.applySidecarFlowRuntimeHint({ account_id: id, hint: "account_live" });
+          }
+        } catch {
+          /* No matching flow is normal. */
+        } finally {
+          void useFlowStore.getState().refreshRuntime();
+        }
+      })();
     });
     const unsubAccountStatus = wsClient.on("account_status", (data) => {
       const rawId = data.account_id;
@@ -503,12 +411,19 @@ export function AppShell() {
         return;
       }
       persistLive(id, isLive, "account_status");
-      persistFlowRuntimeByAccount(id, {
-        status: isLive ? "watching" : "idle",
-        current_node: isLive ? "start" : null,
-        last_live_at: isLive ? isoNow() : undefined,
-      });
       useAppStore.getState().bumpDashboardRevision();
+      void (async () => {
+        try {
+          await api.applySidecarFlowRuntimeHint({
+            account_id: id,
+            hint: isLive ? "account_live" : "account_offline",
+          });
+        } catch {
+          /* No matching flow is normal. */
+        } finally {
+          void useFlowStore.getState().refreshRuntime();
+        }
+      })();
     });
     const unsubClip = wsClient.on("clip_ready", (data) => {
       dispatchSidecarNotification("clip_ready", data);
@@ -517,54 +432,63 @@ export function AppShell() {
         try {
           const clipId = await insertClipFromSidecarWsPayload(data);
           useClipStore.getState().bumpClipsRevision();
+          const accountId = parseAccountId(data.account_id);
+          if (accountId != null) {
+            await api.applySidecarFlowRuntimeHint({
+              account_id: accountId,
+              hint: "clip_ready",
+              clip_id: clipId ?? undefined,
+            });
+          }
           if (clipId != null) {
             void maybeGenerateCaptionAfterInsert(clipId, data);
             void maybeAutoTagClipAfterInsert(clipId, data);
           }
         } catch (err) {
           logSidecarDbSyncError("clip_ready → SQLite insert failed", err);
+        } finally {
+          void useFlowStore.getState().refreshRuntime();
         }
       })();
-      const accountId = parseAccountId(data.account_id);
-      if (accountId != null) {
-        persistFlowRuntimeByAccount(accountId, {
-          status: "processing",
-          current_node: "clip",
-          last_run_at: isoNow(),
-          last_error: null,
-        });
-      }
     });
 
     const unsubCaptionReady = wsClient.on("caption_ready", (data) => {
       void (async () => {
-        for (let attempt = 1; attempt <= CAPTION_SYNC_NOT_FOUND_MAX_ATTEMPTS; attempt += 1) {
-          try {
-            const updated = await syncClipCaptionFromWsPayload(data);
-            if (updated) {
-              useClipStore.getState().bumpClipsRevision();
-            }
-            return;
-          } catch (err) {
-            const canRetry =
-              attempt < CAPTION_SYNC_NOT_FOUND_MAX_ATTEMPTS && isClipCaptionNotFoundError(err);
-            if (!canRetry) {
-              logSidecarDbSyncError("caption_ready → SQLite update failed", err);
+        try {
+          for (let attempt = 1; attempt <= CAPTION_SYNC_NOT_FOUND_MAX_ATTEMPTS; attempt += 1) {
+            try {
+              const updated = await syncClipCaptionFromWsPayload(data);
+              if (updated) {
+                useClipStore.getState().bumpClipsRevision();
+              }
               return;
+            } catch (err) {
+              const canRetry =
+                attempt < CAPTION_SYNC_NOT_FOUND_MAX_ATTEMPTS && isClipCaptionNotFoundError(err);
+              if (!canRetry) {
+                logSidecarDbSyncError("caption_ready → SQLite update failed", err);
+                return;
+              }
             }
+            await delayMs(CAPTION_RETRY_BASE_MS * attempt);
           }
-          await delayMs(CAPTION_RETRY_BASE_MS * attempt);
+        } finally {
+          try {
+            const clipId = parseClipId(data.clip_id);
+            const accountId = parseAccountId(data.account_id);
+            if (clipId != null || accountId != null) {
+              await api.applySidecarFlowRuntimeHint({
+                account_id: accountId ?? 0,
+                hint: "caption_ready",
+                clip_id: clipId ?? undefined,
+              });
+            }
+          } catch {
+            /* No matching flow is normal. */
+          }
+          void useFlowStore.getState().refreshRuntime();
         }
       })();
-      const accountId = parseAccountId(data.account_id);
-      if (accountId != null) {
-        persistFlowRuntimeByAccount(accountId, {
-          status: "processing",
-          current_node: "caption",
-          last_run_at: isoNow(),
-          last_error: null,
-        });
-      }
     });
 
     const unsubSpeechSeg = wsClient.on("speech_segment_ready", (data) => {
@@ -573,6 +497,8 @@ export function AppShell() {
           await insertSpeechSegmentFromWsPayload(data);
         } catch (err) {
           logSidecarDbSyncError("speech_segment_ready → SQLite insert failed", err);
+        } finally {
+          void useFlowStore.getState().refreshRuntime();
         }
       })();
     });
@@ -625,6 +551,7 @@ export function AppShell() {
               logSidecarDbSyncError("recording status poll → SQLite sync failed", err),
             );
           }
+          void useFlowStore.getState().refreshRuntime();
         }
       })
       .catch(() => {});

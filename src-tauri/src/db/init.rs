@@ -35,6 +35,7 @@ fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         (5, include_str!("migrations/005_product_media_files.sql")),
         (6, include_str!("migrations/006_speech_segments.sql")),
         (7, include_str!("migrations/007_flows.sql")),
+        (8, include_str!("migrations/008_flow_engine_rebuild.sql")),
     ];
 
     for (version, sql) in migrations {

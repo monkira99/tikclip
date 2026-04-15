@@ -1,3 +1,9 @@
+"""Clip processing, caption generation, and related HTTP endpoints.
+
+Handlers enqueue work and return deterministic responses; they do not own
+cross-node flow orchestration (handled by the desktop engine + DB sync).
+"""
+
 import asyncio
 import logging
 from pathlib import Path

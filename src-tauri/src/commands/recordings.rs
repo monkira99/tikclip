@@ -50,12 +50,30 @@ pub(super) fn sync_recording_from_sidecar_conn(
     let err = input.error_message.as_deref();
     let flow_id: Option<i64> = conn
         .query_row(
-            "SELECT id FROM flows WHERE account_id = ?1",
+            "SELECT n.flow_id FROM flow_nodes n \
+             JOIN accounts a ON a.id = ?1 \
+             WHERE n.node_key = 'start' \
+               AND trim(json_extract(n.published_config_json, '$.username')) != '' \
+               AND lower(json_extract(n.published_config_json, '$.username')) = lower(a.username) \
+             LIMIT 1",
             [input.account_id],
             |row| row.get(0),
         )
         .optional()
         .map_err(|e| e.to_string())?;
+
+    let flow_run_id: Option<i64> = match flow_id {
+        Some(fid) => conn
+            .query_row(
+                "SELECT id FROM flow_runs WHERE flow_id = ?1 AND status = 'running' \
+                 ORDER BY id DESC LIMIT 1",
+                [fid],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?,
+        None => None,
+    };
 
     let existing_id: Option<i64> = conn
         .query_row(
@@ -75,10 +93,11 @@ pub(super) fn sync_recording_from_sidecar_conn(
                  file_path = COALESCE(?4, file_path), \
                  error_message = COALESCE(?5, error_message), \
                  flow_id = COALESCE(?6, flow_id), \
+                 flow_run_id = COALESCE(?7, flow_run_id), \
                  ended_at = CASE \
                     WHEN ?1 IN ('done', 'error', 'processing') AND ended_at IS NULL \
                     THEN {} ELSE ended_at END \
-                 WHERE id = ?7",
+                 WHERE id = ?8",
                 SQL_NOW_HCM
             ),
             params![
@@ -88,6 +107,7 @@ pub(super) fn sync_recording_from_sidecar_conn(
                 path,
                 err,
                 flow_id,
+                flow_run_id,
                 id
             ],
         )
@@ -102,10 +122,10 @@ pub(super) fn sync_recording_from_sidecar_conn(
         conn.execute(
             &format!(
                 "INSERT INTO recordings (\
-                   account_id, room_id, status, duration_seconds, file_size_bytes, flow_id, \
+                   account_id, room_id, status, duration_seconds, file_size_bytes, flow_id, flow_run_id, \
                    file_path, error_message, sidecar_recording_id, started_at, created_at, ended_at\
-                 ) VALUES (?1, NULL, ?2, ?3, ?4, ?5, ?6, ?7, ?8, {}, {}, \
-                   CASE WHEN ?9 != 0 THEN {} ELSE NULL END)",
+                 ) VALUES (?1, NULL, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, {}, {}, \
+                   CASE WHEN ?10 != 0 THEN {} ELSE NULL END)",
                 SQL_NOW_HCM, SQL_NOW_HCM, SQL_NOW_HCM
             ),
             params![
@@ -114,6 +134,7 @@ pub(super) fn sync_recording_from_sidecar_conn(
                 input.duration_seconds,
                 input.file_size_bytes,
                 flow_id,
+                flow_run_id,
                 path,
                 err,
                 &input.sidecar_recording_id,

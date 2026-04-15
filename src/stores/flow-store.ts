@@ -2,18 +2,20 @@ import { create } from "zustand";
 
 import {
   createFlow,
-  getFlowDetail,
-  listFlows,
-  saveFlowNodeConfig,
+  getFlowDefinition,
+  publishFlowDefinition,
+  restartFlowRun,
+  saveFlowNodeDraft,
   setFlowEnabled,
+  listFlows,
 } from "@/lib/api";
 import type {
   CreateFlowInput,
-  FlowDetail,
-  FlowNodeConfig,
+  FlowEditorPayload,
   FlowNodeKey,
   FlowStatus,
   FlowSummary,
+  PublishFlowResult,
 } from "@/types";
 
 type FlowView = "list" | "detail";
@@ -26,24 +28,32 @@ type FlowFilters = {
 type FlowStore = {
   flows: FlowSummary[];
   activeFlowId: number | null;
-  activeFlow: FlowDetail | null;
+  activeFlow: FlowEditorPayload | null;
   view: FlowView;
   selectedNode: FlowNodeKey | null;
+  editorModalNode: FlowNodeKey | null;
+  publishPending: boolean;
+  draftDirty: boolean;
+  runtimeRefreshTick: number;
   loading: boolean;
   error: string | null;
   filters: FlowFilters;
 
-  fetchFlows: () => Promise<void>;
-  fetchFlowDetail: (flowId?: number) => Promise<void>;
+  fetchFlows: (opts?: { quiet?: boolean }) => Promise<void>;
+  fetchFlowDetail: (flowId?: number, opts?: { quiet?: boolean }) => Promise<void>;
   setActiveFlowId: (flowId: number | null) => void;
   setView: (view: FlowView) => void;
   setSelectedNode: (node: FlowNodeKey | null) => void;
   setFilters: (partial: Partial<FlowFilters>) => void;
-  saveFlowConfig: (input: {
+  openNodeModal: (node: FlowNodeKey) => void;
+  closeNodeModal: () => void;
+  saveNodeDraft: (input: {
     flow_id: number;
     node_key: FlowNodeKey;
-    config_json: string;
-  }) => Promise<FlowNodeConfig>;
+    draft_config_json: string;
+  }) => Promise<void>;
+  publishFlow: (flowId: number, options: { restartCurrentRun: boolean }) => Promise<PublishFlowResult>;
+  refreshRuntime: () => Promise<void>;
   toggleFlowEnabled: (flowId: number, enabled: boolean) => Promise<void>;
   createFlow: (input: CreateFlowInput) => Promise<number>;
 };
@@ -87,12 +97,12 @@ function normalizeFlowSummary(flow: FlowSummary): FlowSummary {
   };
 }
 
-function normalizeFlowDetail(detail: FlowDetail): FlowDetail {
+function normalizeFlowEditorPayload(payload: FlowEditorPayload): FlowEditorPayload {
   return {
-    ...detail,
+    ...payload,
     flow: {
-      ...detail.flow,
-      status: normalizeFlowStatus(detail.flow.status, detail.flow.enabled),
+      ...payload.flow,
+      status: normalizeFlowStatus(payload.flow.status, payload.flow.enabled),
     },
   };
 }
@@ -105,13 +115,13 @@ function applyEnabledToFlowSummary(flow: FlowSummary, enabled: boolean): FlowSum
   };
 }
 
-function applyEnabledToFlowDetail(detail: FlowDetail, enabled: boolean): FlowDetail {
+function applyEnabledToFlowEditor(payload: FlowEditorPayload, enabled: boolean): FlowEditorPayload {
   return {
-    ...detail,
+    ...payload,
     flow: {
-      ...detail.flow,
+      ...payload.flow,
       enabled,
-      status: normalizeFlowStatus(detail.flow.status, enabled),
+      status: normalizeFlowStatus(payload.flow.status, enabled),
     },
   };
 }
@@ -122,13 +132,18 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
   activeFlow: null,
   view: "list",
   selectedNode: null,
+  editorModalNode: null,
+  publishPending: false,
+  draftDirty: false,
+  runtimeRefreshTick: 0,
   loading: false,
   error: null,
   filters: { ...DEFAULT_FILTERS },
 
-  fetchFlows: async () => {
+  fetchFlows: async (opts) => {
+    const quiet = opts?.quiet ?? false;
     const token = ++fetchFlowsToken;
-    const endFetch = beginFetch(set);
+    const endFetch = quiet ? () => {} : beginFetch(set);
     try {
       const flows = await listFlows();
       if (token !== fetchFlowsToken) {
@@ -145,7 +160,8 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
     }
   },
 
-  fetchFlowDetail: async (flowId) => {
+  fetchFlowDetail: async (flowId, opts) => {
+    const quiet = opts?.quiet ?? false;
     const token = ++fetchFlowDetailToken;
     const targetId = flowId ?? get().activeFlowId;
     if (!targetId) {
@@ -153,13 +169,18 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
       return;
     }
 
-    const endFetch = beginFetch(set);
+    const endFetch = quiet ? () => {} : beginFetch(set);
     try {
-      const detail = await getFlowDetail(targetId);
+      const payload = await getFlowDefinition(targetId);
       if (token !== fetchFlowDetailToken) {
         return;
       }
-      set({ activeFlow: normalizeFlowDetail(detail), activeFlowId: targetId, error: null });
+      set({
+        activeFlow: normalizeFlowEditorPayload(payload),
+        activeFlowId: targetId,
+        error: null,
+        draftDirty: quiet ? get().draftDirty : false,
+      });
     } catch (error) {
       if (token !== fetchFlowDetailToken) {
         return;
@@ -180,21 +201,51 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
     set((s) => ({ filters: { ...s.filters, ...partial } }));
   },
 
-  saveFlowConfig: async (input) => {
-    const config = await saveFlowNodeConfig(input);
+  openNodeModal: (node) => set({ editorModalNode: node, selectedNode: node }),
+
+  closeNodeModal: () => set({ editorModalNode: null }),
+
+  saveNodeDraft: async (input) => {
+    await saveFlowNodeDraft(input);
     const current = get().activeFlow;
     if (current && current.flow.id === input.flow_id) {
-      const nextConfigs = current.node_configs.some((x) => x.node_key === config.node_key)
-        ? current.node_configs.map((x) => (x.node_key === config.node_key ? config : x))
-        : [...current.node_configs, config];
+      const now = new Date().toISOString();
+      const nextNodes = current.nodes.some((n) => n.node_key === input.node_key)
+        ? current.nodes.map((n) =>
+            n.node_key === input.node_key
+              ? { ...n, draft_config_json: input.draft_config_json, draft_updated_at: now }
+              : n,
+          )
+        : current.nodes;
       set({
-        activeFlow: {
-          ...current,
-          node_configs: nextConfigs,
-        },
+        activeFlow: { ...current, nodes: nextNodes },
+        draftDirty: true,
       });
     }
-    return config;
+  },
+
+  publishFlow: async (flowId, options) => {
+    set({ publishPending: true, error: null });
+    try {
+      const result = await publishFlowDefinition(flowId);
+      if (options.restartCurrentRun && result.isRunning) {
+        await restartFlowRun(flowId);
+      }
+      await get().fetchFlowDetail(flowId);
+      set({ draftDirty: false });
+      return result;
+    } finally {
+      set({ publishPending: false });
+    }
+  },
+
+  refreshRuntime: async () => {
+    set((s) => ({ runtimeRefreshTick: s.runtimeRefreshTick + 1 }));
+    await get().fetchFlows({ quiet: true });
+    const id = get().activeFlowId;
+    if (id != null) {
+      await get().fetchFlowDetail(id, { quiet: true });
+    }
   },
 
   toggleFlowEnabled: async (flowId, enabled) => {
@@ -207,7 +258,7 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
       ),
       activeFlow:
         state.activeFlow && state.activeFlow.flow.id === flowId
-          ? applyEnabledToFlowDetail(state.activeFlow, enabled)
+          ? applyEnabledToFlowEditor(state.activeFlow, enabled)
           : state.activeFlow,
       error: null,
     }));
