@@ -90,6 +90,13 @@ It owns:
 - if no matching account exists, the runtime auto-upserts a `monitored` account row for that username before a run starts
 - the resolved `account_id` is then used for recordings, clips, dashboard queries, and downstream pipeline ownership
 
+Username normalization rule for this phase:
+- trim leading and trailing whitespace
+- remove exactly one leading `@` if present
+- reject the username if the remaining value is empty
+- preserve the trimmed canonical value without `@` for stored config and created `accounts.username`
+- use the lowercase form of that canonical value for lease keys, duplicate checks, and account lookup
+
 ### 4.2 Record Node Responsibility
 
 `Record` no longer owns source discovery or polling.
@@ -149,6 +156,13 @@ To avoid duplicate runs for the same ongoing live session:
 - the automation session stores the last completed live identity, keyed by `room_id`
 - after a run finishes, the session returns to polling but does not create another run while the same `room_id` remains live
 - a new run is allowed only after the source goes offline once, or a different `room_id` appears
+
+This dedupe rule must survive session restarts.
+
+Bootstrap rule:
+- when a session starts on app startup, enable, or publish restart, it restores the last completed live identity for that flow from durable state
+- phase 1 should restore this from the latest completed or cancelled `flow_run` / `recordings` data for the same flow where a `room_id` is available
+- if no durable room identity can be restored, the session may start without dedupe history and should expose that state in runtime diagnostics
 
 ### 5.3 What Counts As Record Completion
 
@@ -356,6 +370,11 @@ Rules:
 
 Conflicts should be explicit and user-visible.
 
+Legacy duplicate account rule:
+- before account lookup or auto-create, the runtime checks for multiple `accounts` rows that collapse to the same normalized username
+- if duplicates are found, the runtime does not guess or merge automatically in phase 1
+- instead it surfaces a visible conflict state and refuses to start that flow until the duplicate data is resolved
+
 ---
 
 ## 10. Data Flow
@@ -440,8 +459,9 @@ For a successful live detection and recording path:
 
 Account binding rule:
 - `Start.username` is the canonical source for resolving runtime ownership
-- on session start or restart, the runtime looks up `accounts.username` case-insensitively
+- on session start or restart, the runtime looks up `accounts.username` using the same normalization rule as `Start.username`
 - if no account exists, the runtime auto-creates a `monitored` account row with that username before any `flow_run` or `recordings` row is created
+- if multiple accounts match the same normalized username, the flow enters conflict state and does not start
 - if the flow later publishes a different username, the next session restart resolves or creates a different account row for future runs only
 
 `account_id` remains important for dashboarding and existing lookup patterns even though source runtime config now lives in `Start`.
@@ -562,6 +582,7 @@ Config compatibility rule:
 - existing keys such as `cookies_json`, `proxy_url`, `poll_interval_seconds`, `retry_limit`, and `max_duration_minutes` remain canonical
 - new fields added in this phase must also use snake_case
 - frontend parsers and serializers should migrate additively, not by changing the canonical stored key names to camelCase
+- username parsing across frontend, Rust, and migration code must use the same canonicalization rule: `trim` + remove one leading `@` + lowercase only for comparisons
 
 ### 14.2 Existing Accounts
 
