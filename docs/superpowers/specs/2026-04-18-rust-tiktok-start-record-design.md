@@ -33,7 +33,7 @@ This keeps the flow mental model intact: each flow has its own source, its own p
 - Make polling, cookies, proxy, and related source settings configurable per flow via `Start`
 - Keep `Record` focused on recording only
 - Create a new `flow_run` only when a real live session is detected
-- Preserve ownership of outputs via `account_id + flow_run_id`
+- Preserve ownership of outputs via `account_id + flow_run_id`, with runtime auto-upsert of `accounts` rows when needed
 - Prevent two flows from monitoring the same `username` concurrently
 - Preserve the current fixed pipeline shape `Start -> Record -> Clip -> Caption -> Upload`
 
@@ -77,13 +77,18 @@ This also avoids turning the new Rust implementation into another global watcher
 
 It owns:
 - `username`
-- `cookiesJson`
-- `proxyUrl`
+- `cookies_json`
+- `proxy_url`
 - polling interval
 - retry and backoff settings
 - any future TikTok-specific source toggles for this flow
 
 `Start` does not immediately complete when the flow is enabled. Instead, the flow's automation session stays in a polling loop until live is detected.
+
+`Start` also owns account binding for the run:
+- the runtime resolves `account_id` from `accounts.username`
+- if no matching account exists, the runtime auto-upserts a `monitored` account row for that username before a run starts
+- the resolved `account_id` is then used for recordings, clips, dashboard queries, and downstream pipeline ownership
 
 ### 4.2 Record Node Responsibility
 
@@ -119,6 +124,7 @@ Phase 1 introduces an in-memory Rust automation session per enabled flow.
 
 The automation session:
 - loads the published `Start` and `Record` config for the flow
+- resolves or creates the bound `account_id` for the published `username`
 - acquires a `username` lease
 - polls until live is detected
 - creates and advances a `flow_run` when a real session starts
@@ -135,8 +141,14 @@ A `flow_run` starts only when all of the following are true:
 - the target is currently live
 - a valid `room_id` is known or can be derived
 - a valid `stream_url` is resolved for recording
+- the current live room is not the same room that this session has already completed for the current on-air cycle
 
 If TikTok reports live but no reliable `stream_url` can be resolved, the session stays in `Start` polling and does not create a `flow_run` yet.
+
+To avoid duplicate runs for the same ongoing live session:
+- the automation session stores the last completed live identity, keyed by `room_id`
+- after a run finishes, the session returns to polling but does not create another run while the same `room_id` remains live
+- a new run is allowed only after the source goes offline once, or a different `room_id` appears
 
 ### 5.3 What Counts As Record Completion
 
@@ -144,10 +156,10 @@ If TikTok reports live but no reliable `stream_url` can be resolved, the session
 
 The run proceeds to the next node when any of these happen:
 - the livestream stops and `ffmpeg` exits cleanly enough to keep the output
-- the recording reaches `maxDurationSeconds`
+- the recording reaches the runtime max duration derived from `max_duration_minutes`
 
 The key intentional behavior change from Python is:
-- when `maxDurationSeconds` is reached, `Record` is considered complete
+- when the runtime max duration is reached, `Record` is considered complete
 - the flow does not re-check live and does not chain another segment automatically
 
 This is an explicit product decision for the new flow model.
@@ -227,7 +239,22 @@ It should:
 
 The sidecar remains for the other domains in phase 1, but not for this TikTok `Start/Record` slice.
 
-### 7.3 Rust Design Constraints
+### 7.3 Session Lifecycle And Command Boundaries
+
+Phase 1 adds a `LiveRuntimeManager` managed by Tauri alongside `AppState`.
+
+Lifecycle rules:
+- app startup: after SQLite is initialized, the manager scans enabled flows and starts one automation session per eligible flow
+- app shutdown: the manager stops all sessions, terminates active recording workers, and releases all username leases
+- `set_flow_enabled(flow_id, true)`: after the DB update commits, the manager starts or reconciles that flow session immediately from the latest published config
+- `set_flow_enabled(flow_id, false)`: after the DB update commits, the manager stops the session immediately, cancels any active run, and releases the username lease
+- `publish_flow_definition(flow_id)`: after the publish transaction commits, if the flow is enabled the manager stops the current session, releases the lease, and starts a fresh session from the new published config immediately
+
+Atomicity rule:
+- after a publish or enable change, there must never be two active sessions for the same flow
+- if session restart fails, the old session stays stopped and the new failure is surfaced through runtime error state rather than silently continuing on stale config
+
+### 7.4 Rust Design Constraints
 
 The implementation should follow the existing repo style and Rust best practices:
 - prefer owned command inputs at the Tauri boundary
@@ -244,17 +271,21 @@ The implementation should follow the existing repo style and Rust best practices
 
 `Start` published config should become the single source of flow-owned TikTok runtime configuration.
 
+Persisted config should keep the repo's current snake_case convention so DB JSON, Rust, and frontend forms stay aligned.
+
 Example shape:
 
 ```json
 {
   "username": "shop_abc",
-  "cookiesJson": "{\"sessionid\":\"...\"}",
-  "proxyUrl": "http://127.0.0.1:9000",
-  "pollIntervalSeconds": 20,
-  "retryBackoffSeconds": 10,
-  "startupDelaySeconds": 0,
-  "enabled": true
+  "cookies_json": "{\"sessionid\":\"...\"}",
+  "proxy_url": "http://127.0.0.1:9000",
+  "poll_interval_seconds": 20,
+  "watcher_mode": "live_polling",
+  "retry_limit": 3,
+  "last_live_at": null,
+  "last_run_at": null,
+  "last_error": null
 }
 ```
 
@@ -262,21 +293,21 @@ Required fields should be minimal:
 - `username`
 
 Optional fields:
-- `cookiesJson`
-- `proxyUrl`
+- `cookies_json`
+- `proxy_url`
 - polling and retry values
 
 ### 8.2 Record Node Published Config
 
 `Record` published config should remain small and focused.
 
+Persisted config should also stay snake_case in phase 1.
+
 Example shape:
 
 ```json
 {
-  "maxDurationSeconds": 7200,
-  "ffmpegLogLevel": "warning",
-  "outputRootMode": "default"
+  "max_duration_minutes": 120
 }
 ```
 
@@ -301,6 +332,7 @@ The session keeps at least:
 - `last_live_at`
 - `last_error`
 - `active_flow_run_id`
+- `last_completed_room_id`
 
 Suggested session statuses:
 - `idle`
@@ -352,9 +384,11 @@ This payload becomes the input to `Record`.
 
 1. `Record` validates its config and input payload
 2. It creates a recording worker with the resolved `stream_url`
-3. It inserts or updates a `recordings` row tied to `account_id`, `flow_id`, and `flow_run_id`
-4. It emits runtime progress until the worker exits
-5. It finalizes its node run and lets the engine continue to `Clip`
+3. It creates a Rust-owned external recording key using the existing `recordings.sidecar_recording_id` column
+4. It inserts or updates a `recordings` row tied to `account_id`, `flow_id`, `flow_run_id`, and that external recording key
+5. It emits runtime progress until the worker exits
+6. On successful completion, it calls the existing sidecar clip-processing HTTP path using that same external recording key so downstream sidecar work can map back into SQLite unchanged
+7. It finalizes its node run and lets the engine continue to `Clip`
 
 ### 10.4 Loop Back To Start
 
@@ -376,6 +410,8 @@ Phase 1 should reuse the current durable workflow tables:
 - `recordings`
 
 This design does not require a new durable `automation_sessions` table in phase 1.
+
+It also continues to use `recordings.sidecar_recording_id` as the durable external-processing key for sidecar clip and caption work, even though recording ownership has moved to Rust.
 
 ### 11.2 Flow Runs
 
@@ -402,7 +438,15 @@ For a successful live detection and recording path:
 - `flow_id`
 - `flow_run_id`
 
+Account binding rule:
+- `Start.username` is the canonical source for resolving runtime ownership
+- on session start or restart, the runtime looks up `accounts.username` case-insensitively
+- if no account exists, the runtime auto-creates a `monitored` account row with that username before any `flow_run` or `recordings` row is created
+- if the flow later publishes a different username, the next session restart resolves or creates a different account row for future runs only
+
 `account_id` remains important for dashboarding and existing lookup patterns even though source runtime config now lives in `Start`.
+
+Historical recordings keep their original `account_id` even if the flow later changes usernames.
 
 ---
 
@@ -428,7 +472,7 @@ Behavior:
 Stable configuration problems should put the automation session into a visible error or conflict state.
 
 Examples:
-- invalid `cookiesJson`
+- invalid `cookies_json`
 - missing or invalid `username`
 - username lease conflict
 
@@ -444,6 +488,8 @@ Examples:
 - write path failure
 
 These failures should mark the `Record` node run and the `flow_run` failed, then return the automation session to `Start` after the failure path is finalized.
+
+If sidecar clip processing could not be scheduled after a completed recording, the `Record` step is still considered complete, but the downstream handoff failure must be surfaced explicitly so the run can fail in the `Clip` stage rather than disappearing silently.
 
 ### 12.4 Live Ending Mid-Recording
 
@@ -489,6 +535,8 @@ Rust/Tauri should emit runtime events for:
 
 Event names do not need to match the old Python WebSocket names exactly, but the semantic coverage should be preserved.
 
+For downstream processing, the Rust runtime should continue passing the external recording key through the same sidecar-oriented contract currently keyed by `sidecar_recording_id`, so `insert_clip_from_sidecar` and `insert_speech_segment` can keep resolving `recordings.id`, `flow_id`, and `flow_run_id` from SQLite.
+
 ### 13.3 Editor Configuration
 
 The flow editor should show:
@@ -509,12 +557,19 @@ Existing flows should migrate toward:
 
 Any old assumptions that runtime source config lives on `accounts` should be treated as transitional compatibility only.
 
+Config compatibility rule:
+- phase 1 keeps snake_case persisted JSON for `draft_config_json` and `published_config_json`
+- existing keys such as `cookies_json`, `proxy_url`, `poll_interval_seconds`, `retry_limit`, and `max_duration_minutes` remain canonical
+- new fields added in this phase must also use snake_case
+- frontend parsers and serializers should migrate additively, not by changing the canonical stored key names to camelCase
+
 ### 14.2 Existing Accounts
 
 `accounts` remain in phase 1 for:
 - output ownership
 - dashboard views
 - existing queries and joins
+- auto-upsert target rows when a flow introduces a username that does not yet exist
 
 They are no longer the runtime source of truth for TikTok polling behavior in this slice.
 
@@ -532,7 +587,7 @@ For this phase, TikTok `Start` polling and `Record` runtime move to Rust.
 
 Add Rust tests for:
 - valid and invalid `Start` config parsing
-- invalid `cookiesJson`
+- invalid `cookies_json`
 - invalid poll interval values
 
 ### 15.2 TikTok Resolution Tests
