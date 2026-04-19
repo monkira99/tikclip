@@ -1,5 +1,8 @@
 use serde::Serialize;
 
+/// Summary snapshot for live runtime session state.
+/// Structured runtime logs live in `live_runtime::logs` to keep the summary path separate.
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LiveRuntimeSessionSnapshot {

@@ -129,6 +129,28 @@ export interface FlowRuntimeSnapshot {
   active_flow_run_id: number | null;
 }
 
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: JsonValue }
+  | JsonValue[];
+
+export interface FlowRuntimeLogEntry {
+  id: string;
+  timestamp: string;
+  level: "debug" | "info" | "warn" | "error";
+  flow_id: number;
+  flow_run_id: number | null;
+  external_recording_id: string | null;
+  stage: string;
+  event: string;
+  code: string | null;
+  message: string;
+  context: JsonValue;
+}
+
 /** Flow row + resolved account id (from Start node username), aligned with Tauri `Flow`. */
 export type FlowContext = {
   id: number;

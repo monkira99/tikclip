@@ -25,9 +25,9 @@ pub struct AppState {
 
 fn init_rust_logging() {
     let default_filter = if cfg!(debug_assertions) {
-        "warn,tikclip_lib::commands::accounts=info"
+        "warn,tikclip_lib::commands::accounts=info,tikclip_lib::commands::live_runtime=debug,tikclip_lib::live_runtime=debug"
     } else {
-        "warn,tikclip_lib::commands::accounts=warn"
+        "warn,tikclip_lib::commands::accounts=warn,tikclip_lib::commands::live_runtime=info,tikclip_lib::live_runtime=info"
     };
     let _ =
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default_filter))
@@ -87,6 +87,7 @@ pub fn run() {
             commands::flow_engine::publish_flow_definition,
             commands::flow_engine::restart_flow_run,
             commands::live_runtime::list_live_runtime_sessions,
+            commands::live_runtime::list_live_runtime_logs,
             commands::live_runtime::trigger_start_live_detected,
             commands::live_runtime::mark_start_run_completed,
             commands::live_runtime::mark_source_offline,

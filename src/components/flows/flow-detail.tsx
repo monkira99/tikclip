@@ -6,17 +6,35 @@ import { RecordNodeModal } from "@/components/flows/modals/record-node-modal";
 import { StartNodeModal } from "@/components/flows/modals/start-node-modal";
 import { UploadNodeModal } from "@/components/flows/modals/upload-node-modal";
 import { FlowRuntimeLanes } from "@/components/flows/runtime/flow-runtime-lanes";
+import { RuntimeLogsPanel } from "@/components/flows/runtime/runtime-logs-panel";
 import { FlowRuntimeTimeline } from "@/components/flows/runtime/flow-runtime-timeline";
 import { PublishFlowDialog } from "@/components/flows/runtime/publish-flow-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useFlowStore } from "@/stores/flow-store";
-import type { FlowEditorPayload, FlowNodeKey } from "@/types";
+import type { FlowContext, FlowEditorPayload, FlowNodeKey, FlowRuntimeSnapshot } from "@/types";
 
 type FlowDetailProps = {
   flowId: number;
   onBack: () => void;
 };
+
+export function buildRuntimeLogsPanelFlow(
+  flow: FlowContext,
+  runtimeSnapshot: FlowRuntimeSnapshot | null,
+): FlowContext {
+  if (!runtimeSnapshot) {
+    return flow;
+  }
+
+  return {
+    ...flow,
+    status: runtimeSnapshot.status,
+    current_node: runtimeSnapshot.current_node,
+    last_live_at: runtimeSnapshot.last_live_at,
+    last_error: runtimeSnapshot.last_error,
+  };
+}
 
 export function FlowDetail({ flowId, onBack }: FlowDetailProps) {
   const activeFlow = useFlowStore((s) => s.activeFlow);
@@ -25,7 +43,10 @@ export function FlowDetail({ flowId, onBack }: FlowDetailProps) {
   const error = useFlowStore((s) => s.error);
   const publishPending = useFlowStore((s) => s.publishPending);
   const draftDirty = useFlowStore((s) => s.draftDirty);
+  const runtimeLogs = useFlowStore((s) => s.runtimeLogs);
+  const runtimeSnapshot = useFlowStore((s) => s.runtimeSnapshots[flowId] ?? null);
   const fetchFlowDetail = useFlowStore((s) => s.fetchFlowDetail);
+  const fetchRuntimeLogs = useFlowStore((s) => s.fetchRuntimeLogs);
   const editorModalNode = useFlowStore((s) => s.editorModalNode);
   const openNodeModal = useFlowStore((s) => s.openNodeModal);
   const closeNodeModal = useFlowStore((s) => s.closeNodeModal);
@@ -39,7 +60,13 @@ export function FlowDetail({ flowId, onBack }: FlowDetailProps) {
     void fetchFlowDetail(flowId);
   }, [flowId, fetchFlowDetail]);
 
+  useEffect(() => {
+    void fetchRuntimeLogs(flowId);
+  }, [flowId, fetchRuntimeLogs]);
+
   const flow = activeFlow && activeFlow.flow.id === flowId ? activeFlow : null;
+  const flowLogs = runtimeLogs[flowId] ?? [];
+  const runtimePanelFlow = flow ? buildRuntimeLogsPanelFlow(flow.flow, runtimeSnapshot) : null;
 
   const handleCanvasSelect = (node: FlowNodeKey) => {
     openNodeModal(node);
@@ -152,6 +179,15 @@ export function FlowDetail({ flowId, onBack }: FlowDetailProps) {
         <FlowRuntimeTimeline runs={flow?.runs ?? []} nodeRuns={flow?.nodeRuns ?? []} />
         <FlowRuntimeLanes nodeRuns={flow?.nodeRuns ?? []} />
       </div>
+
+      {flow ? (
+        <RuntimeLogsPanel
+          flow={runtimePanelFlow ?? flow.flow}
+          logs={flowLogs}
+          username={runtimeSnapshot?.username ?? null}
+          activeFlowRunId={runtimeSnapshot?.active_flow_run_id ?? null}
+        />
+      ) : null}
 
       <PublishFlowDialog
         open={publishOpen}

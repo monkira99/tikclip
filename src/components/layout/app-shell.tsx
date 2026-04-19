@@ -30,6 +30,7 @@ import {
   countActiveRecordings,
   useRecordingStore,
 } from "@/stores/recording-store";
+import type { FlowRuntimeLogEntry } from "@/types";
 import { Sidebar } from "./sidebar";
 import { TopBar } from "./top-bar";
 
@@ -362,6 +363,30 @@ export function AppShell() {
         return;
       }
       void useFlowStore.getState().refreshRuntime();
+    }).then((fn) => {
+      if (cancelled) {
+        fn();
+        return;
+      }
+      unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isTauri()) {
+      return;
+    }
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    void listen<FlowRuntimeLogEntry>("flow-runtime-log", (event) => {
+      if (cancelled) {
+        return;
+      }
+      useFlowStore.getState().appendRuntimeLog(event.payload);
     }).then((fn) => {
       if (cancelled) {
         fn();

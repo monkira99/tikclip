@@ -8,15 +8,16 @@ import type {
   Clip,
   ClipCaptionStatus,
   ClipFilters,
-    CreateFlowInput,
-    CreateAccountInput,
-    FlowEditorPayload,
-    FlowNodeConfig,
-    FlowNodeKey,
-    FlowRuntimeSnapshot,
-    FlowStatus,
-    FlowSummary,
-    PublishFlowResult,
+  CreateFlowInput,
+  CreateAccountInput,
+  FlowEditorPayload,
+  FlowNodeConfig,
+  FlowNodeKey,
+  FlowRuntimeLogEntry,
+  FlowRuntimeSnapshot,
+  FlowStatus,
+  FlowSummary,
+  PublishFlowResult,
   CreateProductInput,
   Product,
   SidecarRecordingStatus,
@@ -347,6 +348,13 @@ export async function getFlowDefinition(flowId: number): Promise<FlowEditorPaylo
 
 export async function listLiveRuntimeSessions(): Promise<FlowRuntimeSnapshot[]> {
   return invoke<FlowRuntimeSnapshot[]>("list_live_runtime_sessions");
+}
+
+export async function listLiveRuntimeLogs(
+  flowId?: number,
+  limit?: number,
+): Promise<FlowRuntimeLogEntry[]> {
+  return invoke<FlowRuntimeLogEntry[]>("list_live_runtime_logs", { flowId, limit });
 }
 
 export async function triggerStartLiveDetected(input: {
