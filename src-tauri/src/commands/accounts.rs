@@ -206,11 +206,16 @@ mod tests {
     use crate::time_hcm::SQL_NOW_HCM;
     use rusqlite::Connection;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_DB_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     fn open_temp_db() -> (Connection, PathBuf) {
+        let counter = TEST_DB_COUNTER.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
-            "tikclip-accounts-test-{}-{}.db",
+            "tikclip-accounts-test-{}-{}-{}.db",
             std::process::id(),
+            counter,
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_nanos())

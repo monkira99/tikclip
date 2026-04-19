@@ -7,12 +7,42 @@ function bool(value: unknown): boolean {
   return value === true || value === 1 || value === "1";
 }
 
+function normalizeUsername(value: unknown): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim().replace(/^@/, "").trim();
+}
+
+function stringValue(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value === "string") {
+      return value;
+    }
+  }
+  return "";
+}
+
+function firstDefined(...values: unknown[]): unknown {
+  for (const value of values) {
+    if (value !== undefined && value !== null) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function secondsToRoundedUpMinutes(value: unknown, fallbackSeconds: number): number {
+  const seconds = Math.max(1, Math.floor(num(value, fallbackSeconds)));
+  return Math.max(1, Math.ceil(seconds / 60));
+}
+
 export type StartNodeForm = {
   username: string;
   cookies_json: string;
   proxy_url: string;
   poll_interval_seconds: number;
-  watcher_mode: "live_polling";
   retry_limit: number;
 };
 
@@ -24,23 +54,23 @@ export function parseStartNodeDraft(raw: string): StartNodeForm {
     value = {};
   }
   return {
-    username: typeof value.username === "string" ? value.username : "",
-    cookies_json: typeof value.cookies_json === "string" ? value.cookies_json : "",
-    proxy_url: typeof value.proxy_url === "string" ? value.proxy_url : "",
-    poll_interval_seconds: Math.max(5, Math.floor(num(value.poll_interval_seconds, 60))),
-    watcher_mode: "live_polling",
-    retry_limit: Math.max(0, Math.floor(num(value.retry_limit, 3))),
+    username: normalizeUsername(value.username),
+    cookies_json: stringValue(value.cookies_json, value.cookiesJson),
+    proxy_url: stringValue(value.proxy_url, value.proxyUrl),
+    poll_interval_seconds: Math.max(
+      5,
+      Math.floor(num(firstDefined(value.poll_interval_seconds, value.pollIntervalSeconds), 60)),
+    ),
+    retry_limit: Math.max(0, Math.floor(num(firstDefined(value.retry_limit, value.retryLimit), 3))),
   };
 }
 
 export function serializeStartNodeDraft(form: StartNodeForm): string {
   return JSON.stringify({
-    username: form.username,
+    username: normalizeUsername(form.username),
     cookies_json: form.cookies_json,
     proxy_url: form.proxy_url,
-    auto_record: 1,
     poll_interval_seconds: form.poll_interval_seconds,
-    watcher_mode: form.watcher_mode,
     retry_limit: form.retry_limit,
   });
 }
@@ -56,8 +86,19 @@ export function parseRecordNodeDraft(raw: string): RecordNodeForm {
   } catch {
     value = {};
   }
+
+  const minutesValue = firstDefined(
+    value.max_duration_minutes,
+    value.maxDurationMinutes,
+    value.maxDuration,
+  );
+  const secondsValue = firstDefined(value.max_duration_seconds, value.maxDurationSeconds, value.durationSeconds);
+
   return {
-    max_duration_minutes: Math.max(1, Math.floor(num(value.max_duration_minutes, 5))),
+    max_duration_minutes:
+      minutesValue !== undefined
+        ? Math.max(1, Math.floor(num(minutesValue, 5)))
+        : secondsToRoundedUpMinutes(secondsValue, 300),
   };
 }
 

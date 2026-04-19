@@ -36,13 +36,19 @@ mod tests {
     use super::*;
 
     fn def(node_key: &str) -> FlowNodeDefinition {
+        let published_config_json = match node_key {
+            "start" => r#"{"username":"shop_abc"}"#,
+            "record" => r#"{"max_duration_minutes":5}"#,
+            _ => "{}",
+        };
+
         FlowNodeDefinition {
             id: 1,
             flow_id: 1,
             node_key: node_key.to_string(),
             position: 1,
             draft_config_json: "{}".to_string(),
-            published_config_json: "{}".to_string(),
+            published_config_json: published_config_json.to_string(),
             draft_updated_at: "t".to_string(),
             published_at: "t".to_string(),
         }

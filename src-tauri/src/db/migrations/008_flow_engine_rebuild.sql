@@ -76,23 +76,29 @@ SELECT
   'start',
   1,
   json_object(
-    'username', COALESCE(a.username, ''),
+    'username', CASE
+      WHEN trim(COALESCE(a.username, '')) = '' THEN ''
+      WHEN substr(trim(COALESCE(a.username, '')), 1, 1) = '@' THEN trim(substr(trim(COALESCE(a.username, '')), 2))
+      ELSE trim(COALESCE(a.username, ''))
+    END,
     'cookies_json', COALESCE(a.cookies_json, ''),
     'proxy_url', COALESCE(a.proxy_url, ''),
-    'auto_record', COALESCE(a.auto_record, 0),
     'poll_interval_seconds', 60,
-    'watcher_mode', 'live_polling',
+    'retry_limit', 0,
     'last_live_at', f.last_live_at,
     'last_run_at', f.last_run_at,
     'last_error', f.last_error
   ),
   json_object(
-    'username', COALESCE(a.username, ''),
+    'username', CASE
+      WHEN trim(COALESCE(a.username, '')) = '' THEN ''
+      WHEN substr(trim(COALESCE(a.username, '')), 1, 1) = '@' THEN trim(substr(trim(COALESCE(a.username, '')), 2))
+      ELSE trim(COALESCE(a.username, ''))
+    END,
     'cookies_json', COALESCE(a.cookies_json, ''),
     'proxy_url', COALESCE(a.proxy_url, ''),
-    'auto_record', COALESCE(a.auto_record, 0),
     'poll_interval_seconds', 60,
-    'watcher_mode', 'live_polling',
+    'retry_limit', 0,
     'last_live_at', f.last_live_at,
     'last_run_at', f.last_run_at,
     'last_error', f.last_error
@@ -111,8 +117,32 @@ SELECT
     WHEN 'upload' THEN 5
     ELSE 2
   END,
-  n.config_json,
-  n.config_json,
+  CASE n.node_key
+    WHEN 'record' THEN json_object(
+      'max_duration_minutes', CASE
+        WHEN json_extract(n.config_json, '$.max_duration_minutes') IS NOT NULL THEN MAX(CAST(json_extract(n.config_json, '$.max_duration_minutes') AS INTEGER), 1)
+        WHEN json_extract(n.config_json, '$.maxDurationMinutes') IS NOT NULL THEN MAX(CAST(json_extract(n.config_json, '$.maxDurationMinutes') AS INTEGER), 1)
+        WHEN json_extract(n.config_json, '$.maxDuration') IS NOT NULL THEN MAX(CAST(json_extract(n.config_json, '$.maxDuration') AS INTEGER), 1)
+        WHEN json_extract(n.config_json, '$.maxDurationSeconds') IS NOT NULL THEN MAX((CAST(json_extract(n.config_json, '$.maxDurationSeconds') AS INTEGER) + 59) / 60, 1)
+        WHEN json_extract(n.config_json, '$.durationSeconds') IS NOT NULL THEN MAX((CAST(json_extract(n.config_json, '$.durationSeconds') AS INTEGER) + 59) / 60, 1)
+        ELSE 5
+      END
+    )
+    ELSE n.config_json
+  END,
+  CASE n.node_key
+    WHEN 'record' THEN json_object(
+      'max_duration_minutes', CASE
+        WHEN json_extract(n.config_json, '$.max_duration_minutes') IS NOT NULL THEN MAX(CAST(json_extract(n.config_json, '$.max_duration_minutes') AS INTEGER), 1)
+        WHEN json_extract(n.config_json, '$.maxDurationMinutes') IS NOT NULL THEN MAX(CAST(json_extract(n.config_json, '$.maxDurationMinutes') AS INTEGER), 1)
+        WHEN json_extract(n.config_json, '$.maxDuration') IS NOT NULL THEN MAX(CAST(json_extract(n.config_json, '$.maxDuration') AS INTEGER), 1)
+        WHEN json_extract(n.config_json, '$.maxDurationSeconds') IS NOT NULL THEN MAX((CAST(json_extract(n.config_json, '$.maxDurationSeconds') AS INTEGER) + 59) / 60, 1)
+        WHEN json_extract(n.config_json, '$.durationSeconds') IS NOT NULL THEN MAX((CAST(json_extract(n.config_json, '$.durationSeconds') AS INTEGER) + 59) / 60, 1)
+        ELSE 5
+      END
+    )
+    ELSE n.config_json
+  END,
   n.updated_at,
   n.updated_at
 FROM flow_node_configs_legacy n

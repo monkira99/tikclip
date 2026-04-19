@@ -1,18 +1,22 @@
 mod app_paths;
 mod commands;
 mod db;
+mod live_runtime;
+mod recording_runtime;
 mod sidecar;
 mod sidecar_env;
+mod tiktok;
 mod time_hcm;
 mod tray;
 mod workflow;
 
 use db::init::initialize_database;
+use live_runtime::manager::LiveRuntimeManager;
 use rusqlite::Connection;
 use sidecar::SidecarManager;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::Manager;
+use tauri::{Manager, RunEvent};
 
 pub struct AppState {
     pub db: Mutex<Connection>,
@@ -35,7 +39,7 @@ fn init_rust_logging() {
 pub fn run() {
     init_rust_logging();
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
@@ -82,6 +86,11 @@ pub fn run() {
             commands::flow_engine::save_flow_node_draft,
             commands::flow_engine::publish_flow_definition,
             commands::flow_engine::restart_flow_run,
+            commands::live_runtime::list_live_runtime_sessions,
+            commands::live_runtime::trigger_start_live_detected,
+            commands::live_runtime::mark_start_run_completed,
+            commands::live_runtime::mark_source_offline,
+            commands::recordings::finalize_rust_recording_runtime,
             commands::notifications::insert_notification,
             commands::notifications::list_notifications,
             commands::notifications::mark_notification_read,
@@ -118,11 +127,17 @@ pub fn run() {
             let conn = initialize_database(&db_path).expect("failed to initialize database");
             let tikclip_env = sidecar_env::build_sidecar_env(&conn, &storage_path)
                 .expect("failed to build sidecar env from settings");
+            let mut runtime_manager = LiveRuntimeManager::with_runtime_db_path(db_path.clone());
+            runtime_manager.attach_app_handle(app.handle().clone());
+            if let Err(err) = runtime_manager.bootstrap_enabled_flows(&conn) {
+                log::warn!("failed to bootstrap enabled live runtime flows: {}", err);
+            }
 
             app.manage(AppState {
                 db: Mutex::new(conn),
                 storage_path: storage_path.clone(),
             });
+            app.manage(runtime_manager);
 
             let sidecar = SidecarManager::new();
             if let Err(e) = sidecar.start(&tikclip_env) {
@@ -134,6 +149,13 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        if let RunEvent::Exit = event {
+            let runtime_manager = app_handle.state::<LiveRuntimeManager>();
+            let _ = runtime_manager.shutdown();
+        }
+    });
 }
