@@ -11,6 +11,7 @@ export default tseslint.config(
   {
     ignores: [
       "dist/**",
+      ".worktrees/**",
       "src-tauri/**",
       "sidecar/**",
       "node_modules/**",
