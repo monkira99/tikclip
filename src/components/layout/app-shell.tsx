@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ComponentType } from "react";
 import { isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   isPermissionGranted,
   requestPermission,
@@ -13,10 +14,11 @@ import { ProductsPage } from "@/pages/products";
 import { SettingsPage } from "@/pages/settings";
 import {
   insertClipFromSidecarWsPayload,
+  syncRecordingFromSidecarWsPayload,
   insertSpeechSegmentFromWsPayload,
   syncClipCaptionFromWsPayload,
-  syncRecordingFromSidecarWsPayload,
 } from "@/lib/sidecar-db-sync";
+import { syncRecordingListFromSidecar } from "@/lib/recording-sidecar-sync";
 import { hydrateNotificationsFromDb } from "@/lib/notifications-sync";
 import { dispatchSidecarNotification } from "@/lib/sidecar-notifications";
 import { useAccountStore } from "@/stores/account-store";
@@ -239,6 +241,51 @@ function parseClipId(raw: unknown): number | null {
   return Math.trunc(id);
 }
 
+function parseViewerCount(raw: unknown): number | null {
+  const value =
+    typeof raw === "number"
+      ? raw
+      : typeof raw === "string"
+        ? Number(raw)
+        : NaN;
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+  return Math.trunc(value);
+}
+
+async function triggerRustRuntimeLiveDetectedForAccount(
+  accountId: number,
+  data: Record<string, unknown>,
+): Promise<void> {
+  const roomId = typeof data.room_id === "string" ? data.room_id.trim() : "";
+  const streamUrlRaw = typeof data.stream_url === "string" ? data.stream_url.trim() : "";
+  const streamUrl = streamUrlRaw !== "" ? streamUrlRaw : null;
+  const viewerCount = parseViewerCount(data.viewer_count);
+  const snapshots = await api.listLiveRuntimeSessions();
+  useFlowStore.getState().applyRuntimeSnapshots(snapshots);
+  const snapshot = snapshots.find((row) => row.account_id === accountId);
+  if (!snapshot || roomId === "" || !streamUrl) {
+    return;
+  }
+  await api.triggerStartLiveDetected({
+    flow_id: snapshot.flow_id,
+    room_id: roomId,
+    stream_url: streamUrl,
+    viewer_count: viewerCount,
+  });
+}
+
+async function markRustRuntimeOfflineForAccount(accountId: number): Promise<void> {
+  const snapshots = await api.listLiveRuntimeSessions();
+  useFlowStore.getState().applyRuntimeSnapshots(snapshots);
+  const snapshot = snapshots.find((row) => row.account_id === accountId);
+  if (!snapshot) {
+    return;
+  }
+  await api.markSourceOffline(snapshot.flow_id);
+}
+
 export function AppShell() {
   useSidecar();
   const [currentPage, setCurrentPage] = useState<PageId>("dashboard");
@@ -301,6 +348,34 @@ export function AppShell() {
   }, [sidecarConnected]);
 
   useEffect(() => {
+    void useFlowStore.getState().refreshRuntime();
+  }, []);
+
+  useEffect(() => {
+    if (!isTauri()) {
+      return;
+    }
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    void listen("flow-runtime-updated", () => {
+      if (cancelled) {
+        return;
+      }
+      void useFlowStore.getState().refreshRuntime();
+    }).then((fn) => {
+      if (cancelled) {
+        fn();
+        return;
+      }
+      unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
     if (sidecarPort == null) {
       wsClient.disconnect();
       useRecordingStore.getState().hydrateFromSidecar([]);
@@ -308,55 +383,34 @@ export function AppShell() {
     }
 
     const onRecordingEvent = (data: Record<string, unknown>) => {
-      applyRecordingWsPayload(data);
       void (async () => {
         try {
           await syncRecordingFromSidecarWsPayload(data);
-          const accountId = parseAccountId(data.account_id);
-          if (accountId != null) {
-            await api.applySidecarFlowRuntimeHint({
-              account_id: accountId,
-              hint: "recording_started",
-            });
-          }
         } catch (err) {
-          logSidecarDbSyncError("recording → SQLite sync failed", err);
+          logSidecarDbSyncError("recording event → SQLite sync failed", err);
         } finally {
+          applyRecordingWsPayload(data);
           void useFlowStore.getState().refreshRuntime();
         }
       })();
     };
 
     const onFinished = (data: Record<string, unknown>) => {
-      applyRecordingWsPayload(data);
-      dispatchSidecarNotification("recording_finished", data);
-      useAppStore.getState().bumpDashboardRevision();
-      const id = data.recording_id;
-      if (typeof id === "string") {
-        window.setTimeout(() => {
-          useRecordingStore.getState().removeRecording(id);
-        }, FINISHED_CLEANUP_MS);
-      }
       void (async () => {
         try {
           await syncRecordingFromSidecarWsPayload(data);
-          const accountId = parseAccountId(data.account_id);
-          if (accountId != null) {
-            const workerStatus = typeof data.status === "string" ? data.status : "";
-            const errorMessage =
-              typeof data.error_message === "string" && data.error_message.trim() !== ""
-                ? data.error_message
-                : null;
-            await api.applySidecarFlowRuntimeHint({
-              account_id: accountId,
-              hint: "recording_finished",
-              worker_status: workerStatus,
-              error_message: errorMessage,
-            });
-          }
         } catch (err) {
           logSidecarDbSyncError("recording_finished → SQLite sync failed", err);
         } finally {
+          applyRecordingWsPayload(data);
+          dispatchSidecarNotification("recording_finished", data);
+          useAppStore.getState().bumpDashboardRevision();
+          const id = data.recording_id;
+          if (typeof id === "string") {
+            window.setTimeout(() => {
+              useRecordingStore.getState().removeRecording(id);
+            }, FINISHED_CLEANUP_MS);
+          }
           void useFlowStore.getState().refreshRuntime();
         }
       })();
@@ -390,7 +444,7 @@ export function AppShell() {
       void (async () => {
         try {
           if (id != null) {
-            await api.applySidecarFlowRuntimeHint({ account_id: id, hint: "account_live" });
+            await triggerRustRuntimeLiveDetectedForAccount(id, data);
           }
         } catch {
           /* No matching flow is normal. */
@@ -414,10 +468,11 @@ export function AppShell() {
       useAppStore.getState().bumpDashboardRevision();
       void (async () => {
         try {
-          await api.applySidecarFlowRuntimeHint({
-            account_id: id,
-            hint: isLive ? "account_live" : "account_offline",
-          });
+          if (isLive) {
+            await triggerRustRuntimeLiveDetectedForAccount(id, data);
+          } else {
+            await markRustRuntimeOfflineForAccount(id);
+          }
         } catch {
           /* No matching flow is normal. */
         } finally {
@@ -536,23 +591,21 @@ export function AppShell() {
     let cancelled = false;
     void api.getRecordingStatus()
       .then((list) => {
-        if (!cancelled) {
-          useRecordingStore.getState().hydrateFromSidecar(list);
-          for (const r of list) {
-            void syncRecordingFromSidecarWsPayload({
-              recording_id: r.recording_id,
-              account_id: r.account_id,
-              status: r.status,
-              duration_seconds: r.duration_seconds,
-              file_size_bytes: r.file_size_bytes,
-              file_path: r.file_path,
-              error_message: r.error_message,
-            }).catch((err) =>
-              logSidecarDbSyncError("recording status poll → SQLite sync failed", err),
-            );
-          }
-          void useFlowStore.getState().refreshRuntime();
+        if (cancelled) {
+          return;
         }
+        void (async () => {
+          try {
+            await syncRecordingListFromSidecar(list, syncRecordingFromSidecarWsPayload);
+          } catch (err) {
+            logSidecarDbSyncError("recording status poll → SQLite sync failed", err);
+          } finally {
+            if (!cancelled) {
+              useRecordingStore.getState().hydrateFromSidecar(list);
+              void useFlowStore.getState().refreshRuntime();
+            }
+          }
+        })();
       })
       .catch(() => {});
     return () => {

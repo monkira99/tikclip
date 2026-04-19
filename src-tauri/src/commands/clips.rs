@@ -444,10 +444,9 @@ pub struct InsertClipFromSidecarInput {
 }
 
 /// Persist one generated clip when the sidecar emits `clip_ready` over WebSocket.
-#[tauri::command]
-pub fn insert_clip_from_sidecar(
-    state: State<'_, AppState>,
-    input: InsertClipFromSidecarInput,
+fn insert_clip_from_sidecar_with_conn(
+    conn: &rusqlite::Connection,
+    input: &InsertClipFromSidecarInput,
 ) -> Result<i64, String> {
     if input.sidecar_recording_id.trim().is_empty() {
         return Err("sidecar_recording_id is required".to_string());
@@ -456,20 +455,18 @@ pub fn insert_clip_from_sidecar(
         return Err("file_path is required".to_string());
     }
 
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
-
-    let mut recording_row: Option<(i64, Option<i64>, Option<i64>)> = conn
+    let mut recording_row: Option<(i64, i64, Option<i64>, Option<i64>)> = conn
         .query_row(
-            "SELECT id, flow_id, flow_run_id FROM recordings WHERE sidecar_recording_id = ?1",
+            "SELECT id, account_id, flow_id, flow_run_id FROM recordings WHERE sidecar_recording_id = ?1",
             [&input.sidecar_recording_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .optional()
         .map_err(|e| e.to_string())?;
 
     if recording_row.is_none() {
         sync_recording_from_sidecar_conn(
-            &conn,
+            conn,
             &SyncRecordingFromSidecarInput {
                 sidecar_recording_id: input.sidecar_recording_id.clone(),
                 account_id: input.account_id,
@@ -482,15 +479,15 @@ pub fn insert_clip_from_sidecar(
         )?;
         recording_row = Some(
             conn.query_row(
-                "SELECT id, flow_id, flow_run_id FROM recordings WHERE sidecar_recording_id = ?1",
+                "SELECT id, account_id, flow_id, flow_run_id FROM recordings WHERE sidecar_recording_id = ?1",
                 [&input.sidecar_recording_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .map_err(|e| e.to_string())?,
         );
     }
 
-    let (recording_id, flow_id, flow_run_id) =
+    let (recording_id, recording_account_id, flow_id, flow_run_id) =
         recording_row.expect("recording row must exist after upsert");
 
     let existing: Option<i64> = conn
@@ -529,7 +526,7 @@ pub fn insert_clip_from_sidecar(
         ),
         params![
             recording_id,
-            input.account_id,
+            recording_account_id,
             &input.file_path,
             thumb_opt,
             duration_seconds,
@@ -544,6 +541,16 @@ pub fn insert_clip_from_sidecar(
     .map_err(|e| e.to_string())?;
 
     Ok(conn.last_insert_rowid())
+}
+
+/// Persist one generated clip when the sidecar emits `clip_ready` over WebSocket.
+#[tauri::command]
+pub fn insert_clip_from_sidecar(
+    state: State<'_, AppState>,
+    input: InsertClipFromSidecarInput,
+) -> Result<i64, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    insert_clip_from_sidecar_with_conn(&conn, &input)
 }
 
 fn map_speech_segment_row(row: &Row) -> SqlResult<SpeechSegment> {
@@ -660,4 +667,107 @@ pub fn list_speech_segments(
         out.push(r.map_err(|e| e.to_string())?);
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{insert_clip_from_sidecar_with_conn, InsertClipFromSidecarInput};
+    use crate::commands::recordings::upsert_rust_recording;
+    use crate::db::init::initialize_database;
+    use crate::recording_runtime::types::RustRecordingUpsertInput;
+    use rusqlite::{params, Connection};
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_DB_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn open_temp_db() -> (Connection, PathBuf) {
+        let counter = TEST_DB_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "tikclip-clips-test-{}-{}-{}.db",
+            std::process::id(),
+            counter,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let conn = initialize_database(&path).expect("init db");
+        (conn, path)
+    }
+
+    #[test]
+    fn insert_clip_from_sidecar_uses_recording_owner_found_by_external_key() {
+        let (conn, path) = open_temp_db();
+        conn.execute(
+            "INSERT INTO flows (id, name, enabled, status, published_version, draft_version, created_at, updated_at) \
+             VALUES (3, 'Flow 3', 1, 'processing', 1, 1, datetime('now','+7 hours'), datetime('now','+7 hours'))",
+            [],
+        )
+        .expect("insert flow");
+        conn.execute(
+            "INSERT INTO flow_runs (id, flow_id, definition_version, status, started_at, trigger_reason) \
+             VALUES (12, 3, 1, 'running', datetime('now','+7 hours'), 'test')",
+            [],
+        )
+        .expect("insert flow run");
+        conn.execute(
+            "INSERT INTO accounts (id, username, display_name, type, created_at, updated_at) \
+             VALUES (1, 'shop_abc', 'Shop ABC', 'monitored', datetime('now','+7 hours'), datetime('now','+7 hours'))",
+            [],
+        )
+        .expect("insert account one");
+        conn.execute(
+            "INSERT INTO accounts (id, username, display_name, type, created_at, updated_at) \
+             VALUES (2, 'shop_xyz', 'Shop XYZ', 'monitored', datetime('now','+7 hours'), datetime('now','+7 hours'))",
+            [],
+        )
+        .expect("insert account two");
+        upsert_rust_recording(
+            &conn,
+            &RustRecordingUpsertInput {
+                account_id: 1,
+                flow_id: 3,
+                flow_run_id: Some(12),
+                external_recording_id: "ext-123".to_string(),
+                runtime_status: "done".to_string(),
+                room_id: Some("7312345".to_string()),
+                file_path: Some("/tmp/recording.mp4".to_string()),
+                error_message: None,
+                duration_seconds: 120,
+                file_size_bytes: 0,
+            },
+        )
+        .expect("insert rust recording");
+
+        let clip_id = insert_clip_from_sidecar_with_conn(
+            &conn,
+            &InsertClipFromSidecarInput {
+                sidecar_recording_id: "ext-123".to_string(),
+                account_id: 2,
+                file_path: "/tmp/clip.mp4".to_string(),
+                thumbnail_path: String::new(),
+                duration_sec: 10.0,
+                start_sec: 0.0,
+                end_sec: 10.0,
+                transcript_text: None,
+            },
+        )
+        .expect("insert clip from sidecar");
+
+        let row: (i64, Option<i64>, Option<i64>) = conn
+            .query_row(
+                "SELECT account_id, flow_id, flow_run_id FROM clips WHERE id = ?1",
+                params![clip_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("read inserted clip row");
+
+        assert_eq!(row.0, 1);
+        assert_eq!(row.1, Some(3));
+        assert_eq!(row.2, Some(12));
+
+        drop(conn);
+        let _ = std::fs::remove_file(path);
+    }
 }

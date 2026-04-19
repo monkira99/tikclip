@@ -2,7 +2,8 @@ import { create } from "zustand";
 
 import {
   createFlow,
-  getFlowDefinition,
+    getFlowDefinition,
+  listLiveRuntimeSessions,
   publishFlowDefinition,
   restartFlowRun,
   saveFlowNodeDraft,
@@ -13,6 +14,7 @@ import type {
   CreateFlowInput,
   FlowEditorPayload,
   FlowNodeKey,
+  FlowRuntimeSnapshot,
   FlowStatus,
   FlowSummary,
   PublishFlowResult,
@@ -27,6 +29,7 @@ type FlowFilters = {
 
 type FlowStore = {
   flows: FlowSummary[];
+  runtimeSnapshots: Record<number, FlowRuntimeSnapshot>;
   activeFlowId: number | null;
   activeFlow: FlowEditorPayload | null;
   view: FlowView;
@@ -53,6 +56,7 @@ type FlowStore = {
     draft_config_json: string;
   }) => Promise<void>;
   publishFlow: (flowId: number, options: { restartCurrentRun: boolean }) => Promise<PublishFlowResult>;
+  applyRuntimeSnapshots: (rows: FlowRuntimeSnapshot[]) => void;
   refreshRuntime: () => Promise<void>;
   toggleFlowEnabled: (flowId: number, enabled: boolean) => Promise<void>;
   createFlow: (input: CreateFlowInput) => Promise<number>;
@@ -90,21 +94,70 @@ function normalizeFlowStatus(status: FlowStatus, enabled: boolean): FlowStatus {
   return status;
 }
 
-function normalizeFlowSummary(flow: FlowSummary): FlowSummary {
+function applyRuntimeSnapshotToFlowSummary(
+  flow: FlowSummary,
+  runtimeSnapshot?: FlowRuntimeSnapshot,
+): FlowSummary {
+  if (!runtimeSnapshot) {
+    return flow;
+  }
+
   return {
     ...flow,
-    status: normalizeFlowStatus(flow.status, flow.enabled),
+    status: normalizeFlowStatus(runtimeSnapshot.status, flow.enabled),
+    current_node: runtimeSnapshot.current_node,
+    last_live_at: runtimeSnapshot.last_live_at ?? flow.last_live_at,
+    last_error: runtimeSnapshot.last_error ?? flow.last_error,
   };
 }
 
-function normalizeFlowEditorPayload(payload: FlowEditorPayload): FlowEditorPayload {
+function applyRuntimeSnapshotToEditor(
+  payload: FlowEditorPayload,
+  runtimeSnapshot?: FlowRuntimeSnapshot,
+): FlowEditorPayload {
+  if (!runtimeSnapshot) {
+    return payload;
+  }
+
   return {
     ...payload,
     flow: {
       ...payload.flow,
-      status: normalizeFlowStatus(payload.flow.status, payload.flow.enabled),
+      status: normalizeFlowStatus(runtimeSnapshot.status, payload.flow.enabled),
+      current_node: runtimeSnapshot.current_node,
+      last_live_at: runtimeSnapshot.last_live_at ?? payload.flow.last_live_at,
+      last_error: runtimeSnapshot.last_error ?? payload.flow.last_error,
     },
   };
+}
+
+function normalizeFlowSummary(
+  flow: FlowSummary,
+  runtimeSnapshots: Record<number, FlowRuntimeSnapshot>,
+): FlowSummary {
+  return applyRuntimeSnapshotToFlowSummary(
+    {
+      ...flow,
+      status: normalizeFlowStatus(flow.status, flow.enabled),
+    },
+    runtimeSnapshots[flow.id],
+  );
+}
+
+function normalizeFlowEditorPayload(
+  payload: FlowEditorPayload,
+  runtimeSnapshots: Record<number, FlowRuntimeSnapshot>,
+): FlowEditorPayload {
+  return applyRuntimeSnapshotToEditor(
+    {
+      ...payload,
+      flow: {
+        ...payload.flow,
+        status: normalizeFlowStatus(payload.flow.status, payload.flow.enabled),
+      },
+    },
+    runtimeSnapshots[payload.flow.id],
+  );
 }
 
 function applyEnabledToFlowSummary(flow: FlowSummary, enabled: boolean): FlowSummary {
@@ -128,6 +181,7 @@ function applyEnabledToFlowEditor(payload: FlowEditorPayload, enabled: boolean):
 
 export const useFlowStore = create<FlowStore>((set, get) => ({
   flows: [],
+  runtimeSnapshots: {},
   activeFlowId: null,
   activeFlow: null,
   view: "list",
@@ -149,7 +203,8 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
       if (token !== fetchFlowsToken) {
         return;
       }
-      set({ flows: flows.map(normalizeFlowSummary), error: null });
+      const runtimeSnapshots = get().runtimeSnapshots;
+      set({ flows: flows.map((flow) => normalizeFlowSummary(flow, runtimeSnapshots)), error: null });
     } catch (error) {
       if (token !== fetchFlowsToken) {
         return;
@@ -175,8 +230,9 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
       if (token !== fetchFlowDetailToken) {
         return;
       }
+      const runtimeSnapshots = get().runtimeSnapshots;
       set({
-        activeFlow: normalizeFlowEditorPayload(payload),
+        activeFlow: normalizeFlowEditorPayload(payload, runtimeSnapshots),
         activeFlowId: targetId,
         error: null,
         draftDirty: quiet ? get().draftDirty : false,
@@ -239,7 +295,19 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
     }
   },
 
+  applyRuntimeSnapshots: (rows) => {
+    set({
+      runtimeSnapshots: Object.fromEntries(rows.map((row) => [row.flow_id, row])),
+    });
+  },
+
   refreshRuntime: async () => {
+    try {
+      const snapshots = await listLiveRuntimeSessions();
+      get().applyRuntimeSnapshots(snapshots);
+    } catch {
+      /* keep last known runtime snapshots when refresh races startup */
+    }
     set((s) => ({ runtimeRefreshTick: s.runtimeRefreshTick + 1 }));
     await get().fetchFlows({ quiet: true });
     const id = get().activeFlowId;

@@ -8,14 +8,15 @@ import type {
   Clip,
   ClipCaptionStatus,
   ClipFilters,
-  CreateFlowInput,
-  CreateAccountInput,
-  FlowEditorPayload,
-  FlowNodeConfig,
-  FlowNodeKey,
-  FlowStatus,
-  FlowSummary,
-  PublishFlowResult,
+    CreateFlowInput,
+    CreateAccountInput,
+    FlowEditorPayload,
+    FlowNodeConfig,
+    FlowNodeKey,
+    FlowRuntimeSnapshot,
+    FlowStatus,
+    FlowSummary,
+    PublishFlowResult,
   CreateProductInput,
   Product,
   SidecarRecordingStatus,
@@ -344,6 +345,34 @@ export async function getFlowDefinition(flowId: number): Promise<FlowEditorPaylo
   return invoke<FlowEditorPayload>("get_flow_definition", { flowId });
 }
 
+export async function listLiveRuntimeSessions(): Promise<FlowRuntimeSnapshot[]> {
+  return invoke<FlowRuntimeSnapshot[]>("list_live_runtime_sessions");
+}
+
+export async function triggerStartLiveDetected(input: {
+  flow_id: number;
+  room_id: string;
+  stream_url?: string | null;
+  viewer_count?: number | null;
+}): Promise<number | null> {
+  return invoke<number | null>("trigger_start_live_detected", {
+    input: {
+      flow_id: input.flow_id,
+      room_id: input.room_id,
+      stream_url:
+        input.stream_url === undefined || input.stream_url === null ? undefined : input.stream_url,
+      viewer_count:
+        input.viewer_count === undefined || input.viewer_count === null
+          ? undefined
+          : input.viewer_count,
+    },
+  });
+}
+
+export async function markSourceOffline(flowId: number): Promise<void> {
+  await invoke("mark_source_offline", { flowId });
+}
+
 export async function createFlow(input: CreateFlowInput): Promise<number> {
   return invoke<number>("create_flow", { input });
 }
@@ -423,6 +452,9 @@ export async function applySidecarFlowRuntimeHint(input: {
   error_message?: string | null;
   /** Desktop SQLite `clips.id` for `clip_ready` / `caption_ready` pipeline node runs. */
   clip_id?: number | null;
+  room_id?: string | null;
+  stream_url?: string | null;
+  viewer_count?: number | null;
 }): Promise<void> {
   await invoke("apply_sidecar_flow_runtime_hint", {
     input: {
@@ -438,6 +470,35 @@ export async function applySidecarFlowRuntimeHint(input: {
           : input.error_message,
       clip_id:
         input.clip_id === undefined || input.clip_id === null ? undefined : input.clip_id,
+      room_id:
+        input.room_id === undefined || input.room_id === null ? undefined : input.room_id,
+      stream_url:
+        input.stream_url === undefined || input.stream_url === null
+          ? undefined
+          : input.stream_url,
+      viewer_count:
+        input.viewer_count === undefined || input.viewer_count === null
+          ? undefined
+          : input.viewer_count,
+    },
+  });
+}
+
+export async function finalizeRustRecordingRuntime(input: {
+  external_recording_id: string;
+  worker_status: string;
+  room_id?: string | null;
+  error_message?: string | null;
+}): Promise<void> {
+  await invoke("finalize_rust_recording_runtime", {
+    input: {
+      external_recording_id: input.external_recording_id,
+      worker_status: input.worker_status,
+      room_id: input.room_id === undefined || input.room_id === null ? undefined : input.room_id,
+      error_message:
+        input.error_message === undefined || input.error_message === null
+          ? undefined
+          : input.error_message,
     },
   });
 }

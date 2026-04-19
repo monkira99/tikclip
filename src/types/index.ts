@@ -118,6 +118,17 @@ export interface FlowSummary {
   updated_at: string;
 }
 
+export interface FlowRuntimeSnapshot {
+  flow_id: number;
+  status: FlowStatus;
+  current_node: FlowNodeKey | null;
+  account_id: number | null;
+  username: string;
+  last_live_at: string | null;
+  last_error: string | null;
+  active_flow_run_id: number | null;
+}
+
 /** Flow row + resolved account id (from Start node username), aligned with Tauri `Flow`. */
 export type FlowContext = {
   id: number;

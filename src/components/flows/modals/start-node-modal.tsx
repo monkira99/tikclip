@@ -99,6 +99,9 @@ export function StartNodeModal({
                 placeholder="tiktok_username"
                 autoComplete="off"
               />
+              <p className="text-xs font-medium tracking-[0.02em] text-[var(--color-text-muted)]">
+                Leading <code>@</code> is optional and will be removed before saving.
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor={`start-cookies-${flowId}`}>Cookies JSON</Label>
