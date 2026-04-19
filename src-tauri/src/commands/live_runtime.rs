@@ -1,3 +1,4 @@
+use crate::live_runtime::logs::FlowRuntimeLogEntry;
 use crate::live_runtime::manager::LiveRuntimeManager;
 use crate::live_runtime::session::runtime_current_node_for_status;
 use crate::tiktok::types::LiveStatus;
@@ -14,6 +15,17 @@ pub fn list_live_runtime_sessions_from_manager(
     manager: &LiveRuntimeManager,
 ) -> Vec<LiveRuntimeSessionSnapshot> {
     manager.list_sessions()
+}
+
+#[cfg(test)]
+pub fn list_live_runtime_logs_from_manager(
+    manager: &LiveRuntimeManager,
+    flow_id: Option<i64>,
+    limit: Option<usize>,
+) -> Vec<FlowRuntimeLogEntry> {
+    manager
+        .list_runtime_logs(flow_id, limit)
+        .expect("list runtime logs from manager")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -98,6 +110,15 @@ pub fn list_live_runtime_sessions(
     list_live_runtime_snapshots_with_conn(&conn, &manager)
 }
 
+#[tauri::command]
+pub fn list_live_runtime_logs(
+    manager: State<'_, LiveRuntimeManager>,
+    flow_id: Option<i64>,
+    limit: Option<usize>,
+) -> Result<Vec<FlowRuntimeLogEntry>, String> {
+    manager.list_runtime_logs(flow_id, limit)
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct TriggerStartLiveDetectedInput {
@@ -178,9 +199,9 @@ pub fn mark_source_offline(
 #[cfg(test)]
 mod tests {
     use super::{
-        list_live_runtime_sessions_from_manager, list_live_runtime_snapshots_with_conn,
-        mark_source_offline_with_conn, trigger_start_live_detected_with_conn,
-        TriggerStartLiveDetectedInput,
+        list_live_runtime_logs_from_manager, list_live_runtime_sessions_from_manager,
+        list_live_runtime_snapshots_with_conn, mark_source_offline_with_conn,
+        trigger_start_live_detected_with_conn, TriggerStartLiveDetectedInput,
     };
     use crate::db::init::initialize_database;
     use crate::live_runtime::manager::LiveRuntimeManager;
@@ -300,6 +321,29 @@ mod tests {
 
         drop(conn);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn list_live_runtime_logs_command_filters_by_flow_id() {
+        let manager = LiveRuntimeManager::new();
+        manager.log_runtime_event_for_test(
+            7,
+            Some(42),
+            "record",
+            "record_spawned",
+            "Spawned worker",
+        );
+        manager.log_runtime_event_for_test(
+            8,
+            Some(55),
+            "start",
+            "lease_conflict",
+            "Username conflict",
+        );
+
+        let rows = list_live_runtime_logs_from_manager(&manager, Some(7), Some(50));
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].flow_id, 7);
     }
 
     #[test]

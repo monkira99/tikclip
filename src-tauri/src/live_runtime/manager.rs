@@ -4,6 +4,9 @@ use crate::commands::recordings::{finalize_rust_recording_row, start_rust_record
 use crate::live_runtime::account_binding::{
     resolve_or_create_account_for_username, ResolveAccountResult,
 };
+use crate::live_runtime::logs::{
+    format_terminal_entry, FlowRuntimeLogBuffer, FlowRuntimeLogEntry, FlowRuntimeLogLevel,
+};
 use crate::live_runtime::session::LiveRuntimeSession;
 use crate::live_runtime::types::LiveRuntimeSessionSnapshot;
 use crate::recording_runtime::types::{
@@ -32,6 +35,7 @@ struct LiveRuntimeState {
     lease_owner_by_lookup_key: HashMap<String, i64>,
     failed_snapshots_by_flow: HashMap<i64, LiveRuntimeSessionSnapshot>,
     active_recordings_by_flow: HashMap<i64, ActiveRecordingHandle>,
+    log_buffer: FlowRuntimeLogBuffer,
 }
 
 #[derive(Clone)]
@@ -49,6 +53,8 @@ pub struct LiveRuntimeManager {
     auto_spawn_recording_execution: bool,
     app_handle: Option<AppHandle>,
     #[cfg(test)]
+    runtime_log_emit_error: Arc<Mutex<Option<String>>>,
+    #[cfg(test)]
     latest_runtime_event: Arc<Mutex<Option<FlowRuntimeSnapshot>>>,
     #[cfg(test)]
     worker_threads: Arc<Mutex<Vec<std::thread::JoinHandle<()>>>>,
@@ -63,6 +69,8 @@ impl Clone for LiveRuntimeManager {
             runtime_db_path: self.runtime_db_path.clone(),
             auto_spawn_recording_execution: self.auto_spawn_recording_execution,
             app_handle: self.app_handle.clone(),
+            #[cfg(test)]
+            runtime_log_emit_error: Arc::clone(&self.runtime_log_emit_error),
             #[cfg(test)]
             latest_runtime_event: Arc::clone(&self.latest_runtime_event),
             #[cfg(test)]
@@ -93,6 +101,8 @@ impl LiveRuntimeManager {
             auto_spawn_recording_execution: !cfg!(test),
             app_handle: None,
             #[cfg(test)]
+            runtime_log_emit_error: Arc::new(Mutex::new(None)),
+            #[cfg(test)]
             latest_runtime_event: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             worker_threads: Arc::new(Mutex::new(Vec::new())),
@@ -108,6 +118,8 @@ impl LiveRuntimeManager {
             runtime_db_path: Some(db_path),
             auto_spawn_recording_execution: !cfg!(test),
             app_handle: None,
+            #[cfg(test)]
+            runtime_log_emit_error: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             latest_runtime_event: Arc::new(Mutex::new(None)),
             #[cfg(test)]
@@ -137,6 +149,7 @@ impl LiveRuntimeManager {
             runtime_db_path: Some(db_path),
             auto_spawn_recording_execution: false,
             app_handle: None,
+            runtime_log_emit_error: Arc::new(Mutex::new(None)),
             latest_runtime_event: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             worker_threads: Arc::new(Mutex::new(Vec::new())),
@@ -165,6 +178,7 @@ impl LiveRuntimeManager {
             runtime_db_path: Some(db_path),
             auto_spawn_recording_execution: true,
             app_handle: None,
+            runtime_log_emit_error: Arc::new(Mutex::new(None)),
             latest_runtime_event: Arc::new(Mutex::new(None)),
             worker_threads: Arc::new(Mutex::new(Vec::new())),
         }
@@ -185,6 +199,7 @@ impl LiveRuntimeManager {
             runtime_db_path: Some(db_path),
             auto_spawn_recording_execution: true,
             app_handle: None,
+            runtime_log_emit_error: Arc::new(Mutex::new(None)),
             latest_runtime_event: Arc::new(Mutex::new(None)),
             worker_threads: Arc::new(Mutex::new(Vec::new())),
         }
@@ -221,6 +236,120 @@ impl LiveRuntimeManager {
         Ok(())
     }
 
+    fn emit_runtime_log_entry(&self, entry: &FlowRuntimeLogEntry) -> Result<(), String> {
+        #[cfg(test)]
+        {
+            if let Some(err) = self
+                .runtime_log_emit_error
+                .lock()
+                .map_err(|e| e.to_string())?
+                .clone()
+            {
+                return Err(err);
+            }
+        }
+
+        if let Some(app_handle) = &self.app_handle {
+            app_handle
+                .emit("flow-runtime-log", entry.clone())
+                .map_err(|e| e.to_string())?;
+        }
+
+        Ok(())
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Runtime log helper keeps structured fields explicit at the manager boundary"
+    )]
+    pub fn log_runtime_event(
+        &self,
+        flow_id: i64,
+        flow_run_id: Option<i64>,
+        external_recording_id: Option<&str>,
+        stage: &str,
+        event: &str,
+        level: FlowRuntimeLogLevel,
+        code: Option<&str>,
+        message: &str,
+        context: serde_json::Value,
+    ) -> Result<(), String> {
+        let entry = FlowRuntimeLogEntry::new(
+            flow_id,
+            flow_run_id,
+            external_recording_id,
+            stage,
+            event,
+            level,
+            code,
+            message,
+            context,
+        );
+
+        let terminal_entry = format_terminal_entry(&entry);
+
+        match &entry.level {
+            FlowRuntimeLogLevel::Debug => {
+                log::debug!("{}", terminal_entry);
+            }
+            FlowRuntimeLogLevel::Info => {
+                log::info!("{}", terminal_entry);
+            }
+            FlowRuntimeLogLevel::Warn => {
+                log::warn!("{}", terminal_entry);
+            }
+            FlowRuntimeLogLevel::Error => {
+                log::error!("{}", terminal_entry);
+            }
+        }
+
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
+        state.log_buffer.push(entry.clone());
+        drop(state);
+
+        if let Err(err) = self.emit_runtime_log_entry(&entry) {
+            log::warn!(
+                "flow_runtime failed to emit UI log event for flow={} run={:?} stage={} event={}: {}",
+                entry.flow_id,
+                entry.flow_run_id,
+                entry.stage,
+                entry.event,
+                err
+            );
+        }
+
+        Ok(())
+    }
+
+    pub fn list_runtime_logs(
+        &self,
+        flow_id: Option<i64>,
+        limit: Option<usize>,
+    ) -> Result<Vec<FlowRuntimeLogEntry>, String> {
+        let mut rows = self
+            .state
+            .lock()
+            .map_err(|e| e.to_string())?
+            .log_buffer
+            .entries();
+
+        if let Some(flow_id) = flow_id {
+            rows.retain(|row| row.flow_id == flow_id);
+        }
+
+        if let Some(limit) = limit {
+            if limit == 0 {
+                return Ok(Vec::new());
+            }
+            if rows.len() > limit {
+                rows = rows.split_off(rows.len() - limit);
+            }
+        }
+
+        Ok(rows)
+    }
+
     fn load_sidecar_base_url(conn: &Connection) -> Result<Option<String>, String> {
         let port: Option<String> = conn
             .query_row(
@@ -240,15 +369,35 @@ impl LiveRuntimeManager {
         }))
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Structured handoff logging keeps runtime identifiers explicit at the sidecar boundary"
+    )]
     fn handoff_recording_to_sidecar_processing(
         &self,
         conn: &Connection,
+        flow_id: i64,
+        flow_run_id: i64,
         external_recording_id: &str,
         account_id: i64,
         username: &str,
         file_path: &str,
     ) -> Result<(), String> {
         let Some(sidecar_base_url) = Self::load_sidecar_base_url(conn)? else {
+            let _ = self.log_runtime_event(
+                flow_id,
+                Some(flow_run_id),
+                Some(external_recording_id),
+                "clip",
+                "sidecar_handoff_failed",
+                FlowRuntimeLogLevel::Warn,
+                Some("handoff.sidecar_unavailable"),
+                "Skipped sidecar handoff because sidecar base URL is unavailable",
+                serde_json::json!({
+                    "sidecar_url_present": false,
+                    "file_path_present": true,
+                }),
+            );
             return Ok(());
         };
         let body = serde_json::json!({
@@ -257,7 +406,7 @@ impl LiveRuntimeManager {
             "file_path": file_path,
             "account_id": account_id,
         });
-        tokio::runtime::Runtime::new()
+        let handoff_result = tokio::runtime::Runtime::new()
             .map_err(|e| e.to_string())?
             .block_on(async {
                 reqwest::Client::new()
@@ -269,7 +418,39 @@ impl LiveRuntimeManager {
                     .error_for_status()
                     .map_err(|e| e.to_string())?;
                 Ok::<(), String>(())
-            })?;
+            });
+        if let Err(err) = handoff_result {
+            let _ = self.log_runtime_event(
+                flow_id,
+                Some(flow_run_id),
+                Some(external_recording_id),
+                "clip",
+                "sidecar_handoff_failed",
+                FlowRuntimeLogLevel::Error,
+                Some("handoff.http_failed"),
+                "Failed to hand off recording to sidecar processing",
+                serde_json::json!({
+                    "sidecar_url_present": true,
+                    "file_path_present": true,
+                    "error": err,
+                }),
+            );
+            return Err(err);
+        }
+        let _ = self.log_runtime_event(
+            flow_id,
+            Some(flow_run_id),
+            Some(external_recording_id),
+            "clip",
+            "sidecar_handoff_completed",
+            FlowRuntimeLogLevel::Info,
+            None,
+            "Handed recording off to sidecar processing",
+            serde_json::json!({
+                "sidecar_url_present": true,
+                "file_path_present": true,
+            }),
+        );
         Ok(())
     }
 
@@ -283,7 +464,35 @@ impl LiveRuntimeManager {
 
         for row in rows {
             let flow_id = row.map_err(|e| e.to_string())?;
+            let _ = self.log_runtime_event(
+                flow_id,
+                None,
+                None,
+                "session",
+                "session_bootstrap_started",
+                FlowRuntimeLogLevel::Info,
+                None,
+                "Starting runtime session bootstrap for enabled flow",
+                serde_json::json!({
+                    "flow_id": flow_id,
+                }),
+            );
             if let Err(err) = self.start_flow_session(conn, flow_id) {
+                let err_message = err.clone();
+                let _ = self.log_runtime_event(
+                    flow_id,
+                    None,
+                    None,
+                    "session",
+                    "session_bootstrap_failed",
+                    FlowRuntimeLogLevel::Error,
+                    None,
+                    "Failed to bootstrap runtime session",
+                    serde_json::json!({
+                        "flow_id": flow_id,
+                        "error": err_message,
+                    }),
+                );
                 warn!(
                     "failed to bootstrap live runtime session for flow {}: {}",
                     flow_id, err
@@ -312,6 +521,7 @@ impl LiveRuntimeManager {
         if let Some(owner) = state
             .lease_owner_by_lookup_key
             .get(config.lookup_key.as_str())
+            .copied()
         {
             let error = format!(
                 "username lease already held for {} by flow {}",
@@ -321,14 +531,30 @@ impl LiveRuntimeManager {
                 flow_id,
                 failed_snapshot(flow_id, &config, 1, error.as_str()),
             );
+            drop(state);
+            let _ = self.log_runtime_event(
+                flow_id,
+                active_flow_run_id,
+                None,
+                "start",
+                "lease_conflict",
+                FlowRuntimeLogLevel::Warn,
+                Some("start.username_conflict"),
+                "Skipped session start because username lease is already held",
+                serde_json::json!({
+                    "lookup_key": config.lookup_key.as_str(),
+                    "lease_owner_flow_id": owner,
+                }),
+            );
             return Err(error);
         }
 
+        let lookup_key = config.lookup_key.clone();
         let session = LiveRuntimeSession::new(
             config.flow_id,
             config.flow_name,
             config.username,
-            config.lookup_key.clone(),
+            lookup_key.clone(),
             1,
             last_completed_room_id,
         );
@@ -338,9 +564,37 @@ impl LiveRuntimeManager {
         }
         state
             .lease_owner_by_lookup_key
-            .insert(config.lookup_key, config.flow_id);
+            .insert(lookup_key.clone(), config.flow_id);
         state.sessions_by_flow.insert(flow_id, session);
         drop(state);
+        let _ = self.log_runtime_event(
+            flow_id,
+            active_flow_run_id,
+            None,
+            "start",
+            "lease_acquired",
+            FlowRuntimeLogLevel::Info,
+            None,
+            "Acquired username lease for runtime session",
+            serde_json::json!({
+                "lookup_key": lookup_key.as_str(),
+            }),
+        );
+        let _ = self.log_runtime_event(
+            flow_id,
+            active_flow_run_id,
+            None,
+            "session",
+            "session_started",
+            FlowRuntimeLogLevel::Info,
+            None,
+            "Started runtime session",
+            serde_json::json!({
+                "generation": 1,
+                "lookup_key": lookup_key.as_str(),
+                "restored_active_flow_run": active_flow_run_id.is_some(),
+            }),
+        );
         self.emit_runtime_update_for_flow(conn, flow_id)?;
         Ok(())
     }
@@ -399,6 +653,21 @@ impl LiveRuntimeManager {
                         failed_snapshot(flow_id, &config, next_generation, error.as_str()),
                     );
                 }
+                drop(state);
+                let _ = self.log_runtime_event(
+                    flow_id,
+                    active_flow_run_id,
+                    None,
+                    "start",
+                    "lease_conflict",
+                    FlowRuntimeLogLevel::Warn,
+                    Some("start.username_conflict"),
+                    "Skipped session reconcile because username lease is already held",
+                    serde_json::json!({
+                        "lookup_key": config.lookup_key.as_str(),
+                        "lease_owner_flow_id": owner,
+                    }),
+                );
                 return Err(error);
             }
         }
@@ -416,11 +685,12 @@ impl LiveRuntimeManager {
             .lease_owner_by_lookup_key
             .insert(config.lookup_key.clone(), flow_id);
         state.failed_snapshots_by_flow.remove(&flow_id);
+        let lookup_key = config.lookup_key.clone();
         let mut session = LiveRuntimeSession::new(
             config.flow_id,
             config.flow_name,
             config.username,
-            config.lookup_key,
+            lookup_key.clone(),
             next_generation,
             last_completed_room_id,
         );
@@ -429,6 +699,34 @@ impl LiveRuntimeManager {
         }
         state.sessions_by_flow.insert(flow_id, session);
         drop(state);
+        let _ = self.log_runtime_event(
+            flow_id,
+            active_flow_run_id,
+            None,
+            "start",
+            "lease_acquired",
+            FlowRuntimeLogLevel::Info,
+            None,
+            "Acquired username lease for reconciled runtime session",
+            serde_json::json!({
+                "lookup_key": lookup_key.as_str(),
+                "generation": next_generation,
+            }),
+        );
+        let _ = self.log_runtime_event(
+            flow_id,
+            active_flow_run_id,
+            None,
+            "session",
+            "session_started",
+            FlowRuntimeLogLevel::Info,
+            None,
+            "Replaced runtime session after reconcile",
+            serde_json::json!({
+                "generation": next_generation,
+                "lookup_key": lookup_key.as_str(),
+            }),
+        );
         self.emit_runtime_update_for_flow(conn, flow_id)?;
         Ok(())
     }
@@ -441,17 +739,19 @@ impl LiveRuntimeManager {
         live_status: &LiveStatus,
     ) -> Result<Option<i64>, String> {
         let config = load_flow_runtime_config(conn, flow_id)?;
-        let mut state = self.state.lock().map_err(|e| e.to_string())?;
-        let session_state = state
-            .sessions_by_flow
-            .get(&flow_id)
-            .map(|session| {
-                (
-                    session.active_flow_run_id(),
-                    session.last_completed_room_id().map(str::to_string),
-                )
-            })
-            .ok_or_else(|| format!("missing live runtime session for flow {flow_id}"))?;
+        let session_state = {
+            let state = self.state.lock().map_err(|e| e.to_string())?;
+            state
+                .sessions_by_flow
+                .get(&flow_id)
+                .map(|session| {
+                    (
+                        session.active_flow_run_id(),
+                        session.last_completed_room_id().map(str::to_string),
+                    )
+                })
+                .ok_or_else(|| format!("missing live runtime session for flow {flow_id}"))?
+        };
         let session_active = session_state.0;
         let last_completed_room_id = session_state.1;
 
@@ -461,14 +761,57 @@ impl LiveRuntimeManager {
         if live_status.room_id.trim().is_empty() {
             return Ok(None);
         }
+        let _ = self.log_runtime_event(
+            flow_id,
+            None,
+            None,
+            "start",
+            "live_detected",
+            FlowRuntimeLogLevel::Info,
+            None,
+            "Detected live room while polling runtime session",
+            serde_json::json!({
+                "room_id": live_status.room_id.as_str(),
+                "viewer_count": live_status.viewer_count,
+                "has_stream_url": live_status.stream_url.is_some(),
+            }),
+        );
         if !crate::live_runtime::session::should_start_new_run(
             Some(live_status.room_id.as_str()),
             last_completed_room_id.as_deref(),
             true,
         ) {
+            let _ = self.log_runtime_event(
+                flow_id,
+                None,
+                None,
+                "start",
+                "run_creation_skipped_dedupe",
+                FlowRuntimeLogLevel::Info,
+                None,
+                "Skipped run creation because room was already completed",
+                serde_json::json!({
+                    "room_id": live_status.room_id.as_str(),
+                    "last_completed_room_id": last_completed_room_id,
+                }),
+            );
             return Ok(None);
         }
         let Some(stream_url) = live_status.stream_url.as_deref() else {
+            let _ = self.log_runtime_event(
+                flow_id,
+                None,
+                None,
+                "start",
+                "stream_url_missing",
+                FlowRuntimeLogLevel::Warn,
+                Some("start.stream_url_missing"),
+                "Skipped run creation because live stream URL is missing",
+                serde_json::json!({
+                    "room_id": live_status.room_id.as_str(),
+                    "viewer_count": live_status.viewer_count,
+                }),
+            );
             return Ok(None);
         };
 
@@ -501,6 +844,21 @@ impl LiveRuntimeManager {
             max_duration_seconds: load_record_duration_seconds(conn, flow_id)?,
             external_recording_id: worker::generate_external_recording_id(flow_run_id),
         };
+        let _ = self.log_runtime_event(
+            flow_id,
+            Some(flow_run_id),
+            Some(start_input.external_recording_id.as_str()),
+            "start",
+            "run_created",
+            FlowRuntimeLogLevel::Info,
+            None,
+            "Created runtime flow run for live room",
+            serde_json::json!({
+                "room_id": live_status.room_id.as_str(),
+                "has_stream_url": true,
+            }),
+        );
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
         let cancel_flag = Arc::new(AtomicBool::new(false));
         state.active_recordings_by_flow.insert(
             flow_id,
@@ -569,6 +927,19 @@ impl LiveRuntimeManager {
             session.mark_downstream_stage(flow_run_id, "processing");
         }
         drop(state);
+        let _ = self.log_runtime_event(
+            flow_id,
+            Some(flow_run_id),
+            None,
+            "record",
+            "record_completed",
+            FlowRuntimeLogLevel::Info,
+            None,
+            "Recording completed successfully",
+            serde_json::json!({
+                "room_id": room_id,
+            }),
+        );
         self.emit_runtime_update_for_flow(conn, flow_id)?;
         Ok(())
     }
@@ -581,6 +952,7 @@ impl LiveRuntimeManager {
         room_id: Option<&str>,
         error_message: Option<&str>,
     ) -> Result<(), String> {
+        let flow_run_id = runtime_store::load_latest_running_flow_run_id(conn, flow_id)?;
         let room_id = match room_id {
             Some(room_id) => Some(room_id.to_string()),
             None => runtime_store::load_last_room_id_from_latest_start_node_run(conn, flow_id)?,
@@ -605,6 +977,20 @@ impl LiveRuntimeManager {
             session.mark_flow_run_completed(room_id.as_deref());
         }
         drop(state);
+        let _ = self.log_runtime_event(
+            flow_id,
+            flow_run_id,
+            None,
+            "record",
+            "record_failed",
+            FlowRuntimeLogLevel::Error,
+            None,
+            "Recording failed and active run was finalized",
+            serde_json::json!({
+                "room_id": room_id,
+                "error": error_message,
+            }),
+        );
         self.emit_runtime_update_for_flow(conn, flow_id)?;
         Ok(())
     }
@@ -686,9 +1072,24 @@ impl LiveRuntimeManager {
                 session.mark_downstream_stage(flow_run_id, "processing");
             }
             drop(state);
+            let _ = self.log_runtime_event(
+                flow_id,
+                Some(flow_run_id),
+                Some(external_recording_id),
+                "record",
+                "record_completed",
+                FlowRuntimeLogLevel::Info,
+                None,
+                "Recording finalized successfully",
+                serde_json::json!({
+                    "room_id": room_id,
+                }),
+            );
             if let Some(file_path) = file_path.as_deref() {
                 if let Err(err) = self.handoff_recording_to_sidecar_processing(
                     conn,
+                    flow_id,
+                    flow_run_id,
                     external_recording_id,
                     account_id,
                     &load_flow_runtime_config(conn, flow_id)?.username,
@@ -771,6 +1172,32 @@ impl LiveRuntimeManager {
                 session.mark_flow_run_completed(room_id);
             }
             drop(state);
+            let _ = self.log_runtime_event(
+                flow_id,
+                Some(flow_run_id),
+                Some(external_recording_id),
+                "record",
+                if is_cancel {
+                    "record_cancelled"
+                } else {
+                    "record_failed"
+                },
+                if is_cancel {
+                    FlowRuntimeLogLevel::Warn
+                } else {
+                    FlowRuntimeLogLevel::Error
+                },
+                None,
+                if is_cancel {
+                    "Recording was cancelled"
+                } else {
+                    "Recording finalized with failure"
+                },
+                serde_json::json!({
+                    "room_id": room_id,
+                    "error": error_message,
+                }),
+            );
             self.emit_runtime_update_for_flow(conn, flow_id)?;
         }
 
@@ -785,6 +1212,20 @@ impl LiveRuntimeManager {
         }
         let db_path = self.runtime_db_path.clone();
         drop(state);
+        let _ = self.log_runtime_event(
+            flow_id,
+            None,
+            None,
+            "session",
+            "source_offline_marked",
+            FlowRuntimeLogLevel::Info,
+            None,
+            "Marked source offline and reset dedupe state",
+            serde_json::json!({
+                "flow_id": flow_id,
+                "dedupe_reset": true,
+            }),
+        );
         if let Some(db_path) = db_path {
             let conn = open_runtime_connection(&db_path)?;
             self.emit_runtime_update_for_flow(&conn, flow_id)?;
@@ -862,6 +1303,46 @@ impl LiveRuntimeManager {
             .lock()
             .ok()
             .and_then(|mut slot| slot.take())
+    }
+
+    #[cfg(test)]
+    pub fn fail_runtime_log_emit_for_test(&self, error: &str) {
+        if let Ok(mut slot) = self.runtime_log_emit_error.lock() {
+            *slot = Some(error.to_string());
+        }
+    }
+
+    #[cfg(test)]
+    pub fn log_runtime_event_for_test(
+        &self,
+        flow_id: i64,
+        flow_run_id: Option<i64>,
+        stage: &str,
+        event: &str,
+        message: &str,
+    ) {
+        self.log_runtime_event(
+            flow_id,
+            flow_run_id,
+            None,
+            stage,
+            event,
+            FlowRuntimeLogLevel::Info,
+            None,
+            message,
+            serde_json::json!({}),
+        )
+        .expect("append runtime log for test");
+    }
+
+    #[cfg(test)]
+    pub fn list_runtime_logs_for_test(
+        &self,
+        flow_id: Option<i64>,
+        limit: Option<usize>,
+    ) -> Vec<FlowRuntimeLogEntry> {
+        self.list_runtime_logs(flow_id, limit)
+            .expect("list runtime logs for test")
     }
 
     pub fn stop_flow_session(
@@ -1160,6 +1641,20 @@ impl LiveRuntimeManager {
         let runtime_manager = self.clone();
         let execution = worker::build_recording_execution(&start_input);
 
+        let _ = self.log_runtime_event(
+            start_input.flow_id,
+            Some(start_input.flow_run_id),
+            Some(start_input.external_recording_id.as_str()),
+            "record",
+            "record_spawned",
+            FlowRuntimeLogLevel::Info,
+            None,
+            "Spawned Rust-owned recording worker",
+            serde_json::json!({
+                "room_id": start_input.room_id.as_str(),
+            }),
+        );
+
         let handle = std::thread::spawn(move || {
             let process = match runner.spawn(&execution.start, execution.output_path.as_str()) {
                 Ok(process) => process,
@@ -1267,6 +1762,7 @@ fn failed_snapshot(
 mod tests {
     use super::LiveRuntimeManager;
     use crate::db::init::initialize_database;
+    use crate::live_runtime::logs::FlowRuntimeLogLevel;
     use crate::live_runtime::session::{
         lock_teardown_test_guard_for_test, reset_teardown_call_count_for_test,
         teardown_call_count_for_test,
@@ -1457,6 +1953,16 @@ mod tests {
         assert_eq!(sessions[0].flow_id, 1);
         assert_eq!(sessions[0].lookup_key, "shop_abc");
         assert_eq!(sessions[0].generation, 1);
+        let logs = manager.list_runtime_logs_for_test(Some(1), Some(10));
+        assert!(logs.iter().any(|entry| {
+            entry.event == "session_bootstrap_started"
+                && entry.stage == "session"
+                && entry
+                    .context
+                    .get("flow_id")
+                    .and_then(|value| value.as_i64())
+                    == Some(1)
+        }));
 
         drop(conn);
         let _ = std::fs::remove_file(path);
@@ -1644,6 +2150,47 @@ mod tests {
     }
 
     #[test]
+    fn log_runtime_event_appends_entry_to_manager_buffer() {
+        let manager = LiveRuntimeManager::new();
+
+        manager.log_runtime_event_for_test(
+            7,
+            Some(42),
+            "record",
+            "record_spawned",
+            "Spawned worker",
+        );
+
+        let logs = manager.list_runtime_logs_for_test(None, None);
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].flow_id, 7);
+        assert_eq!(logs[0].event, "record_spawned");
+    }
+
+    #[test]
+    fn log_runtime_event_keeps_buffered_entry_when_emit_fails() {
+        let manager = LiveRuntimeManager::new();
+        manager.fail_runtime_log_emit_for_test("simulated emit failure");
+
+        let result = manager.log_runtime_event(
+            7,
+            Some(42),
+            None,
+            "record",
+            "record_spawned",
+            FlowRuntimeLogLevel::Info,
+            None,
+            "Spawned worker",
+            serde_json::json!({}),
+        );
+
+        assert!(result.is_ok());
+        let logs = manager.list_runtime_logs_for_test(Some(7), None);
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].event, "record_spawned");
+    }
+
+    #[test]
     fn stop_and_shutdown_invoke_session_teardown_hook() {
         let _guard = lock_teardown_test_guard_for_test();
         let (conn, path) = open_temp_db();
@@ -1739,6 +2286,12 @@ mod tests {
 
         assert_eq!(flow_run_id, None);
         assert!(manager.session_is_polling_for_test(1));
+        let logs = manager.list_runtime_logs_for_test(Some(1), Some(10));
+        assert!(logs.iter().any(|entry| {
+            entry.event == "stream_url_missing"
+                && entry.code.as_deref() == Some("start.stream_url_missing")
+                && entry.stage == "start"
+        }));
         let run_count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM flow_runs WHERE flow_id = 1",
@@ -2194,6 +2747,26 @@ mod tests {
             body_json.get("file_path").and_then(|v| v.as_str()),
             Some(recording.1.as_str())
         );
+        let logs = manager.list_runtime_logs_for_test(Some(1), Some(20));
+        let record_completed_index = logs
+            .iter()
+            .position(|entry| {
+                entry.event == "record_completed"
+                    && entry.flow_run_id == Some(flow_run_id)
+                    && entry.external_recording_id.as_deref() == Some(recording.0.as_str())
+                    && entry.stage == "record"
+            })
+            .expect("record_completed log index");
+        let handoff_completed_index = logs
+            .iter()
+            .position(|entry| {
+                entry.event == "sidecar_handoff_completed"
+                    && entry.flow_run_id == Some(flow_run_id)
+                    && entry.external_recording_id.as_deref() == Some(recording.0.as_str())
+                    && entry.stage == "clip"
+            })
+            .expect("sidecar_handoff_completed log index");
+        assert!(record_completed_index < handoff_completed_index);
 
         drop(conn);
         let _ = std::fs::remove_file(path);
@@ -2328,6 +2901,29 @@ mod tests {
         );
         assert_eq!(snapshot.status, "error");
         assert_eq!(snapshot.current_node.as_deref(), Some("clip"));
+        let logs = manager.list_runtime_logs_for_test(Some(1), Some(20));
+        let record_completed_index = logs
+            .iter()
+            .position(|entry| {
+                entry.event == "record_completed"
+                    && entry.flow_run_id == Some(flow_run_id)
+                    && entry.external_recording_id.as_deref()
+                        == Some(external_recording_id.as_str())
+                    && entry.stage == "record"
+            })
+            .expect("record_completed log index");
+        let handoff_failed_index = logs
+            .iter()
+            .position(|entry| {
+                entry.event == "sidecar_handoff_failed"
+                    && entry.flow_run_id == Some(flow_run_id)
+                    && entry.external_recording_id.as_deref()
+                        == Some(external_recording_id.as_str())
+                    && entry.stage == "clip"
+                    && entry.code.as_deref() == Some("handoff.http_failed")
+            })
+            .expect("sidecar_handoff_failed log index");
+        assert!(record_completed_index < handoff_failed_index);
 
         drop(conn);
         let _ = std::fs::remove_file(path);
@@ -2849,6 +3445,12 @@ mod tests {
         assert_eq!(row.0, "done");
         assert!(row.1.is_some());
         assert!(!manager.session_is_polling_for_test(1));
+        let logs = manager.list_runtime_logs_for_test(Some(1), Some(20));
+        assert!(logs.iter().any(|entry| {
+            entry.event == "record_completed"
+                && entry.flow_run_id == Some(flow_run_id)
+                && entry.stage == "record"
+        }));
         assert_eq!(
             manager.session_active_flow_run_id_for_test(1),
             Some(flow_run_id)
@@ -2910,6 +3512,16 @@ mod tests {
         assert_eq!(duplicate_before_reset, None);
 
         manager.mark_source_offline(1).expect("mark source offline");
+        let logs = manager.list_runtime_logs_for_test(Some(1), Some(20));
+        assert!(logs.iter().any(|entry| {
+            entry.event == "source_offline_marked"
+                && entry.stage == "session"
+                && entry
+                    .context
+                    .get("flow_id")
+                    .and_then(|value| value.as_i64())
+                    == Some(1)
+        }));
 
         let second_run_id = manager
             .handle_live_detected(
@@ -2925,6 +3537,37 @@ mod tests {
             .expect("second run created");
 
         assert_ne!(first_run_id, second_run_id);
+
+        drop(conn);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn start_flow_session_emits_lease_conflict_runtime_log() {
+        let (conn, path) = open_temp_db();
+        insert_flow(&conn, 1, true, "shop_abc");
+        insert_flow(&conn, 2, true, "shop_abc");
+        let manager = LiveRuntimeManager::new();
+
+        manager
+            .start_flow_session(&conn, 1)
+            .expect("start first session");
+        let error = manager
+            .start_flow_session(&conn, 2)
+            .expect_err("second session should hit username lease conflict");
+
+        assert!(error.contains("username lease already held"));
+        let logs = manager.list_runtime_logs_for_test(Some(2), Some(10));
+        assert!(logs.iter().any(|entry| {
+            entry.event == "lease_conflict"
+                && entry.code.as_deref() == Some("start.username_conflict")
+                && entry.stage == "start"
+                && entry
+                    .context
+                    .get("lookup_key")
+                    .and_then(|value| value.as_str())
+                    == Some("shop_abc")
+        }));
 
         drop(conn);
         let _ = std::fs::remove_file(path);

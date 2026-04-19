@@ -2,18 +2,20 @@ import { create } from "zustand";
 
 import {
   createFlow,
-    getFlowDefinition,
+  getFlowDefinition,
+  listLiveRuntimeLogs,
   listLiveRuntimeSessions,
+  listFlows,
   publishFlowDefinition,
   restartFlowRun,
   saveFlowNodeDraft,
   setFlowEnabled,
-  listFlows,
 } from "@/lib/api";
 import type {
   CreateFlowInput,
   FlowEditorPayload,
   FlowNodeKey,
+  FlowRuntimeLogEntry,
   FlowRuntimeSnapshot,
   FlowStatus,
   FlowSummary,
@@ -30,6 +32,7 @@ type FlowFilters = {
 type FlowStore = {
   flows: FlowSummary[];
   runtimeSnapshots: Record<number, FlowRuntimeSnapshot>;
+  runtimeLogs: Record<number, FlowRuntimeLogEntry[]>;
   activeFlowId: number | null;
   activeFlow: FlowEditorPayload | null;
   view: FlowView;
@@ -57,10 +60,27 @@ type FlowStore = {
   }) => Promise<void>;
   publishFlow: (flowId: number, options: { restartCurrentRun: boolean }) => Promise<PublishFlowResult>;
   applyRuntimeSnapshots: (rows: FlowRuntimeSnapshot[]) => void;
+  applyRuntimeLogs: (rows: FlowRuntimeLogEntry[], options?: { flowIds?: number[] }) => void;
+  appendRuntimeLog: (row: FlowRuntimeLogEntry) => void;
+  fetchRuntimeLogs: (flowId: number, limit?: number) => Promise<void>;
   refreshRuntime: () => Promise<void>;
   toggleFlowEnabled: (flowId: number, enabled: boolean) => Promise<void>;
   createFlow: (input: CreateFlowInput) => Promise<number>;
 };
+
+export const flowStoreApi = {
+  listFlows,
+  getFlowDefinition,
+  listLiveRuntimeLogs,
+  listLiveRuntimeSessions,
+  saveFlowNodeDraft,
+  publishFlowDefinition,
+  restartFlowRun,
+  setFlowEnabled,
+  createFlow,
+};
+
+const FLOW_RUNTIME_LOG_CAP = 500;
 
 const DEFAULT_FILTERS: FlowFilters = {
   search: "",
@@ -70,6 +90,8 @@ const DEFAULT_FILTERS: FlowFilters = {
 let pendingFetchRequests = 0;
 let fetchFlowsToken = 0;
 let fetchFlowDetailToken = 0;
+let fetchRuntimeLogsToken = 0;
+const fetchRuntimeLogsTokensByFlow: Record<number, number> = {};
 
 function beginFetch(set: (partial: Partial<FlowStore>) => void): () => void {
   pendingFetchRequests += 1;
@@ -82,6 +104,21 @@ function beginFetch(set: (partial: Partial<FlowStore>) => void): () => void {
 
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
+}
+
+function appendRuntimeLogEntry(
+  bucket: FlowRuntimeLogEntry[],
+  row: FlowRuntimeLogEntry,
+): FlowRuntimeLogEntry[] {
+  if (bucket.some((entry) => entry.id === row.id)) {
+    return bucket;
+  }
+
+  const next = [...bucket, row];
+  if (next.length <= FLOW_RUNTIME_LOG_CAP) {
+    return next;
+  }
+  return next.slice(next.length - FLOW_RUNTIME_LOG_CAP);
 }
 
 function normalizeFlowStatus(status: FlowStatus, enabled: boolean): FlowStatus {
@@ -182,6 +219,7 @@ function applyEnabledToFlowEditor(payload: FlowEditorPayload, enabled: boolean):
 export const useFlowStore = create<FlowStore>((set, get) => ({
   flows: [],
   runtimeSnapshots: {},
+  runtimeLogs: {},
   activeFlowId: null,
   activeFlow: null,
   view: "list",
@@ -199,7 +237,7 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
     const token = ++fetchFlowsToken;
     const endFetch = quiet ? () => {} : beginFetch(set);
     try {
-      const flows = await listFlows();
+      const flows = await flowStoreApi.listFlows();
       if (token !== fetchFlowsToken) {
         return;
       }
@@ -226,7 +264,7 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
 
     const endFetch = quiet ? () => {} : beginFetch(set);
     try {
-      const payload = await getFlowDefinition(targetId);
+      const payload = await flowStoreApi.getFlowDefinition(targetId);
       if (token !== fetchFlowDetailToken) {
         return;
       }
@@ -262,7 +300,7 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
   closeNodeModal: () => set({ editorModalNode: null }),
 
   saveNodeDraft: async (input) => {
-    await saveFlowNodeDraft(input);
+    await flowStoreApi.saveFlowNodeDraft(input);
     const current = get().activeFlow;
     if (current && current.flow.id === input.flow_id) {
       const now = new Date().toISOString();
@@ -283,9 +321,9 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
   publishFlow: async (flowId, options) => {
     set({ publishPending: true, error: null });
     try {
-      const result = await publishFlowDefinition(flowId);
+      const result = await flowStoreApi.publishFlowDefinition(flowId);
       if (options.restartCurrentRun && result.isRunning) {
-        await restartFlowRun(flowId);
+        await flowStoreApi.restartFlowRun(flowId);
       }
       await get().fetchFlowDetail(flowId);
       set({ draftDirty: false });
@@ -301,9 +339,55 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
     });
   },
 
+  applyRuntimeLogs: (rows, options) => {
+    set((state) => {
+      const next = { ...state.runtimeLogs };
+      const flowIds = new Set(options?.flowIds ?? rows.map((row) => row.flow_id));
+      for (const flowId of flowIds) {
+        next[flowId] = [];
+      }
+      for (const row of rows) {
+        next[row.flow_id] = appendRuntimeLogEntry(next[row.flow_id] ?? [], row);
+      }
+      return { runtimeLogs: next };
+    });
+  },
+
+  appendRuntimeLog: (row) => {
+    set((state) => ({
+      runtimeLogs: {
+        ...state.runtimeLogs,
+        [row.flow_id]: appendRuntimeLogEntry(state.runtimeLogs[row.flow_id] ?? [], row),
+      },
+    }));
+  },
+
+  fetchRuntimeLogs: async (flowId, limit = 50) => {
+    const token = ++fetchRuntimeLogsToken;
+    fetchRuntimeLogsTokensByFlow[flowId] = token;
+    const initialBucketIds = new Set((get().runtimeLogs[flowId] ?? []).map((row) => row.id));
+
+    try {
+      const rows = await flowStoreApi.listLiveRuntimeLogs(flowId, limit);
+      if (fetchRuntimeLogsTokensByFlow[flowId] !== token) {
+        return;
+      }
+      const appendedDuringFetch = (get().runtimeLogs[flowId] ?? []).filter(
+        (row) => !initialBucketIds.has(row.id),
+      );
+      const mergedRows = [
+        ...rows,
+        ...appendedDuringFetch.filter((row) => !rows.some((hydrated) => hydrated.id === row.id)),
+      ];
+      get().applyRuntimeLogs(mergedRows, { flowIds: [flowId] });
+    } catch {
+      /* keep last known logs when runtime log hydration races startup or sidecar reconnect */
+    }
+  },
+
   refreshRuntime: async () => {
     try {
-      const snapshots = await listLiveRuntimeSessions();
+      const snapshots = await flowStoreApi.listLiveRuntimeSessions();
       get().applyRuntimeSnapshots(snapshots);
     } catch {
       /* keep last known runtime snapshots when refresh races startup */
@@ -332,7 +416,7 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
     }));
 
     try {
-      await setFlowEnabled(flowId, enabled);
+      await flowStoreApi.setFlowEnabled(flowId, enabled);
     } catch (error) {
       set({
         flows: previousFlows,
@@ -344,7 +428,7 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
   },
 
   createFlow: async (input) => {
-    const id = await createFlow(input);
+    const id = await flowStoreApi.createFlow(input);
     await get().fetchFlows();
     set({ activeFlowId: id, view: "detail" });
     await get().fetchFlowDetail(id);
