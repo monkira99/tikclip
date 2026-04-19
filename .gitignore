@@ -36,3 +36,8 @@ sidecar/.env
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Agents
+.agents/
+.cursor/
+docs/superpowers/
