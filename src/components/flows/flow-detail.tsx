@@ -24,6 +24,11 @@ type FlowDetailProps = {
   onBack: () => void;
 };
 
+type RuntimeMonitorMetadata = {
+  username: string | null;
+  activeFlowRunId: number | null;
+};
+
 function normalizeRuntimePanelStatus(status: FlowStatus, enabled: boolean): FlowStatus {
   if (!enabled) {
     return "disabled";
@@ -58,6 +63,23 @@ export function buildRuntimeLogsPanelFlow(
     current_node: runtimeSnapshot.current_node,
     last_live_at: runtimeSnapshot.last_live_at,
     last_error: runtimeSnapshot.last_error,
+  };
+}
+
+export function buildRuntimeMonitorMetadata(
+  flow: FlowContext,
+  runtimeSnapshot: FlowRuntimeSnapshot | null,
+): RuntimeMonitorMetadata {
+  if (!flow.enabled || !runtimeSnapshot) {
+    return {
+      username: null,
+      activeFlowRunId: null,
+    };
+  }
+
+  return {
+    username: runtimeSnapshot.username,
+    activeFlowRunId: runtimeSnapshot.active_flow_run_id,
   };
 }
 
@@ -125,6 +147,7 @@ export function FlowDetail({ flowId, onBack }: FlowDetailProps) {
   const flow = activeFlow && activeFlow.flow.id === flowId ? activeFlow : null;
   const flowLogs = runtimeLogs[flowId] ?? [];
   const runtimePanelFlow = flow ? buildRuntimeLogsPanelFlow(flow.flow, runtimeSnapshot) : null;
+  const runtimeMonitorMetadata = flow ? buildRuntimeMonitorMetadata(flow.flow, runtimeSnapshot) : null;
 
   const handleCanvasSelect = (node: FlowNodeKey) => {
     openNodeModal(node);
@@ -241,7 +264,8 @@ export function FlowDetail({ flowId, onBack }: FlowDetailProps) {
       {flow ? (
         <FlowRuntimeStrip
           flow={runtimePanelFlow ?? flow.flow}
-          runtimeSnapshot={runtimeSnapshot}
+          username={runtimeMonitorMetadata?.username ?? null}
+          activeFlowRunId={runtimeMonitorMetadata?.activeFlowRunId ?? null}
           runtimeLogsCount={flowLogs.length}
           onOpenDiagnostics={() => setDiagnosticsOpen(true)}
         />
@@ -253,8 +277,8 @@ export function FlowDetail({ flowId, onBack }: FlowDetailProps) {
           onOpenChange={setDiagnosticsOpen}
           flow={runtimePanelFlow}
           logs={flowLogs}
-          username={runtimeSnapshot?.username ?? null}
-          activeFlowRunId={runtimeSnapshot?.active_flow_run_id ?? null}
+          username={runtimeMonitorMetadata?.username ?? null}
+          activeFlowRunId={runtimeMonitorMetadata?.activeFlowRunId ?? null}
         />
       ) : null}
 

@@ -2,11 +2,12 @@ import { FLOW_NODE_LABEL } from "@/components/flows/flow-node-utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { FlowContext, FlowNodeKey, FlowRuntimeSnapshot, FlowStatus } from "@/types";
+import type { FlowContext, FlowNodeKey, FlowStatus } from "@/types";
 
 type FlowRuntimeStripProps = {
   flow: FlowContext;
-  runtimeSnapshot: FlowRuntimeSnapshot | null;
+  username: string | null;
+  activeFlowRunId: number | null;
   runtimeLogsCount: number;
   onOpenDiagnostics: () => void;
 };
@@ -74,7 +75,8 @@ function derivePrimaryRuntimeCopy(flow: FlowContext): {
 
 export function FlowRuntimeStrip({
   flow,
-  runtimeSnapshot,
+  username,
+  activeFlowRunId,
   runtimeLogsCount,
   onOpenDiagnostics,
 }: FlowRuntimeStripProps) {
@@ -113,13 +115,13 @@ export function FlowRuntimeStrip({
               <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-soft)]">
                 Account
               </p>
-              <p className="mt-1 text-sm text-[var(--color-text)]">{runtimeSnapshot?.username ?? "Unknown"}</p>
+              <p className="mt-1 text-sm text-[var(--color-text)]">{username ?? "Unknown"}</p>
             </div>
             <div className="rounded-xl border border-[var(--color-border)] bg-white/[0.02] px-3 py-2">
               <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-soft)]">
                 Run
               </p>
-              <p className="mt-1 text-sm text-[var(--color-text)]">{formatRunLabel(runtimeSnapshot?.active_flow_run_id)}</p>
+              <p className="mt-1 text-sm text-[var(--color-text)]">{formatRunLabel(activeFlowRunId)}</p>
             </div>
             <div className="rounded-xl border border-[var(--color-border)] bg-white/[0.02] px-3 py-2">
               <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-soft)]">

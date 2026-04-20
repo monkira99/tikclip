@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import type { FlowContext, FlowRuntimeSnapshot } from "@/types";
+import type { FlowContext } from "@/types";
 
 import { FlowRuntimeStrip } from "./flow-runtime-strip";
 
@@ -24,23 +24,6 @@ function createFlow(overrides: Partial<FlowContext> = {}): FlowContext {
   };
 }
 
-function createRuntimeSnapshot(
-  overrides: Partial<FlowRuntimeSnapshot> = {},
-): FlowRuntimeSnapshot {
-  return {
-    flow_id: overrides.flow_id ?? 7,
-    status: overrides.status ?? "processing",
-    current_node: "current_node" in overrides ? overrides.current_node ?? null : "clip",
-    account_id: overrides.account_id ?? 44,
-    username: overrides.username ?? "shop_abc",
-    last_live_at:
-      "last_live_at" in overrides ? overrides.last_live_at ?? null : "2026-04-19T10:01:02.345+07:00",
-    last_error: "last_error" in overrides ? overrides.last_error ?? null : null,
-    active_flow_run_id:
-      "active_flow_run_id" in overrides ? overrides.active_flow_run_id ?? null : 42,
-  };
-}
-
 test("FlowRuntimeStrip renders live runtime summary and diagnostics affordance", () => {
   const markup = renderToStaticMarkup(
     <FlowRuntimeStrip
@@ -49,12 +32,8 @@ test("FlowRuntimeStrip renders live runtime summary and diagnostics affordance",
         current_node: "clip",
         last_live_at: "2026-04-19T10:01:02.345+07:00",
       })}
-      runtimeSnapshot={createRuntimeSnapshot({
-        status: "processing",
-        current_node: "clip",
-        username: "shop_abc",
-        active_flow_run_id: 42,
-      })}
+      username="shop_abc"
+      activeFlowRunId={42}
       runtimeLogsCount={3}
       onOpenDiagnostics={() => {}}
     />,
@@ -77,12 +56,8 @@ test("FlowRuntimeStrip surfaces last error and empty log state when runtime is d
         last_live_at: null,
         last_error: "Caption worker crashed",
       })}
-      runtimeSnapshot={createRuntimeSnapshot({
-        status: "error",
-        current_node: "caption",
-        last_error: "Caption worker crashed",
-        active_flow_run_id: null,
-      })}
+      username="shop_abc"
+      activeFlowRunId={null}
       runtimeLogsCount={0}
       onOpenDiagnostics={() => {}}
     />,
@@ -103,7 +78,8 @@ test("FlowRuntimeStrip falls back to non-running copy without a runtime snapshot
         last_live_at: null,
         last_error: null,
       })}
-      runtimeSnapshot={null}
+      username={null}
+      activeFlowRunId={null}
       runtimeLogsCount={0}
       onOpenDiagnostics={() => {}}
     />,
@@ -122,12 +98,8 @@ test("FlowRuntimeStrip respects canonical overlaid null runtime fields without f
         last_live_at: null,
         last_error: null,
       })}
-      runtimeSnapshot={createRuntimeSnapshot({
-        status: "processing",
-        current_node: "clip",
-        last_live_at: "2026-04-19T10:01:02.345+07:00",
-        active_flow_run_id: null,
-      })}
+      username={null}
+      activeFlowRunId={null}
       runtimeLogsCount={0}
       onOpenDiagnostics={() => {}}
     />,

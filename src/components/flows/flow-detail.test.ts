@@ -4,7 +4,11 @@ import assert from "node:assert/strict";
 import type { FlowContext, FlowRuntimeSnapshot } from "@/types";
 
 import { deriveCanvasNodeStateMap } from "./canvas/flow-canvas-runtime-state";
-import { buildRuntimeLogsPanelFlow, shouldFetchDiagnosticsLogs } from "./flow-detail";
+import {
+  buildRuntimeLogsPanelFlow,
+  buildRuntimeMonitorMetadata,
+  shouldFetchDiagnosticsLogs,
+} from "./flow-detail";
 
 function createFlow(overrides: Partial<FlowContext> = {}): FlowContext {
   return {
@@ -108,6 +112,27 @@ test("buildRuntimeLogsPanelFlow keeps disabled status for disabled flows even wh
     assert.equal(panelFlow.last_live_at, null);
     assert.equal(panelFlow.last_error, null);
   }
+});
+
+test("buildRuntimeMonitorMetadata clears stale username and run id for disabled flows", () => {
+  const metadata = buildRuntimeMonitorMetadata(
+    createFlow({
+      enabled: false,
+      status: "disabled",
+      current_node: null,
+      last_live_at: null,
+      last_error: null,
+    }),
+    createRuntimeSnapshot({
+      status: "recording",
+      username: "stale_shop",
+      active_flow_run_id: 42,
+      current_node: "record",
+    }),
+  );
+
+  assert.equal(metadata.username, null);
+  assert.equal(metadata.activeFlowRunId, null);
 });
 
 test("runtime snapshot overlay keeps canvas helper focused on node-level state only", () => {
