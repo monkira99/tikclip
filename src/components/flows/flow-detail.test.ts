@@ -104,6 +104,9 @@ test("buildRuntimeLogsPanelFlow keeps disabled status for disabled flows even wh
     );
 
     assert.equal(panelFlow.status, "disabled");
+    assert.equal(panelFlow.current_node, null);
+    assert.equal(panelFlow.last_live_at, null);
+    assert.equal(panelFlow.last_error, null);
   }
 });
 
@@ -125,6 +128,7 @@ test("runtime snapshot overlay keeps canvas helper focused on node-level state o
     runtimeSnapshot,
   );
   const nodeStateMap = deriveCanvasNodeStateMap({
+    flowEnabled: true,
     runs: [],
     nodeRuns: [],
     runtimeSnapshot,

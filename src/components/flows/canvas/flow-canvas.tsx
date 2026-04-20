@@ -79,11 +79,12 @@ export function FlowCanvas({ flow, selectedNode, runtimeSnapshot = null, onSelec
   const runtimeStateByNode = useMemo(
     () =>
       deriveCanvasNodeStateMap({
+        flowEnabled: flow?.flow.enabled ?? true,
         runs: flow?.runs ?? [],
         nodeRuns: flow?.nodeRuns ?? [],
         runtimeSnapshot,
       }),
-    [flow?.nodeRuns, flow?.runs, runtimeSnapshot],
+    [flow?.flow.enabled, flow?.nodeRuns, flow?.runs, runtimeSnapshot],
   );
 
   const sceneWidth = Math.max(...NODE_SCENE.map((n) => n.x)) + FLOW_CANVAS_NODE_W + 80;

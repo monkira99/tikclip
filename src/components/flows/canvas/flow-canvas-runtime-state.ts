@@ -12,6 +12,7 @@ export type CanvasNodeRuntimeState = {
 };
 
 type DeriveCanvasNodeStateArgs = {
+  flowEnabled: boolean;
   runs: FlowRunRow[];
   nodeRuns: FlowNodeRunRow[];
   runtimeSnapshot: FlowRuntimeSnapshot | null;
@@ -74,10 +75,26 @@ function latestNodeRunByKey(nodeRuns: FlowNodeRunRow[], flowRunId: number | null
 }
 
 export function deriveCanvasNodeStateMap({
+  flowEnabled,
   runs,
   nodeRuns,
   runtimeSnapshot,
 }: DeriveCanvasNodeStateArgs): Record<FlowNodeKey, CanvasNodeRuntimeState> {
+  if (!flowEnabled) {
+    return Object.fromEntries(
+      FLOW_NODE_ORDER.map((nodeKey) => [
+        nodeKey,
+        {
+          visualState: "idle",
+          badgeLabel: null,
+          runtimeLabel: "Disabled",
+          inlineDetail: null,
+          activeMarker: false,
+        },
+      ]),
+    ) as Record<FlowNodeKey, CanvasNodeRuntimeState>;
+  }
+
   const snapshotStatus = runtimeSnapshot?.status ?? null;
   const snapshotIsActive = snapshotStatus != null && ACTIVE_SNAPSHOT_STATUSES.has(snapshotStatus);
   const activeRunId = snapshotIsActive && runtimeSnapshot?.active_flow_run_id == null

@@ -42,6 +42,16 @@ export function buildRuntimeLogsPanelFlow(
     return flow;
   }
 
+   if (!flow.enabled) {
+    return {
+      ...flow,
+      status: "disabled",
+      current_node: null,
+      last_live_at: null,
+      last_error: null,
+    };
+  }
+
   return {
     ...flow,
     status: normalizeRuntimePanelStatus(runtimeSnapshot.status, flow.enabled),

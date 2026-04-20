@@ -71,6 +71,7 @@ test("deriveActiveRunId falls back to latest running run", () => {
 
 test("deriveCanvasNodeStateMap marks snapshot current node as running", () => {
   const stateMap = deriveCanvasNodeStateMap({
+    flowEnabled: true,
     runs: [createRun({ id: 42 })],
     nodeRuns: [],
     runtimeSnapshot: createSnapshot({ current_node: "record", status: "recording" }),
@@ -83,6 +84,7 @@ test("deriveCanvasNodeStateMap marks snapshot current node as running", () => {
 
 test("deriveCanvasNodeStateMap prefers error over running when snapshot status is error", () => {
   const stateMap = deriveCanvasNodeStateMap({
+    flowEnabled: true,
     runs: [createRun({ id: 42, status: "failed", error: "clip timeout" })],
     nodeRuns: [
       createNodeRun({
@@ -102,6 +104,7 @@ test("deriveCanvasNodeStateMap prefers error over running when snapshot status i
 
 test("deriveCanvasNodeStateMap uses latest row wins for repeated node rows in same run", () => {
   const stateMap = deriveCanvasNodeStateMap({
+    flowEnabled: true,
     runs: [createRun({ id: 42, status: "running" })],
     nodeRuns: [
       createNodeRun({
@@ -128,6 +131,7 @@ test("deriveCanvasNodeStateMap uses latest row wins for repeated node rows in sa
 
 test("deriveCanvasNodeStateMap omits done state when no reliable run-scoped node rows exist", () => {
   const stateMap = deriveCanvasNodeStateMap({
+    flowEnabled: true,
     runs: [],
     nodeRuns: [createNodeRun({ id: 10, flow_run_id: 77, node_key: "clip" })],
     runtimeSnapshot: createSnapshot({ active_flow_run_id: null, current_node: null, status: "processing" }),
@@ -139,11 +143,13 @@ test("deriveCanvasNodeStateMap omits done state when no reliable run-scoped node
 
 test("deriveCanvasNodeStateMap does not render running for idle or disabled snapshots", () => {
   const idleStateMap = deriveCanvasNodeStateMap({
+    flowEnabled: true,
     runs: [],
     nodeRuns: [],
     runtimeSnapshot: createSnapshot({ status: "idle", current_node: "clip", active_flow_run_id: null }),
   });
   const disabledStateMap = deriveCanvasNodeStateMap({
+    flowEnabled: true,
     runs: [],
     nodeRuns: [],
     runtimeSnapshot: createSnapshot({ status: "disabled", current_node: "record", active_flow_run_id: null }),
@@ -155,8 +161,34 @@ test("deriveCanvasNodeStateMap does not render running for idle or disabled snap
   assert.equal(disabledStateMap.record.badgeLabel, null);
 });
 
+test("deriveCanvasNodeStateMap ignores stale active runtime snapshot cues when the flow is disabled", () => {
+  const stateMap = deriveCanvasNodeStateMap({
+    flowEnabled: false,
+    runs: [createRun({ id: 42, status: "running" })],
+    nodeRuns: [
+      createNodeRun({
+        id: 10,
+        node_key: "record",
+        status: "failed",
+        error: "stale recorder error",
+      }),
+    ],
+    runtimeSnapshot: createSnapshot({
+      status: "recording",
+      current_node: "record",
+      last_error: "stale recorder error",
+      active_flow_run_id: 42,
+    }),
+  });
+
+  assert.equal(stateMap.record.visualState, "idle");
+  assert.equal(stateMap.record.badgeLabel, null);
+  assert.equal(stateMap.record.activeMarker, false);
+});
+
 test("deriveCanvasNodeStateMap does not leak historical node rows into active snapshots without confirmed run id", () => {
   const stateMap = deriveCanvasNodeStateMap({
+    flowEnabled: true,
     runs: [createRun({ id: 41, status: "completed", started_at: "2026-04-20T11:00:00.000+07:00" })],
     nodeRuns: [
       createNodeRun({
