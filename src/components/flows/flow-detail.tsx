@@ -5,14 +5,19 @@ import { ClipNodeModal } from "@/components/flows/modals/clip-node-modal";
 import { RecordNodeModal } from "@/components/flows/modals/record-node-modal";
 import { StartNodeModal } from "@/components/flows/modals/start-node-modal";
 import { UploadNodeModal } from "@/components/flows/modals/upload-node-modal";
-import { FlowRuntimeLanes } from "@/components/flows/runtime/flow-runtime-lanes";
-import { RuntimeLogsPanel } from "@/components/flows/runtime/runtime-logs-panel";
-import { FlowRuntimeTimeline } from "@/components/flows/runtime/flow-runtime-timeline";
+import { FlowRuntimeDiagnosticsDialog } from "@/components/flows/runtime/flow-runtime-diagnostics-dialog";
+import { FlowRuntimeStrip } from "@/components/flows/runtime/flow-runtime-strip";
 import { PublishFlowDialog } from "@/components/flows/runtime/publish-flow-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useFlowStore } from "@/stores/flow-store";
-import type { FlowContext, FlowEditorPayload, FlowNodeKey, FlowRuntimeSnapshot } from "@/types";
+import type {
+  FlowContext,
+  FlowEditorPayload,
+  FlowNodeKey,
+  FlowRuntimeLogEntry,
+  FlowRuntimeSnapshot,
+} from "@/types";
 
 type FlowDetailProps = {
   flowId: number;
@@ -36,6 +41,18 @@ export function buildRuntimeLogsPanelFlow(
   };
 }
 
+export function shouldFetchDiagnosticsLogs({
+  diagnosticsOpen,
+  runtimeLogs,
+  flowId,
+}: {
+  diagnosticsOpen: boolean;
+  runtimeLogs: Record<number, FlowRuntimeLogEntry[]>;
+  flowId: number;
+}): boolean {
+  return diagnosticsOpen && !(flowId in runtimeLogs);
+}
+
 export function FlowDetail({ flowId, onBack }: FlowDetailProps) {
   const activeFlow = useFlowStore((s) => s.activeFlow);
   const selectedNode = useFlowStore((s) => s.selectedNode);
@@ -55,14 +72,19 @@ export function FlowDetail({ flowId, onBack }: FlowDetailProps) {
 
   const [publishError, setPublishError] = useState<string | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
 
   useEffect(() => {
     void fetchFlowDetail(flowId);
   }, [flowId, fetchFlowDetail]);
 
   useEffect(() => {
+    if (!shouldFetchDiagnosticsLogs({ diagnosticsOpen, runtimeLogs, flowId })) {
+      return;
+    }
+
     void fetchRuntimeLogs(flowId);
-  }, [flowId, fetchRuntimeLogs]);
+  }, [diagnosticsOpen, fetchRuntimeLogs, flowId, runtimeLogs]);
 
   const flow = activeFlow && activeFlow.flow.id === flowId ? activeFlow : null;
   const flowLogs = runtimeLogs[flowId] ?? [];
@@ -180,14 +202,20 @@ export function FlowDetail({ flowId, onBack }: FlowDetailProps) {
         onSelectNode={handleCanvasSelect}
       />
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <FlowRuntimeTimeline runs={flow?.runs ?? []} nodeRuns={flow?.nodeRuns ?? []} />
-        <FlowRuntimeLanes nodeRuns={flow?.nodeRuns ?? []} />
-      </div>
-
       {flow ? (
-        <RuntimeLogsPanel
-          flow={runtimePanelFlow ?? flow.flow}
+        <FlowRuntimeStrip
+          flow={flow.flow}
+          runtimeSnapshot={runtimeSnapshot}
+          runtimeLogsCount={flowLogs.length}
+          onOpenDiagnostics={() => setDiagnosticsOpen(true)}
+        />
+      ) : null}
+
+      {flow && runtimePanelFlow ? (
+        <FlowRuntimeDiagnosticsDialog
+          open={diagnosticsOpen}
+          onOpenChange={setDiagnosticsOpen}
+          flow={runtimePanelFlow}
           logs={flowLogs}
           username={runtimeSnapshot?.username ?? null}
           activeFlowRunId={runtimeSnapshot?.active_flow_run_id ?? null}

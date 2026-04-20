@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import type { FlowContext, FlowRuntimeSnapshot } from "@/types";
 
 import { deriveCanvasNodeStateMap } from "./canvas/flow-canvas-runtime-state";
-import { buildRuntimeLogsPanelFlow } from "./flow-detail";
+import { buildRuntimeLogsPanelFlow, shouldFetchDiagnosticsLogs } from "./flow-detail";
 
 function createFlow(overrides: Partial<FlowContext> = {}): FlowContext {
   return {
@@ -88,4 +88,37 @@ test("runtime snapshot overlay keeps canvas helper focused on node-level state o
   assert.equal(panelFlow.status, "processing");
   assert.equal(nodeStateMap.clip.visualState, "running");
   assert.equal(nodeStateMap.clip.runtimeLabel, "Creating clips");
+});
+
+test("shouldFetchDiagnosticsLogs is false before diagnostics open", () => {
+  assert.equal(
+    shouldFetchDiagnosticsLogs({
+      diagnosticsOpen: false,
+      runtimeLogs: {},
+      flowId: 7,
+    }),
+    false,
+  );
+});
+
+test("shouldFetchDiagnosticsLogs is true when diagnostics opens and no logs exist yet", () => {
+  assert.equal(
+    shouldFetchDiagnosticsLogs({
+      diagnosticsOpen: true,
+      runtimeLogs: {},
+      flowId: 7,
+    }),
+    true,
+  );
+});
+
+test("shouldFetchDiagnosticsLogs is false when logs bucket already exists", () => {
+  assert.equal(
+    shouldFetchDiagnosticsLogs({
+      diagnosticsOpen: true,
+      runtimeLogs: { 7: [] },
+      flowId: 7,
+    }),
+    false,
+  );
 });
