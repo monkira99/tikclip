@@ -1,23 +1,43 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FlowCanvas } from "@/components/flows/canvas/flow-canvas";
 import { CaptionNodeModal } from "@/components/flows/modals/caption-node-modal";
 import { ClipNodeModal } from "@/components/flows/modals/clip-node-modal";
 import { RecordNodeModal } from "@/components/flows/modals/record-node-modal";
 import { StartNodeModal } from "@/components/flows/modals/start-node-modal";
 import { UploadNodeModal } from "@/components/flows/modals/upload-node-modal";
-import { FlowRuntimeLanes } from "@/components/flows/runtime/flow-runtime-lanes";
-import { RuntimeLogsPanel } from "@/components/flows/runtime/runtime-logs-panel";
-import { FlowRuntimeTimeline } from "@/components/flows/runtime/flow-runtime-timeline";
+import { FlowRuntimeDiagnosticsDialog } from "@/components/flows/runtime/flow-runtime-diagnostics-dialog";
+import { FlowRuntimeStrip } from "@/components/flows/runtime/flow-runtime-strip";
 import { PublishFlowDialog } from "@/components/flows/runtime/publish-flow-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useFlowStore } from "@/stores/flow-store";
-import type { FlowContext, FlowEditorPayload, FlowNodeKey, FlowRuntimeSnapshot } from "@/types";
+import type {
+  FlowContext,
+  FlowEditorPayload,
+  FlowNodeKey,
+  FlowStatus,
+  FlowRuntimeSnapshot,
+} from "@/types";
 
 type FlowDetailProps = {
   flowId: number;
   onBack: () => void;
 };
+
+type RuntimeMonitorMetadata = {
+  username: string | null;
+  activeFlowRunId: number | null;
+};
+
+function normalizeRuntimePanelStatus(status: FlowStatus, enabled: boolean): FlowStatus {
+  if (!enabled) {
+    return "disabled";
+  }
+  if (status === "disabled") {
+    return "idle";
+  }
+  return status;
+}
 
 export function buildRuntimeLogsPanelFlow(
   flow: FlowContext,
@@ -27,13 +47,58 @@ export function buildRuntimeLogsPanelFlow(
     return flow;
   }
 
+   if (!flow.enabled) {
+    return {
+      ...flow,
+      status: "disabled",
+      current_node: null,
+      last_live_at: null,
+      last_error: null,
+    };
+  }
+
   return {
     ...flow,
-    status: runtimeSnapshot.status,
+    status: normalizeRuntimePanelStatus(runtimeSnapshot.status, flow.enabled),
     current_node: runtimeSnapshot.current_node,
     last_live_at: runtimeSnapshot.last_live_at,
     last_error: runtimeSnapshot.last_error,
   };
+}
+
+export function buildRuntimeMonitorMetadata(
+  flow: FlowContext,
+  runtimeSnapshot: FlowRuntimeSnapshot | null,
+): RuntimeMonitorMetadata {
+  if (!flow.enabled || !runtimeSnapshot) {
+    return {
+      username: null,
+      activeFlowRunId: null,
+    };
+  }
+
+  return {
+    username: runtimeSnapshot.username,
+    activeFlowRunId: runtimeSnapshot.active_flow_run_id,
+  };
+}
+
+export function shouldFetchDiagnosticsLogs({
+  diagnosticsOpen,
+  hasFetchedInOpenCycle,
+}: {
+  diagnosticsOpen: boolean;
+  hasFetchedInOpenCycle: boolean;
+}): boolean {
+  if (!diagnosticsOpen) {
+    return false;
+  }
+
+  if (hasFetchedInOpenCycle) {
+    return false;
+  }
+
+  return true;
 }
 
 export function FlowDetail({ flowId, onBack }: FlowDetailProps) {
@@ -55,18 +120,34 @@ export function FlowDetail({ flowId, onBack }: FlowDetailProps) {
 
   const [publishError, setPublishError] = useState<string | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const diagnosticsFetchedInOpenCycleRef = useRef(false);
 
   useEffect(() => {
     void fetchFlowDetail(flowId);
   }, [flowId, fetchFlowDetail]);
 
   useEffect(() => {
+    if (!diagnosticsOpen) {
+      diagnosticsFetchedInOpenCycleRef.current = false;
+      return;
+    }
+
+    if (!shouldFetchDiagnosticsLogs({
+      diagnosticsOpen,
+      hasFetchedInOpenCycle: diagnosticsFetchedInOpenCycleRef.current,
+    })) {
+      return;
+    }
+
+    diagnosticsFetchedInOpenCycleRef.current = true;
     void fetchRuntimeLogs(flowId);
-  }, [flowId, fetchRuntimeLogs]);
+  }, [diagnosticsOpen, fetchRuntimeLogs, flowId, runtimeLogs]);
 
   const flow = activeFlow && activeFlow.flow.id === flowId ? activeFlow : null;
   const flowLogs = runtimeLogs[flowId] ?? [];
   const runtimePanelFlow = flow ? buildRuntimeLogsPanelFlow(flow.flow, runtimeSnapshot) : null;
+  const runtimeMonitorMetadata = flow ? buildRuntimeMonitorMetadata(flow.flow, runtimeSnapshot) : null;
 
   const handleCanvasSelect = (node: FlowNodeKey) => {
     openNodeModal(node);
@@ -173,19 +254,31 @@ export function FlowDetail({ flowId, onBack }: FlowDetailProps) {
         </div>
       ) : null}
 
-      <FlowCanvas flow={flow} selectedNode={selectedNode} onSelectNode={handleCanvasSelect} />
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <FlowRuntimeTimeline runs={flow?.runs ?? []} nodeRuns={flow?.nodeRuns ?? []} />
-        <FlowRuntimeLanes nodeRuns={flow?.nodeRuns ?? []} />
-      </div>
+      <FlowCanvas
+        flow={flow}
+        selectedNode={selectedNode}
+        runtimeSnapshot={runtimeSnapshot}
+        onSelectNode={handleCanvasSelect}
+      />
 
       {flow ? (
-        <RuntimeLogsPanel
+        <FlowRuntimeStrip
           flow={runtimePanelFlow ?? flow.flow}
+          username={runtimeMonitorMetadata?.username ?? null}
+          activeFlowRunId={runtimeMonitorMetadata?.activeFlowRunId ?? null}
+          runtimeLogsCount={flowLogs.length}
+          onOpenDiagnostics={() => setDiagnosticsOpen(true)}
+        />
+      ) : null}
+
+      {flow && runtimePanelFlow ? (
+        <FlowRuntimeDiagnosticsDialog
+          open={diagnosticsOpen}
+          onOpenChange={setDiagnosticsOpen}
+          flow={runtimePanelFlow}
           logs={flowLogs}
-          username={runtimeSnapshot?.username ?? null}
-          activeFlowRunId={runtimeSnapshot?.active_flow_run_id ?? null}
+          username={runtimeMonitorMetadata?.username ?? null}
+          activeFlowRunId={runtimeMonitorMetadata?.activeFlowRunId ?? null}
         />
       ) : null}
 

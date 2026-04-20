@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "test:js": "npm exec --package tsx -- tsx --test",
     "lint": "npm run lint:js && npm run lint:py && npm run lint:rust",
     "lint:js": "eslint . && npm run build",
     "lint:py": "cd sidecar && uv run ruff check src tests && uv run ruff format --check src tests && uv run ty check .",

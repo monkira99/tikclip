@@ -6,8 +6,8 @@ import {
   FLOW_CANVAS_PAD,
 } from "@/components/flows/canvas/flow-canvas-layout";
 import { FlowCanvasNode } from "@/components/flows/canvas/flow-canvas-node";
-import { getFlowNodeStatus } from "@/components/flows/flow-node-utils";
-import type { FlowEditorPayload, FlowNodeKey } from "@/types";
+import { deriveCanvasNodeStateMap } from "@/components/flows/canvas/flow-canvas-runtime-state";
+import type { FlowEditorPayload, FlowNodeKey, FlowRuntimeSnapshot } from "@/types";
 
 /** Vertical center of the node row inside `sceneHeight` (top margin + NODE_H + bottom margin). */
 const ROW_Y = 120;
@@ -57,22 +57,14 @@ function summarizeDraft(nodeKey: FlowNodeKey, draft: string): string {
   }
 }
 
-function runtimeLabel(flow: FlowEditorPayload["flow"] | null, nodeKey: FlowNodeKey): string {
-  if (!flow) {
-    return "—";
-  }
-  const pipe = getFlowNodeStatus(flow, nodeKey);
-  const status = flow.status;
-  return `${pipe} · ${status}`;
-}
-
 export type FlowCanvasProps = {
   flow: FlowEditorPayload | null;
   selectedNode: FlowNodeKey | null;
+  runtimeSnapshot?: FlowRuntimeSnapshot | null;
   onSelectNode: (node: FlowNodeKey) => void;
 };
 
-export function FlowCanvas({ flow, selectedNode, onSelectNode }: FlowCanvasProps) {
+export function FlowCanvas({ flow, selectedNode, runtimeSnapshot = null, onSelectNode }: FlowCanvasProps) {
   const arrowMarkerId = useId().replace(/:/g, "");
   const markerEndUrl = `url(#${arrowMarkerId})`;
 
@@ -83,6 +75,17 @@ export function FlowCanvas({ flow, selectedNode, onSelectNode }: FlowCanvasProps
     }
     return map;
   }, [flow?.nodes]);
+
+  const runtimeStateByNode = useMemo(
+    () =>
+      deriveCanvasNodeStateMap({
+        flowEnabled: flow?.flow.enabled ?? true,
+        runs: flow?.runs ?? [],
+        nodeRuns: flow?.nodeRuns ?? [],
+        runtimeSnapshot,
+      }),
+    [flow?.flow.enabled, flow?.nodeRuns, flow?.runs, runtimeSnapshot],
+  );
 
   const sceneWidth = Math.max(...NODE_SCENE.map((n) => n.x)) + FLOW_CANVAS_NODE_W + 80;
   const sceneHeight = Math.max(...NODE_SCENE.map((n) => n.y)) + FLOW_CANVAS_NODE_H + 80;
@@ -110,7 +113,7 @@ export function FlowCanvas({ flow, selectedNode, onSelectNode }: FlowCanvasProps
   });
 
   return (
-    <div className="app-panel-subtle flex min-h-[280px] items-center overflow-x-auto rounded-2xl">
+    <div className="app-panel-subtle flex min-h-[360px] items-center overflow-x-auto rounded-2xl">
       <div
         className="relative shrink-0 p-6"
         style={{ width: sceneWidth, minWidth: "100%", height: shellHeight }}
@@ -142,14 +145,19 @@ export function FlowCanvas({ flow, selectedNode, onSelectNode }: FlowCanvasProps
           const published = def?.published_config_json ?? "{}";
           const hasDraft = def ? nodeHasDraftChanges(draft, published) : false;
           const summary = summarizeDraft(key, draft);
+          const runtimeState = runtimeStateByNode[key];
           return (
             <FlowCanvasNode
               key={key}
               nodeKey={key}
               selected={selectedNode === key}
               hasDraftChanges={hasDraft}
-              runtimeState={runtimeLabel(flow?.flow ?? null, key)}
+              runtimeState={runtimeState.runtimeLabel}
               summary={summary}
+              visualState={runtimeState.visualState}
+              badgeLabel={runtimeState.badgeLabel}
+              inlineDetail={runtimeState.inlineDetail}
+              activeMarker={runtimeState.activeMarker}
               onClick={() => onSelectNode(key)}
               style={{
                 left: x,

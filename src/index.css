@@ -176,6 +176,31 @@
   color: var(--color-text);
 }
 
+@keyframes runtime-pulse {
+  0%,
+  100% {
+    opacity: 0.28;
+    transform: scale(0.985);
+  }
+
+  50% {
+    opacity: 0.62;
+    transform: scale(1.02);
+  }
+}
+
+.runtime-pulse {
+  animation: runtime-pulse 1.8s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .runtime-pulse {
+    animation: none;
+    transform: none;
+  }
+}
+
 .app-panel {
   background: var(--color-bg-elevated);
   border: 1px solid rgba(255, 255, 255, 0.06);
