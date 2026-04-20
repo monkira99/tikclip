@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import type { FlowContext, FlowRuntimeSnapshot } from "@/types";
 
+import { deriveCanvasNodeStateMap } from "./canvas/flow-canvas-runtime-state";
 import { buildRuntimeLogsPanelFlow } from "./flow-detail";
 
 function createFlow(overrides: Partial<FlowContext> = {}): FlowContext {
@@ -58,4 +59,33 @@ test("buildRuntimeLogsPanelFlow overlays runtime snapshot summary fields onto th
   assert.equal(panelFlow.current_node, "clip");
   assert.equal(panelFlow.last_live_at, "2026-04-19T10:01:02.345+07:00");
   assert.equal(panelFlow.last_error, null);
+});
+
+test("runtime snapshot overlay keeps canvas helper focused on node-level state only", () => {
+  const runtimeSnapshot = createRuntimeSnapshot({
+    status: "processing",
+    current_node: "clip",
+    last_live_at: "2026-04-19T10:01:02.345+07:00",
+    last_error: null,
+  });
+
+  const panelFlow = buildRuntimeLogsPanelFlow(
+    createFlow({
+      status: "watching",
+      current_node: "start",
+      last_live_at: null,
+      last_error: "stale error",
+    }),
+    runtimeSnapshot,
+  );
+  const nodeStateMap = deriveCanvasNodeStateMap({
+    runs: [],
+    nodeRuns: [],
+    runtimeSnapshot,
+  });
+
+  assert.equal(panelFlow.current_node, "clip");
+  assert.equal(panelFlow.status, "processing");
+  assert.equal(nodeStateMap.clip.visualState, "running");
+  assert.equal(nodeStateMap.clip.runtimeLabel, "Creating clips");
 });
