@@ -30,12 +30,14 @@ function createRuntimeSnapshot(
   return {
     flow_id: overrides.flow_id ?? 7,
     status: overrides.status ?? "processing",
-    current_node: overrides.current_node ?? "clip",
+    current_node: "current_node" in overrides ? overrides.current_node ?? null : "clip",
     account_id: overrides.account_id ?? 44,
     username: overrides.username ?? "shop_abc",
-    last_live_at: overrides.last_live_at ?? "2026-04-19T10:01:02.345+07:00",
-    last_error: overrides.last_error ?? null,
-    active_flow_run_id: overrides.active_flow_run_id ?? 42,
+    last_live_at:
+      "last_live_at" in overrides ? overrides.last_live_at ?? null : "2026-04-19T10:01:02.345+07:00",
+    last_error: "last_error" in overrides ? overrides.last_error ?? null : null,
+    active_flow_run_id:
+      "active_flow_run_id" in overrides ? overrides.active_flow_run_id ?? null : 42,
   };
 }
 
@@ -77,6 +79,29 @@ test("buildRuntimeLogsPanelFlow overlays runtime snapshot summary fields onto th
   assert.equal(panelFlow.status, "processing");
   assert.equal(panelFlow.current_node, "clip");
   assert.equal(panelFlow.last_live_at, "2026-04-19T10:01:02.345+07:00");
+  assert.equal(panelFlow.last_error, null);
+});
+
+test("buildRuntimeLogsPanelFlow preserves intentional null runtime fields instead of falling back to persisted flow values", () => {
+  const panelFlow = buildRuntimeLogsPanelFlow(
+    createFlow({
+      status: "watching",
+      current_node: "start",
+      last_live_at: "2026-04-19T09:45:00.000+07:00",
+      last_error: "stale error",
+    }),
+    createRuntimeSnapshot({
+      status: "idle",
+      current_node: null,
+      last_live_at: null,
+      last_error: null,
+      active_flow_run_id: null,
+    }),
+  );
+
+  assert.equal(panelFlow.status, "idle");
+  assert.equal(panelFlow.current_node, null);
+  assert.equal(panelFlow.last_live_at, null);
   assert.equal(panelFlow.last_error, null);
 });
 

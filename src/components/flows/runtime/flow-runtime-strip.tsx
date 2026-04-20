@@ -1,5 +1,4 @@
 import { FLOW_NODE_LABEL } from "@/components/flows/flow-node-utils";
-import { deriveCanvasNodeStateMap } from "@/components/flows/canvas/flow-canvas-runtime-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -40,36 +39,30 @@ function formatLogCountLabel(count: number): string {
   return count > 0 ? `${count} logs` : "No logs loaded";
 }
 
-function derivePrimaryRuntimeCopy(runtimeSnapshot: FlowRuntimeSnapshot | null): {
+function derivePrimaryRuntimeCopy(flow: FlowContext): {
   title: string;
   detail: string | null;
 } {
-  if (!runtimeSnapshot) {
+  if (flow.status === "error") {
     return {
-      title: "Not running",
+      title: flow.current_node ? `${FLOW_NODE_LABEL[flow.current_node]} failed` : "Runtime failed",
+      detail: flow.last_error,
+    };
+  }
+
+  if (flow.current_node != null) {
+    return {
+      title:
+        flow.current_node === "start"
+          ? "Watching for live"
+          : flow.current_node === "record"
+            ? "Recording live"
+            : flow.current_node === "clip"
+              ? "Creating clips"
+              : flow.current_node === "caption"
+                ? "Generating captions"
+                : "Waiting for upload",
       detail: null,
-    };
-  }
-
-  const stateMap = deriveCanvasNodeStateMap({
-    runs: [],
-    nodeRuns: [],
-    runtimeSnapshot,
-  });
-  const currentNode = runtimeSnapshot.current_node;
-
-  if (currentNode != null) {
-    const nodeState = stateMap[currentNode];
-    return {
-      title: nodeState.runtimeLabel,
-      detail: nodeState.inlineDetail,
-    };
-  }
-
-  if (runtimeSnapshot.status === "error") {
-    return {
-      title: "Runtime failed",
-      detail: runtimeSnapshot.last_error,
     };
   }
 
@@ -85,8 +78,7 @@ export function FlowRuntimeStrip({
   runtimeLogsCount,
   onOpenDiagnostics,
 }: FlowRuntimeStripProps) {
-  const currentStatus = runtimeSnapshot?.status ?? flow.status;
-  const primaryCopy = derivePrimaryRuntimeCopy(runtimeSnapshot);
+  const primaryCopy = derivePrimaryRuntimeCopy(flow);
 
   return (
     <section className="app-panel-subtle rounded-2xl px-4 py-4">
@@ -96,8 +88,8 @@ export function FlowRuntimeStrip({
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
               Runtime Monitor
             </p>
-            <Badge variant="secondary" className={cn("text-[10px] capitalize", STATUS_CLASS[currentStatus])}>
-              {currentStatus}
+            <Badge variant="secondary" className={cn("text-[10px] capitalize", STATUS_CLASS[flow.status])}>
+              {flow.status}
             </Badge>
           </div>
 
@@ -115,7 +107,7 @@ export function FlowRuntimeStrip({
               <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-soft)]">
                 Node
               </p>
-              <p className="mt-1 text-sm text-[var(--color-text)]">{formatNodeLabel(runtimeSnapshot?.current_node ?? flow.current_node)}</p>
+              <p className="mt-1 text-sm text-[var(--color-text)]">{formatNodeLabel(flow.current_node)}</p>
             </div>
             <div className="rounded-xl border border-[var(--color-border)] bg-white/[0.02] px-3 py-2">
               <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-soft)]">
@@ -134,7 +126,7 @@ export function FlowRuntimeStrip({
                 Last live
               </p>
               <p className="mt-1 text-sm text-[var(--color-text)]">
-                {formatLastLiveLabel(runtimeSnapshot?.last_live_at ?? flow.last_live_at)}
+                {formatLastLiveLabel(flow.last_live_at)}
               </p>
             </div>
           </div>

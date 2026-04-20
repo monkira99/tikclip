@@ -226,7 +226,7 @@ export function FlowDetail({ flowId, onBack }: FlowDetailProps) {
 
       {flow ? (
         <FlowRuntimeStrip
-          flow={flow.flow}
+          flow={runtimePanelFlow ?? flow.flow}
           runtimeSnapshot={runtimeSnapshot}
           runtimeLogsCount={flowLogs.length}
           onOpenDiagnostics={() => setDiagnosticsOpen(true)}

@@ -13,10 +13,10 @@ function createFlow(overrides: Partial<FlowContext> = {}): FlowContext {
     name: overrides.name ?? "Night Shift Recorder",
     enabled: overrides.enabled ?? true,
     status: overrides.status ?? "watching",
-    current_node: overrides.current_node ?? "start",
-    last_live_at: overrides.last_live_at ?? null,
+    current_node: "current_node" in overrides ? overrides.current_node ?? null : "start",
+    last_live_at: "last_live_at" in overrides ? overrides.last_live_at ?? null : null,
     last_run_at: overrides.last_run_at ?? "2026-04-19T09:40:00.000+07:00",
-    last_error: overrides.last_error ?? null,
+    last_error: "last_error" in overrides ? overrides.last_error ?? null : null,
     published_version: overrides.published_version ?? 3,
     draft_version: overrides.draft_version ?? 4,
     created_at: overrides.created_at ?? "2026-04-18T22:10:00.000+07:00",
@@ -30,12 +30,14 @@ function createRuntimeSnapshot(
   return {
     flow_id: overrides.flow_id ?? 7,
     status: overrides.status ?? "processing",
-    current_node: overrides.current_node ?? "clip",
+    current_node: "current_node" in overrides ? overrides.current_node ?? null : "clip",
     account_id: overrides.account_id ?? 44,
     username: overrides.username ?? "shop_abc",
-    last_live_at: overrides.last_live_at ?? "2026-04-19T10:01:02.345+07:00",
-    last_error: overrides.last_error ?? null,
-    active_flow_run_id: overrides.active_flow_run_id ?? 42,
+    last_live_at:
+      "last_live_at" in overrides ? overrides.last_live_at ?? null : "2026-04-19T10:01:02.345+07:00",
+    last_error: "last_error" in overrides ? overrides.last_error ?? null : null,
+    active_flow_run_id:
+      "active_flow_run_id" in overrides ? overrides.active_flow_run_id ?? null : 42,
   };
 }
 
@@ -43,9 +45,9 @@ test("FlowRuntimeStrip renders live runtime summary and diagnostics affordance",
   const markup = renderToStaticMarkup(
     <FlowRuntimeStrip
       flow={createFlow({
-        status: "watching",
-        current_node: "start",
-        last_live_at: null,
+        status: "processing",
+        current_node: "clip",
+        last_live_at: "2026-04-19T10:01:02.345+07:00",
       })}
       runtimeSnapshot={createRuntimeSnapshot({
         status: "processing",
@@ -70,9 +72,10 @@ test("FlowRuntimeStrip surfaces last error and empty log state when runtime is d
   const markup = renderToStaticMarkup(
     <FlowRuntimeStrip
       flow={createFlow({
-        status: "watching",
-        current_node: "start",
-        last_error: "stale error",
+        status: "error",
+        current_node: "caption",
+        last_live_at: null,
+        last_error: "Caption worker crashed",
       })}
       runtimeSnapshot={createRuntimeSnapshot({
         status: "error",
@@ -108,4 +111,31 @@ test("FlowRuntimeStrip falls back to non-running copy without a runtime snapshot
 
   assert.match(markup, /Not running/);
   assert.match(markup, /No recent live signal/);
+});
+
+test("FlowRuntimeStrip respects canonical overlaid null runtime fields without falling back to persisted values", () => {
+  const markup = renderToStaticMarkup(
+    <FlowRuntimeStrip
+      flow={createFlow({
+        status: "idle",
+        current_node: null,
+        last_live_at: null,
+        last_error: null,
+      })}
+      runtimeSnapshot={createRuntimeSnapshot({
+        status: "processing",
+        current_node: "clip",
+        last_live_at: "2026-04-19T10:01:02.345+07:00",
+        active_flow_run_id: null,
+      })}
+      runtimeLogsCount={0}
+      onOpenDiagnostics={() => {}}
+    />,
+  );
+
+  assert.match(markup, /Not running/);
+  assert.match(markup, /Waiting/);
+  assert.match(markup, /No recent live signal/);
+  assert.doesNotMatch(markup, />Clip</);
+  assert.doesNotMatch(markup, /2026-04-19T10:01:02.345\+07:00/);
 });
