@@ -1,156 +1,43 @@
 use serde_json::Value;
 
+use super::check_live::{
+    extract_room_id_from_live_html, merge_live_status_from_room_payload,
+    pick_stream_url_from_room_payload,
+};
 use super::types::LiveStatus;
 
 #[cfg_attr(not(test), allow(dead_code))]
-const STREAM_QUALITY_ORDER: &[&str] = &["FULL_HD1", "HD1", "SD1", "SD2"];
-
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn normalize_cookie_header(raw: &str) -> Result<String, String> {
-    if raw.trim().is_empty() {
-        return Ok(String::new());
-    }
-
-    let value: Value = serde_json::from_str(raw).map_err(|e| e.to_string())?;
-    let object = value
-        .as_object()
-        .ok_or_else(|| "cookies_json must be a JSON object".to_string())?;
-
-    Ok(object
-        .iter()
-        .filter_map(|(key, value)| value.as_str().map(|value| format!("{key}={value}")))
-        .collect::<Vec<_>>()
-        .join("; "))
+    super::http_transport::normalize_cookie_header(raw)
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn proxy_url_for_reqwest(raw: Option<&str>) -> Result<Option<String>, String> {
-    let trimmed = raw.unwrap_or_default().trim();
-    if trimmed.is_empty() {
-        return Ok(None);
-    }
-    if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
-        return Err("proxy_url must start with http:// or https://".to_string());
-    }
-
-    reqwest::Proxy::all(trimmed).map_err(|e| e.to_string())?;
-    Ok(Some(trimmed.to_string()))
+    super::http_transport::proxy_url_for_reqwest(raw)
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn extract_room_id_from_html(html: &str) -> Option<String> {
-    const PREFIXES: &[&str] = &[
-        "\"roomId\":\"",
-        "\"room_id\":\"",
-        "\"room_id\":",
-        "room_id=",
-        "roomId=",
-        "\"id_str\":\"",
-        "\"web_rid\":\"",
-    ];
-
-    for prefix in PREFIXES {
-        if let Some(index) = html.find(prefix) {
-            let suffix = &html[index + prefix.len()..];
-            let digits: String = suffix.chars().take_while(|c| c.is_ascii_digit()).collect();
-            if digits.len() >= 5 {
-                return Some(digits);
-            }
-        }
-    }
-
-    if let Some(index) = html.find("room/") {
-        let suffix = &html[index + "room/".len()..];
-        let digits: String = suffix.chars().take_while(|c| c.is_ascii_digit()).collect();
-        if digits.len() >= 10 {
-            return Some(digits);
-        }
-    }
-
-    None
-}
-
-fn choose_stream_url(room: &Value) -> Option<String> {
-    let stream_url = room.get("stream_url")?;
-
-    for field in ["flv_pull_url", "hls_pull_url_map", "hls_pull_url"] {
-        if let Some(map) = stream_url.get(field).and_then(Value::as_object) {
-            for quality in STREAM_QUALITY_ORDER {
-                if let Some(url) = map.get(*quality).and_then(Value::as_str) {
-                    if !url.is_empty() {
-                        return Some(url.to_string());
-                    }
-                }
-            }
-            if let Some(url) = map.values().find_map(Value::as_str) {
-                if !url.is_empty() {
-                    return Some(url.to_string());
-                }
-            }
-        }
-    }
-
-    for field in ["flv_pull_url", "hls_pull_url"] {
-        if let Some(url) = stream_url.get(field).and_then(Value::as_str) {
-            if !url.is_empty() {
-                return Some(url.to_string());
-            }
-        }
-    }
-
-    None
-}
-
-fn live_status_value(room: &Value) -> Option<i64> {
-    room.get("LiveRoomInfo")
-        .and_then(|value| value.get("status"))
-        .and_then(Value::as_i64)
-        .or_else(|| room.get("status").and_then(Value::as_i64))
-}
-
-fn room_id_value(room: &Value) -> Option<String> {
-    for field in ["id_str", "room_id", "web_rid"] {
-        if let Some(value) = room.get(field) {
-            if let Some(room_id) = value.as_str() {
-                if !room_id.is_empty() {
-                    return Some(room_id.to_string());
-                }
-            }
-
-            if let Some(room_id) = value.as_i64() {
-                return Some(room_id.to_string());
-            }
-        }
-    }
-
-    None
-}
-
-fn viewer_count_value(room: &Value) -> Option<i64> {
-    room.get("LiveRoomInfo")
-        .and_then(|value| value.get("liveRoomStats"))
-        .and_then(|value| value.get("userCount"))
-        .and_then(Value::as_i64)
-        .or_else(|| room.get("owner_count").and_then(Value::as_i64))
-        .or_else(|| room.get("user_count").and_then(Value::as_i64))
-        .or_else(|| room.get("viewer_count").and_then(Value::as_i64))
+    extract_room_id_from_live_html(html)
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn parse_room_info_live_status(body: &str) -> Result<Option<LiveStatus>, String> {
     let value: Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
     let room = &value["data"]["room"];
-    if live_status_value(room).unwrap_or_default() != 2 {
+    let merged = merge_live_status_from_room_payload(room);
+    if !merged.is_live {
         return Ok(None);
     }
 
-    let room_id = room_id_value(room).unwrap_or_default();
-    let stream_url = choose_stream_url(room).ok_or_else(|| "missing stream_url".to_string())?;
+    let room_id = merged.room_id.unwrap_or_default();
+    let stream_url =
+        pick_stream_url_from_room_payload(room).ok_or_else(|| "missing stream_url".to_string())?;
 
     Ok(Some(LiveStatus {
         room_id,
         stream_url: Some(stream_url),
-        viewer_count: viewer_count_value(room),
+        viewer_count: merged.viewer_count,
     }))
 }
 
@@ -164,19 +51,14 @@ pub fn parse_check_alive_live_status(body: &str) -> Result<Option<LiveStatus>, S
         .and_then(|rows| rows.first())
         .unwrap_or(data);
 
-    if first_row["alive"].as_i64().unwrap_or_default() != 1 {
+    let merged = merge_live_status_from_room_payload(first_row);
+    if !merged.is_live {
         return Ok(None);
     }
 
-    let room_id = first_row["room_id"]
-        .as_str()
-        .unwrap_or_default()
-        .to_string();
-    let stream_url = first_row["stream_url"].as_str().map(str::to_string);
-
     Ok(Some(LiveStatus {
-        room_id,
-        stream_url,
+        room_id: merged.room_id.unwrap_or_default(),
+        stream_url: merged.stream_url,
         viewer_count: None,
     }))
 }
