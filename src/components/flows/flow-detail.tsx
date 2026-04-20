@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FlowCanvas } from "@/components/flows/canvas/flow-canvas";
 import { CaptionNodeModal } from "@/components/flows/modals/caption-node-modal";
 import { ClipNodeModal } from "@/components/flows/modals/clip-node-modal";
@@ -45,12 +45,18 @@ export function shouldFetchDiagnosticsLogs({
   diagnosticsOpen,
   runtimeLogs,
   flowId,
+  hasFetchedInOpenCycle,
 }: {
   diagnosticsOpen: boolean;
   runtimeLogs: Record<number, FlowRuntimeLogEntry[]>;
   flowId: number;
+  hasFetchedInOpenCycle: boolean;
 }): boolean {
   if (!diagnosticsOpen) {
+    return false;
+  }
+
+  if (hasFetchedInOpenCycle) {
     return false;
   }
 
@@ -77,16 +83,28 @@ export function FlowDetail({ flowId, onBack }: FlowDetailProps) {
   const [publishError, setPublishError] = useState<string | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const diagnosticsFetchedInOpenCycleRef = useRef(false);
 
   useEffect(() => {
     void fetchFlowDetail(flowId);
   }, [flowId, fetchFlowDetail]);
 
   useEffect(() => {
-    if (!shouldFetchDiagnosticsLogs({ diagnosticsOpen, runtimeLogs, flowId })) {
+    if (!diagnosticsOpen) {
+      diagnosticsFetchedInOpenCycleRef.current = false;
       return;
     }
 
+    if (!shouldFetchDiagnosticsLogs({
+      diagnosticsOpen,
+      runtimeLogs,
+      flowId,
+      hasFetchedInOpenCycle: diagnosticsFetchedInOpenCycleRef.current,
+    })) {
+      return;
+    }
+
+    diagnosticsFetchedInOpenCycleRef.current = true;
     void fetchRuntimeLogs(flowId);
   }, [diagnosticsOpen, fetchRuntimeLogs, flowId, runtimeLogs]);
 

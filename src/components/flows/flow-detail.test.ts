@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import type { FlowContext, FlowRuntimeSnapshot } from "@/types";
+import type { FlowContext, FlowRuntimeLogEntry, FlowRuntimeSnapshot } from "@/types";
 
 import { deriveCanvasNodeStateMap } from "./canvas/flow-canvas-runtime-state";
 import { buildRuntimeLogsPanelFlow, shouldFetchDiagnosticsLogs } from "./flow-detail";
@@ -36,6 +36,25 @@ function createRuntimeSnapshot(
     last_live_at: overrides.last_live_at ?? "2026-04-19T10:01:02.345+07:00",
     last_error: overrides.last_error ?? null,
     active_flow_run_id: overrides.active_flow_run_id ?? 42,
+  };
+}
+
+function createRuntimeLogEntry(
+  overrides: Partial<FlowRuntimeLogEntry> & Pick<FlowRuntimeLogEntry, "id">,
+): FlowRuntimeLogEntry {
+  return {
+    id: overrides.id,
+    timestamp: overrides.timestamp ?? "2026-04-19T09:41:12.381+07:00",
+    level: overrides.level ?? "info",
+    flow_id: overrides.flow_id ?? 7,
+    flow_run_id: overrides.flow_run_id ?? 42,
+    external_recording_id:
+      overrides.external_recording_id === undefined ? null : overrides.external_recording_id,
+    stage: overrides.stage ?? "record",
+    event: overrides.event ?? "record_spawned",
+    code: overrides.code === undefined ? null : overrides.code,
+    message: overrides.message ?? "Spawned Rust-owned recording worker",
+    context: overrides.context === undefined ? { room_id: "7312345" } : overrides.context,
   };
 }
 
@@ -96,6 +115,7 @@ test("shouldFetchDiagnosticsLogs is false when diagnostics is closed", () => {
       diagnosticsOpen: false,
       runtimeLogs: {},
       flowId: 7,
+      hasFetchedInOpenCycle: false,
     }),
     false,
   );
@@ -107,6 +127,7 @@ test("shouldFetchDiagnosticsLogs is true when diagnostics opens and bucket is mi
       diagnosticsOpen: true,
       runtimeLogs: {},
       flowId: 7,
+      hasFetchedInOpenCycle: false,
     }),
     true,
   );
@@ -118,6 +139,7 @@ test("shouldFetchDiagnosticsLogs is true when diagnostics opens and bucket is em
       diagnosticsOpen: true,
       runtimeLogs: { 7: [] },
       flowId: 7,
+      hasFetchedInOpenCycle: false,
     }),
     true,
   );
@@ -128,24 +150,35 @@ test("shouldFetchDiagnosticsLogs is false when diagnostics opens and bucket alre
     shouldFetchDiagnosticsLogs({
       diagnosticsOpen: true,
       runtimeLogs: {
-        7: [
-          {
-            id: "log-1",
-            timestamp: "2026-04-19T09:41:12.381+07:00",
-            level: "info",
-            flow_id: 7,
-            flow_run_id: 42,
-            external_recording_id: null,
-            stage: "record",
-            event: "record_spawned",
-            code: null,
-            message: "Spawned Rust-owned recording worker",
-            context: { room_id: "7312345" },
-          },
-        ],
+        7: [createRuntimeLogEntry({ id: "log-1" })],
       },
       flowId: 7,
+      hasFetchedInOpenCycle: false,
     }),
     false,
+  );
+});
+
+test("shouldFetchDiagnosticsLogs is false after an empty diagnostics fetch already completed in the same open cycle", () => {
+  assert.equal(
+    shouldFetchDiagnosticsLogs({
+      diagnosticsOpen: true,
+      runtimeLogs: { 7: [] },
+      flowId: 7,
+      hasFetchedInOpenCycle: true,
+    }),
+    false,
+  );
+});
+
+test("shouldFetchDiagnosticsLogs allows a new open cycle to fetch an existing empty bucket again", () => {
+  assert.equal(
+    shouldFetchDiagnosticsLogs({
+      diagnosticsOpen: true,
+      runtimeLogs: { 7: [] },
+      flowId: 7,
+      hasFetchedInOpenCycle: false,
+    }),
+    true,
   );
 });
