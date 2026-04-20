@@ -15,6 +15,7 @@ import type {
   FlowContext,
   FlowEditorPayload,
   FlowNodeKey,
+  FlowStatus,
   FlowRuntimeSnapshot,
 } from "@/types";
 
@@ -22,6 +23,16 @@ type FlowDetailProps = {
   flowId: number;
   onBack: () => void;
 };
+
+function normalizeRuntimePanelStatus(status: FlowStatus, enabled: boolean): FlowStatus {
+  if (!enabled) {
+    return "disabled";
+  }
+  if (status === "disabled") {
+    return "idle";
+  }
+  return status;
+}
 
 export function buildRuntimeLogsPanelFlow(
   flow: FlowContext,
@@ -33,7 +44,7 @@ export function buildRuntimeLogsPanelFlow(
 
   return {
     ...flow,
-    status: runtimeSnapshot.status,
+    status: normalizeRuntimePanelStatus(runtimeSnapshot.status, flow.enabled),
     current_node: runtimeSnapshot.current_node,
     last_live_at: runtimeSnapshot.last_live_at,
     last_error: runtimeSnapshot.last_error,

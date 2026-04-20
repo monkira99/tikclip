@@ -86,6 +86,27 @@ test("buildRuntimeLogsPanelFlow preserves intentional null runtime fields instea
   assert.equal(panelFlow.last_error, null);
 });
 
+test("buildRuntimeLogsPanelFlow keeps disabled status for disabled flows even when runtime snapshot is active", () => {
+  for (const runtimeStatus of ["watching", "recording", "processing"] as const) {
+    const panelFlow = buildRuntimeLogsPanelFlow(
+      createFlow({
+        enabled: false,
+        status: "disabled",
+        current_node: null,
+        last_live_at: null,
+        last_error: null,
+      }),
+      createRuntimeSnapshot({
+        status: runtimeStatus,
+        current_node: "record",
+        last_live_at: "2026-04-19T10:01:02.345+07:00",
+      }),
+    );
+
+    assert.equal(panelFlow.status, "disabled");
+  }
+});
+
 test("runtime snapshot overlay keeps canvas helper focused on node-level state only", () => {
   const runtimeSnapshot = createRuntimeSnapshot({
     status: "processing",
