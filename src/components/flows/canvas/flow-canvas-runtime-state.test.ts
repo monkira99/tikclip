@@ -136,3 +136,55 @@ test("deriveCanvasNodeStateMap omits done state when no reliable run-scoped node
   assert.equal(stateMap.clip.visualState, "idle");
   assert.equal(stateMap.clip.badgeLabel, null);
 });
+
+test("deriveCanvasNodeStateMap does not render running for idle or disabled snapshots", () => {
+  const idleStateMap = deriveCanvasNodeStateMap({
+    runs: [],
+    nodeRuns: [],
+    runtimeSnapshot: createSnapshot({ status: "idle", current_node: "clip", active_flow_run_id: null }),
+  });
+  const disabledStateMap = deriveCanvasNodeStateMap({
+    runs: [],
+    nodeRuns: [],
+    runtimeSnapshot: createSnapshot({ status: "disabled", current_node: "record", active_flow_run_id: null }),
+  });
+
+  assert.equal(idleStateMap.clip.visualState, "idle");
+  assert.equal(idleStateMap.clip.badgeLabel, null);
+  assert.equal(disabledStateMap.record.visualState, "idle");
+  assert.equal(disabledStateMap.record.badgeLabel, null);
+});
+
+test("deriveCanvasNodeStateMap does not leak historical node rows into active snapshots without confirmed run id", () => {
+  const stateMap = deriveCanvasNodeStateMap({
+    runs: [createRun({ id: 41, status: "completed", started_at: "2026-04-20T11:00:00.000+07:00" })],
+    nodeRuns: [
+      createNodeRun({
+        id: 10,
+        flow_run_id: 41,
+        node_key: "clip",
+        status: "completed",
+        started_at: "2026-04-20T11:01:00.000+07:00",
+      }),
+      createNodeRun({
+        id: 11,
+        flow_run_id: 41,
+        node_key: "caption",
+        status: "failed",
+        started_at: "2026-04-20T11:02:00.000+07:00",
+        error: "old caption error",
+      }),
+    ],
+    runtimeSnapshot: createSnapshot({
+      status: "processing",
+      current_node: "record",
+      active_flow_run_id: null,
+    }),
+  });
+
+  assert.equal(stateMap.record.visualState, "running");
+  assert.equal(stateMap.clip.visualState, "idle");
+  assert.equal(stateMap.clip.badgeLabel, null);
+  assert.equal(stateMap.caption.visualState, "idle");
+  assert.equal(stateMap.caption.badgeLabel, null);
+});

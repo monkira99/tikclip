@@ -25,6 +25,8 @@ const ACTIVE_RUNTIME_LABEL: Partial<Record<FlowNodeKey, string>> = {
   upload: "Waiting for upload",
 };
 
+const ACTIVE_SNAPSHOT_STATUSES = new Set(["watching", "recording", "processing"]);
+
 function isNodeRunMoreRecent(a: FlowNodeRunRow, b: FlowNodeRunRow): number {
   const aAt = a.started_at ?? a.ended_at ?? "";
   const bAt = b.started_at ?? b.ended_at ?? "";
@@ -76,10 +78,14 @@ export function deriveCanvasNodeStateMap({
   nodeRuns,
   runtimeSnapshot,
 }: DeriveCanvasNodeStateArgs): Record<FlowNodeKey, CanvasNodeRuntimeState> {
-  const activeRunId = deriveActiveRunId(runs, runtimeSnapshot);
+  const snapshotStatus = runtimeSnapshot?.status ?? null;
+  const snapshotIsActive = snapshotStatus != null && ACTIVE_SNAPSHOT_STATUSES.has(snapshotStatus);
+  const activeRunId = snapshotIsActive && runtimeSnapshot?.active_flow_run_id == null
+    ? null
+    : deriveActiveRunId(runs, runtimeSnapshot);
   const latestByKey = latestNodeRunByKey(nodeRuns, activeRunId);
   const currentNode = runtimeSnapshot?.current_node ?? null;
-  const snapshotIsError = runtimeSnapshot?.status === "error";
+  const snapshotIsError = snapshotStatus === "error";
 
   return Object.fromEntries(
     FLOW_NODE_ORDER.map((nodeKey) => {
@@ -98,7 +104,7 @@ export function deriveCanvasNodeStateMap({
         ];
       }
 
-      if (currentNode === nodeKey) {
+      if (snapshotIsActive && currentNode === nodeKey) {
         return [
           nodeKey,
           {
