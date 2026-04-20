@@ -357,30 +357,6 @@ export async function listLiveRuntimeLogs(
   return invoke<FlowRuntimeLogEntry[]>("list_live_runtime_logs", { flowId, limit });
 }
 
-export async function triggerStartLiveDetected(input: {
-  flow_id: number;
-  room_id: string;
-  stream_url?: string | null;
-  viewer_count?: number | null;
-}): Promise<number | null> {
-  return invoke<number | null>("trigger_start_live_detected", {
-    input: {
-      flow_id: input.flow_id,
-      room_id: input.room_id,
-      stream_url:
-        input.stream_url === undefined || input.stream_url === null ? undefined : input.stream_url,
-      viewer_count:
-        input.viewer_count === undefined || input.viewer_count === null
-          ? undefined
-          : input.viewer_count,
-    },
-  });
-}
-
-export async function markSourceOffline(flowId: number): Promise<void> {
-  await invoke("mark_source_offline", { flowId });
-}
-
 export async function createFlow(input: CreateFlowInput): Promise<number> {
   return invoke<number>("create_flow", { input });
 }
@@ -445,8 +421,6 @@ export async function updateFlow(flowId: number, input: UpdateFlowInput): Promis
 }
 
 export type SidecarFlowRuntimeHint =
-  | "account_live"
-  | "account_offline"
   | "recording_started"
   | "recording_finished"
   | "clip_ready"

@@ -242,49 +242,14 @@ function parseClipId(raw: unknown): number | null {
   return Math.trunc(id);
 }
 
-function parseViewerCount(raw: unknown): number | null {
-  const value =
-    typeof raw === "number"
-      ? raw
-      : typeof raw === "string"
-        ? Number(raw)
-        : NaN;
-  if (!Number.isFinite(value)) {
-    return null;
-  }
-  return Math.trunc(value);
+export function shouldTriggerRustLiveIngressFromSidecar(): boolean {
+  return false;
 }
 
-async function triggerRustRuntimeLiveDetectedForAccount(
-  accountId: number,
-  data: Record<string, unknown>,
-): Promise<void> {
-  const roomId = typeof data.room_id === "string" ? data.room_id.trim() : "";
-  const streamUrlRaw = typeof data.stream_url === "string" ? data.stream_url.trim() : "";
-  const streamUrl = streamUrlRaw !== "" ? streamUrlRaw : null;
-  const viewerCount = parseViewerCount(data.viewer_count);
-  const snapshots = await api.listLiveRuntimeSessions();
-  useFlowStore.getState().applyRuntimeSnapshots(snapshots);
-  const snapshot = snapshots.find((row) => row.account_id === accountId);
-  if (!snapshot || roomId === "" || !streamUrl) {
-    return;
+export function maybeTriggerRustRuntimeIngressRefresh(refreshRuntime: () => void): void {
+  if (shouldTriggerRustLiveIngressFromSidecar()) {
+    refreshRuntime();
   }
-  await api.triggerStartLiveDetected({
-    flow_id: snapshot.flow_id,
-    room_id: roomId,
-    stream_url: streamUrl,
-    viewer_count: viewerCount,
-  });
-}
-
-async function markRustRuntimeOfflineForAccount(accountId: number): Promise<void> {
-  const snapshots = await api.listLiveRuntimeSessions();
-  useFlowStore.getState().applyRuntimeSnapshots(snapshots);
-  const snapshot = snapshots.find((row) => row.account_id === accountId);
-  if (!snapshot) {
-    return;
-  }
-  await api.markSourceOffline(snapshot.flow_id);
 }
 
 export function AppShell() {
@@ -466,17 +431,9 @@ export function AppShell() {
       if (id != null) {
         persistLive(id, true, "account_live");
       }
-      void (async () => {
-        try {
-          if (id != null) {
-            await triggerRustRuntimeLiveDetectedForAccount(id, data);
-          }
-        } catch {
-          /* No matching flow is normal. */
-        } finally {
-          void useFlowStore.getState().refreshRuntime();
-        }
-      })();
+      maybeTriggerRustRuntimeIngressRefresh(() => {
+        void useFlowStore.getState().refreshRuntime();
+      });
     });
     const unsubAccountStatus = wsClient.on("account_status", (data) => {
       const rawId = data.account_id;
@@ -491,19 +448,9 @@ export function AppShell() {
       }
       persistLive(id, isLive, "account_status");
       useAppStore.getState().bumpDashboardRevision();
-      void (async () => {
-        try {
-          if (isLive) {
-            await triggerRustRuntimeLiveDetectedForAccount(id, data);
-          } else {
-            await markRustRuntimeOfflineForAccount(id);
-          }
-        } catch {
-          /* No matching flow is normal. */
-        } finally {
-          void useFlowStore.getState().refreshRuntime();
-        }
-      })();
+      maybeTriggerRustRuntimeIngressRefresh(() => {
+        void useFlowStore.getState().refreshRuntime();
+      });
     });
     const unsubClip = wsClient.on("clip_ready", (data) => {
       dispatchSidecarNotification("clip_ready", data);
