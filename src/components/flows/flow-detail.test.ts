@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import type { FlowContext, FlowRuntimeLogEntry, FlowRuntimeSnapshot } from "@/types";
+import type { FlowContext, FlowRuntimeSnapshot } from "@/types";
 
 import { deriveCanvasNodeStateMap } from "./canvas/flow-canvas-runtime-state";
 import { buildRuntimeLogsPanelFlow, shouldFetchDiagnosticsLogs } from "./flow-detail";
@@ -38,25 +38,6 @@ function createRuntimeSnapshot(
     last_error: "last_error" in overrides ? overrides.last_error ?? null : null,
     active_flow_run_id:
       "active_flow_run_id" in overrides ? overrides.active_flow_run_id ?? null : 42,
-  };
-}
-
-function createRuntimeLogEntry(
-  overrides: Partial<FlowRuntimeLogEntry> & Pick<FlowRuntimeLogEntry, "id">,
-): FlowRuntimeLogEntry {
-  return {
-    id: overrides.id,
-    timestamp: overrides.timestamp ?? "2026-04-19T09:41:12.381+07:00",
-    level: overrides.level ?? "info",
-    flow_id: overrides.flow_id ?? 7,
-    flow_run_id: overrides.flow_run_id ?? 42,
-    external_recording_id:
-      overrides.external_recording_id === undefined ? null : overrides.external_recording_id,
-    stage: overrides.stage ?? "record",
-    event: overrides.event ?? "record_spawned",
-    code: overrides.code === undefined ? null : overrides.code,
-    message: overrides.message ?? "Spawned Rust-owned recording worker",
-    context: overrides.context === undefined ? { room_id: "7312345" } : overrides.context,
   };
 }
 
@@ -138,70 +119,56 @@ test("shouldFetchDiagnosticsLogs is false when diagnostics is closed", () => {
   assert.equal(
     shouldFetchDiagnosticsLogs({
       diagnosticsOpen: false,
-      runtimeLogs: {},
-      flowId: 7,
       hasFetchedInOpenCycle: false,
     }),
     false,
   );
 });
 
-test("shouldFetchDiagnosticsLogs is true when diagnostics opens and bucket is missing", () => {
+test("shouldFetchDiagnosticsLogs is true on first open in a cycle when the bucket is missing", () => {
   assert.equal(
     shouldFetchDiagnosticsLogs({
       diagnosticsOpen: true,
-      runtimeLogs: {},
-      flowId: 7,
       hasFetchedInOpenCycle: false,
     }),
     true,
   );
 });
 
-test("shouldFetchDiagnosticsLogs is true when diagnostics opens and bucket is empty", () => {
+test("shouldFetchDiagnosticsLogs is true on first open in a cycle when the bucket is empty", () => {
   assert.equal(
     shouldFetchDiagnosticsLogs({
       diagnosticsOpen: true,
-      runtimeLogs: { 7: [] },
-      flowId: 7,
       hasFetchedInOpenCycle: false,
     }),
     true,
   );
 });
 
-test("shouldFetchDiagnosticsLogs is false when diagnostics opens and bucket already has logs", () => {
+test("shouldFetchDiagnosticsLogs is true on first open in a cycle when the bucket already has logs", () => {
   assert.equal(
     shouldFetchDiagnosticsLogs({
       diagnosticsOpen: true,
-      runtimeLogs: {
-        7: [createRuntimeLogEntry({ id: "log-1" })],
-      },
-      flowId: 7,
       hasFetchedInOpenCycle: false,
     }),
-    false,
+    true,
   );
 });
 
-test("shouldFetchDiagnosticsLogs is false after an empty diagnostics fetch already completed in the same open cycle", () => {
+test("shouldFetchDiagnosticsLogs is false once diagnostics already fetched in the same open cycle", () => {
   assert.equal(
     shouldFetchDiagnosticsLogs({
       diagnosticsOpen: true,
-      runtimeLogs: { 7: [] },
-      flowId: 7,
       hasFetchedInOpenCycle: true,
     }),
     false,
   );
 });
 
-test("shouldFetchDiagnosticsLogs allows a new open cycle to fetch an existing empty bucket again", () => {
+test("shouldFetchDiagnosticsLogs allows close and reopen to fetch again", () => {
   assert.equal(
     shouldFetchDiagnosticsLogs({
       diagnosticsOpen: true,
-      runtimeLogs: { 7: [] },
-      flowId: 7,
       hasFetchedInOpenCycle: false,
     }),
     true,

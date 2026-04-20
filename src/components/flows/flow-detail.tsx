@@ -15,7 +15,6 @@ import type {
   FlowContext,
   FlowEditorPayload,
   FlowNodeKey,
-  FlowRuntimeLogEntry,
   FlowRuntimeSnapshot,
 } from "@/types";
 
@@ -43,13 +42,9 @@ export function buildRuntimeLogsPanelFlow(
 
 export function shouldFetchDiagnosticsLogs({
   diagnosticsOpen,
-  runtimeLogs,
-  flowId,
   hasFetchedInOpenCycle,
 }: {
   diagnosticsOpen: boolean;
-  runtimeLogs: Record<number, FlowRuntimeLogEntry[]>;
-  flowId: number;
   hasFetchedInOpenCycle: boolean;
 }): boolean {
   if (!diagnosticsOpen) {
@@ -60,7 +55,7 @@ export function shouldFetchDiagnosticsLogs({
     return false;
   }
 
-  return (runtimeLogs[flowId]?.length ?? 0) === 0;
+  return true;
 }
 
 export function FlowDetail({ flowId, onBack }: FlowDetailProps) {
@@ -97,8 +92,6 @@ export function FlowDetail({ flowId, onBack }: FlowDetailProps) {
 
     if (!shouldFetchDiagnosticsLogs({
       diagnosticsOpen,
-      runtimeLogs,
-      flowId,
       hasFetchedInOpenCycle: diagnosticsFetchedInOpenCycleRef.current,
     })) {
       return;
