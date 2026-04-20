@@ -944,6 +944,39 @@ fn set_flow_enabled_with_conn(
     Ok(())
 }
 
+fn delete_flow_with_conn(
+    conn: &mut Connection,
+    runtime_manager: &LiveRuntimeManager,
+    flow_id: i64,
+) -> Result<(), String> {
+    if flow_id <= 0 {
+        return Err("flow_id must be positive".to_string());
+    }
+
+    let exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM flows WHERE id = ?1",
+            [flow_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if exists == 0 {
+        return Err(format!("flow {flow_id} not found"));
+    }
+
+    runtime_manager.stop_flow_session(flow_id).map(|_| ())?;
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let changed = tx
+        .execute("DELETE FROM flows WHERE id = ?1", [flow_id])
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err(format!("flow {flow_id} not found"));
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn set_flow_enabled(
     state: State<'_, AppState>,
@@ -957,6 +990,16 @@ pub fn set_flow_enabled(
 
     let mut conn = state.db.lock().map_err(|e| e.to_string())?;
     set_flow_enabled_with_conn(&mut conn, &runtime_manager, flow_id, enabled)
+}
+
+#[tauri::command]
+pub fn delete_flow(
+    state: State<'_, AppState>,
+    runtime_manager: State<'_, LiveRuntimeManager>,
+    flow_id: i64,
+) -> Result<(), String> {
+    let mut conn = state.db.lock().map_err(|e| e.to_string())?;
+    delete_flow_with_conn(&mut conn, &runtime_manager, flow_id)
 }
 
 #[tauri::command]
@@ -1114,7 +1157,7 @@ pub fn list_clips_by_flow(state: State<'_, AppState>, flow_id: i64) -> Result<Ve
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_sidecar_flow_runtime_hint_with_conn, map_flow_node_config_row,
+        apply_sidecar_flow_runtime_hint_with_conn, delete_flow_with_conn, map_flow_node_config_row,
         normalize_flow_node_config_json, set_flow_enabled_with_conn,
         ApplySidecarFlowRuntimeHintInput,
     };
@@ -1640,6 +1683,123 @@ mod tests {
             runtime_manager.cancelled_poll_generations_for_test(1),
             vec![1]
         );
+
+        drop(conn);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn delete_flow_with_conn_rejects_missing_flow() {
+        let (mut conn, path) = open_temp_db();
+        let runtime_manager = LiveRuntimeManager::new();
+
+        let err = delete_flow_with_conn(&mut conn, &runtime_manager, 999).unwrap_err();
+        assert_eq!(err, "flow 999 not found");
+
+        drop(conn);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn delete_flow_with_conn_stops_active_session_and_removes_flow_owned_rows() {
+        let (mut conn, path) = open_temp_db();
+        let runtime_manager = LiveRuntimeManager::new();
+
+        conn.execute(
+            "INSERT INTO accounts (id, username, display_name, type, created_at, updated_at) \
+             VALUES (1, 'shop_abc', 'A', 'monitored', datetime('now','+7 hours'), datetime('now','+7 hours'))",
+            [],
+        )
+        .expect("insert account");
+        conn.execute(
+            "INSERT INTO flows (id, name, enabled, status, published_version, draft_version, created_at, updated_at) \
+             VALUES (11, 'Flow', 1, 'idle', 1, 1, datetime('now','+7 hours'), datetime('now','+7 hours'))",
+            [],
+        )
+        .expect("insert flow");
+        conn.execute(
+            "INSERT INTO flow_nodes (flow_id, node_key, position, draft_config_json, published_config_json, draft_updated_at, published_at) \
+             VALUES (11, 'start', 1, '{\"username\":\"shop_abc\"}', '{\"username\":\"shop_abc\"}', datetime('now','+7 hours'), datetime('now','+7 hours'))",
+            [],
+        )
+        .expect("insert start node");
+        conn.execute(
+            "INSERT INTO flow_runs (id, flow_id, definition_version, status, started_at, trigger_reason) \
+             VALUES (21, 11, 1, 'running', datetime('now','+7 hours'), 'test')",
+            [],
+        )
+        .expect("insert flow run");
+        conn.execute(
+            "INSERT INTO flow_node_runs (flow_run_id, flow_id, node_key, status, started_at) \
+             VALUES (21, 11, 'start', 'completed', datetime('now','+7 hours'))",
+            [],
+        )
+        .expect("insert node run");
+        conn.execute(
+            "INSERT INTO recordings (id, account_id, room_id, status, started_at, duration_seconds, file_size_bytes, flow_id, created_at) \
+             VALUES (31, 1, '7312345', 'recording', datetime('now','+7 hours'), 0, 0, 11, datetime('now','+7 hours'))",
+            [],
+        )
+        .expect("insert recording");
+        conn.execute(
+            "INSERT INTO clips (id, recording_id, account_id, title, file_path, duration_seconds, file_size_bytes, status, flow_id, created_at, updated_at) \
+             VALUES (41, 31, 1, 'clip', '/tmp/clip.mp4', 10, 100, 'ready', 11, datetime('now','+7 hours'), datetime('now','+7 hours'))",
+            [],
+        )
+        .expect("insert clip");
+
+        runtime_manager
+            .start_flow_session(&conn, 11)
+            .expect("start flow session");
+        assert_eq!(runtime_manager.list_sessions().len(), 1);
+
+        delete_flow_with_conn(&mut conn, &runtime_manager, 11).expect("delete flow");
+
+        assert!(runtime_manager.list_sessions().is_empty());
+
+        let flow_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM flows WHERE id = 11", [], |row| {
+                row.get(0)
+            })
+            .expect("count flows");
+        let flow_node_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM flow_nodes WHERE flow_id = 11",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count flow nodes");
+        let flow_run_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM flow_runs WHERE flow_id = 11",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count flow runs");
+        let flow_node_run_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM flow_node_runs WHERE flow_id = 11",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count flow node runs");
+        let recording_flow_id: Option<i64> = conn
+            .query_row("SELECT flow_id FROM recordings WHERE id = 31", [], |row| {
+                row.get(0)
+            })
+            .expect("read recording flow id");
+        let clip_flow_id: Option<i64> = conn
+            .query_row("SELECT flow_id FROM clips WHERE id = 41", [], |row| {
+                row.get(0)
+            })
+            .expect("read clip flow id");
+
+        assert_eq!(flow_count, 0);
+        assert_eq!(flow_node_count, 0);
+        assert_eq!(flow_run_count, 0);
+        assert_eq!(flow_node_run_count, 0);
+        assert_eq!(recording_flow_id, None);
+        assert_eq!(clip_flow_id, None);
 
         drop(conn);
         let _ = std::fs::remove_file(path);

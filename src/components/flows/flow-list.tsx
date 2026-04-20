@@ -14,10 +14,12 @@ export function FlowList({ onOpenFlow }: FlowListProps) {
   const error = useFlowStore((s) => s.error);
   const fetchFlows = useFlowStore((s) => s.fetchFlows);
   const createFlow = useFlowStore((s) => s.createFlow);
+  const deleteFlow = useFlowStore((s) => s.deleteFlow);
   const toggleFlowEnabled = useFlowStore((s) => s.toggleFlowEnabled);
   const filters = useFlowStore((s) => s.filters);
 
-  const [busyFlowIds, setBusyFlowIds] = useState<Record<number, boolean>>({});
+  const [toggleBusyCounts, setToggleBusyCounts] = useState<Record<number, number>>({});
+  const [deleteBusyCounts, setDeleteBusyCounts] = useState<Record<number, number>>({});
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [newFlowName, setNewFlowName] = useState("");
@@ -44,18 +46,46 @@ export function FlowList({ onOpenFlow }: FlowListProps) {
   }, [flows, filters.search, filters.status]);
 
   const handleToggle = (flowId: number, enabled: boolean) => {
-    setBusyFlowIds((prev) => ({ ...prev, [flowId]: true }));
+    setToggleBusyCounts((prev) => ({ ...prev, [flowId]: (prev[flowId] ?? 0) + 1 }));
     void toggleFlowEnabled(flowId, enabled)
       .catch(() => {
         /* store already keeps user-facing error state */
       })
       .finally(() => {
-        setBusyFlowIds((prev) => {
+        setToggleBusyCounts((prev) => {
           const next = { ...prev };
-          delete next[flowId];
+          const count = (next[flowId] ?? 1) - 1;
+          if (count > 0) {
+            next[flowId] = count;
+          } else {
+            delete next[flowId];
+          }
           return next;
         });
       });
+  };
+
+  const handleDelete = async (flowId: number): Promise<boolean> => {
+    setDeleteBusyCounts((prev) => ({ ...prev, [flowId]: (prev[flowId] ?? 0) + 1 }));
+
+    try {
+      await deleteFlow(flowId);
+      return true;
+    } catch {
+      /* store already keeps user-facing error state */
+      return false;
+    } finally {
+      setDeleteBusyCounts((prev) => {
+        const next = { ...prev };
+        const count = (next[flowId] ?? 1) - 1;
+        if (count > 0) {
+          next[flowId] = count;
+        } else {
+          delete next[flowId];
+        }
+        return next;
+      });
+    }
   };
 
   const handleCreateFlow = () => {
@@ -128,9 +158,11 @@ export function FlowList({ onOpenFlow }: FlowListProps) {
             <FlowCard
               key={flow.id}
               flow={flow}
-              busy={busyFlowIds[flow.id] === true}
+              busy={(toggleBusyCounts[flow.id] ?? 0) > 0 || (deleteBusyCounts[flow.id] ?? 0) > 0}
+              deleting={(deleteBusyCounts[flow.id] ?? 0) > 0}
               onOpen={onOpenFlow}
               onToggleEnabled={handleToggle}
+              onDelete={handleDelete}
             />
           ))}
         </div>

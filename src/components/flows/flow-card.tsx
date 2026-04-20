@@ -1,6 +1,15 @@
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import type { FlowNodeKey, FlowStatus, FlowSummary } from "@/types";
@@ -48,12 +57,29 @@ function formatCount(value: number): string {
 type FlowCardProps = {
   flow: FlowSummary;
   busy?: boolean;
+  deleting?: boolean;
   onOpen: (flowId: number) => void;
   onToggleEnabled: (flowId: number, enabled: boolean) => void;
+  onDelete: (flowId: number) => Promise<boolean>;
 };
 
-export function FlowCard({ flow, busy = false, onOpen, onToggleEnabled }: FlowCardProps) {
+export function FlowCard({
+  flow,
+  busy = false,
+  deleting = false,
+  onOpen,
+  onToggleEnabled,
+  onDelete,
+}: FlowCardProps) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const currentNodeIndex = flow.current_node ? FLOW_STEPS.indexOf(flow.current_node) : -1;
+
+  const handleConfirmDelete = async () => {
+    const deleted = await onDelete(flow.id);
+    if (deleted) {
+      setConfirmOpen(false);
+    }
+  };
 
   return (
     <Card className="gap-4" size="sm">
@@ -135,11 +161,33 @@ export function FlowCard({ flow, busy = false, onOpen, onToggleEnabled }: FlowCa
               aria-label={`Toggle flow ${flow.name}`}
             />
           </label>
-          <Button variant="outline" size="sm" onClick={() => onOpen(flow.id)}>
+          <Button variant="outline" size="sm" onClick={() => onOpen(flow.id)} disabled={busy}>
             Open
+          </Button>
+          <Button variant="destructive" size="sm" onClick={() => setConfirmOpen(true)} disabled={busy}>
+            Delete
           </Button>
         </div>
       </CardFooter>
+
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent showCloseButton={!deleting} className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete flow?</DialogTitle>
+            <DialogDescription>
+              "{flow.name}" will be removed permanently. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="border-0 bg-transparent p-0 sm:justify-end">
+            <Button type="button" variant="outline" disabled={deleting} onClick={() => setConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" variant="destructive" disabled={deleting} onClick={() => void handleConfirmDelete()}>
+              {deleting ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 import {
   createFlow,
+  deleteFlow,
   getFlowDefinition,
   listLiveRuntimeLogs,
   listLiveRuntimeSessions,
@@ -66,6 +67,7 @@ type FlowStore = {
   refreshRuntime: () => Promise<void>;
   toggleFlowEnabled: (flowId: number, enabled: boolean) => Promise<void>;
   createFlow: (input: CreateFlowInput) => Promise<number>;
+  deleteFlow: (flowId: number) => Promise<void>;
 };
 
 export const flowStoreApi = {
@@ -78,6 +80,7 @@ export const flowStoreApi = {
   restartFlowRun,
   setFlowEnabled,
   createFlow,
+  deleteFlow,
 };
 
 const FLOW_RUNTIME_LOG_CAP = 500;
@@ -433,5 +436,106 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
     set({ activeFlowId: id, view: "detail" });
     await get().fetchFlowDetail(id);
     return id;
+  },
+
+  deleteFlow: async (flowId) => {
+    fetchFlowsToken += 1;
+    fetchFlowDetailToken += 1;
+    fetchRuntimeLogsToken += 1;
+    fetchRuntimeLogsTokensByFlow[flowId] = fetchRuntimeLogsToken;
+
+    const previousFlows = get().flows;
+    const previousFlow = previousFlows.find((flow) => flow.id === flowId);
+    const previousFlowIndex = previousFlows.findIndex((flow) => flow.id === flowId);
+    const previousRuntimeSnapshots = get().runtimeSnapshots;
+    const previousRuntimeSnapshot = previousRuntimeSnapshots[flowId];
+    const previousRuntimeLogs = get().runtimeLogs;
+    const previousRuntimeLogBucket = previousRuntimeLogs[flowId];
+    const previousActiveFlowId = get().activeFlowId;
+    const previousActiveFlow = get().activeFlow;
+    const previousSelectedNode = get().selectedNode;
+    const previousEditorModalNode = get().editorModalNode;
+    const previousDraftDirty = get().draftDirty;
+    const previousView = get().view;
+    const deletingActive =
+      previousActiveFlowId === flowId || previousActiveFlow?.flow.id === flowId;
+
+    set((state) => {
+      const nextRuntimeSnapshots = { ...state.runtimeSnapshots };
+      delete nextRuntimeSnapshots[flowId];
+
+      const nextRuntimeLogs = { ...state.runtimeLogs };
+      delete nextRuntimeLogs[flowId];
+
+      return {
+        flows: state.flows.filter((flow) => flow.id !== flowId),
+        runtimeSnapshots: nextRuntimeSnapshots,
+        runtimeLogs: nextRuntimeLogs,
+        activeFlowId: deletingActive ? null : state.activeFlowId,
+        activeFlow: deletingActive ? null : state.activeFlow,
+        selectedNode: deletingActive ? null : state.selectedNode,
+        editorModalNode: deletingActive ? null : state.editorModalNode,
+        draftDirty: deletingActive ? false : state.draftDirty,
+        view: deletingActive ? "list" : state.view,
+        error: null,
+      };
+    });
+
+    try {
+      await flowStoreApi.deleteFlow(flowId);
+    } catch (error) {
+      set((state) => {
+        const next: Partial<FlowStore> = {
+          error: getErrorMessage(error, "Failed to delete flow"),
+        };
+
+        if (previousFlow && !state.flows.some((flow) => flow.id === flowId)) {
+          const insertAt =
+            previousFlowIndex >= 0 && previousFlowIndex <= state.flows.length
+              ? previousFlowIndex
+              : state.flows.length;
+          next.flows = [
+            ...state.flows.slice(0, insertAt),
+            previousFlow,
+            ...state.flows.slice(insertAt),
+          ];
+        }
+
+        if (previousRuntimeSnapshot && state.runtimeSnapshots[flowId] == null) {
+          next.runtimeSnapshots = {
+            ...state.runtimeSnapshots,
+            [flowId]: previousRuntimeSnapshot,
+          };
+        }
+
+        if (previousRuntimeLogBucket && state.runtimeLogs[flowId] == null) {
+          next.runtimeLogs = {
+            ...state.runtimeLogs,
+            [flowId]: previousRuntimeLogBucket,
+          };
+        }
+
+        const matchesOptimisticClearedShape =
+          deletingActive &&
+          state.activeFlowId === null &&
+          state.activeFlow === null &&
+          state.selectedNode === null &&
+          state.editorModalNode === null &&
+          state.draftDirty === false &&
+          state.view === "list";
+
+        if (matchesOptimisticClearedShape) {
+          next.activeFlowId = previousActiveFlowId;
+          next.activeFlow = previousActiveFlow;
+          next.selectedNode = previousSelectedNode;
+          next.editorModalNode = previousEditorModalNode;
+          next.draftDirty = previousDraftDirty;
+          next.view = previousView;
+        }
+
+        return next;
+      });
+      throw error;
+    }
   },
 }));

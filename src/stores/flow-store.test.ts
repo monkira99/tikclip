@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import type { FlowRuntimeLogEntry } from "@/types";
+import type { FlowEditorPayload, FlowRuntimeLogEntry, FlowRuntimeSnapshot, FlowSummary } from "@/types";
 
 import { flowStoreApi, useFlowStore } from "./flow-store.ts";
 
@@ -46,6 +46,53 @@ function resetFlowStore(): void {
       status: "all",
     },
   });
+}
+
+function flowSummary(overrides: Partial<FlowSummary> & Pick<FlowSummary, "id">): FlowSummary {
+  return {
+    id: overrides.id,
+    account_id: overrides.account_id ?? 10,
+    account_username: overrides.account_username ?? "demo-account",
+    name: overrides.name ?? `Flow ${overrides.id}`,
+    enabled: overrides.enabled ?? true,
+    status: overrides.status ?? "idle",
+    current_node: overrides.current_node ?? "start",
+    last_live_at: overrides.last_live_at ?? null,
+    last_run_at: overrides.last_run_at ?? null,
+    last_error: overrides.last_error ?? null,
+    published_version: overrides.published_version ?? 1,
+    draft_version: overrides.draft_version ?? 1,
+    recordings_count: overrides.recordings_count ?? 0,
+    clips_count: overrides.clips_count ?? 0,
+    captions_count: overrides.captions_count ?? 0,
+    created_at: overrides.created_at ?? "2026-04-19T09:41:12.381+07:00",
+    updated_at: overrides.updated_at ?? "2026-04-19T09:41:12.381+07:00",
+  };
+}
+
+function flowEditorPayload(flowId: number): FlowEditorPayload {
+  return {
+    flow: {
+      id: flowId,
+      account_id: 10,
+      name: `Flow ${flowId}`,
+      enabled: true,
+      status: "idle",
+      current_node: "start",
+      last_live_at: null,
+      last_run_at: null,
+      last_error: null,
+      published_version: 1,
+      draft_version: 1,
+      created_at: "2026-04-19T09:41:12.381+07:00",
+      updated_at: "2026-04-19T09:41:12.381+07:00",
+    },
+    nodes: [],
+    runs: [],
+    nodeRuns: [],
+    recordings_count: 0,
+    clips_count: 0,
+  };
 }
 
 test("applyRuntimeLogs hydrates logs by flow id", () => {
@@ -358,4 +405,233 @@ test("FlowRuntimeLogEntry context accepts non-object JSON values", () => {
 
   assert.equal(withNullContext.context, null);
   assert.deepEqual(withArrayContext.context, [1, "two", false]);
+});
+
+test("deleteFlow removes list/runtime state and resets active detail when deleting current flow", async (t) => {
+  resetFlowStore();
+
+  const deletedFlowId = 7;
+  useFlowStore.setState({
+    flows: [flowSummary({ id: deletedFlowId }), flowSummary({ id: 8 })],
+    runtimeSnapshots: {
+      [deletedFlowId]: {
+        flow_id: deletedFlowId,
+        status: "watching",
+        current_node: "record",
+        account_id: 10,
+        username: "demo-account",
+        last_live_at: "2026-04-19T09:41:12.381+07:00",
+        last_error: null,
+        active_flow_run_id: 101,
+      },
+      8: {
+        flow_id: 8,
+        status: "idle",
+        current_node: "start",
+        account_id: 11,
+        username: "other-account",
+        last_live_at: null,
+        last_error: null,
+        active_flow_run_id: null,
+      },
+    },
+    runtimeLogs: {
+      [deletedFlowId]: [runtimeLogEntry({ id: "log-7", flow_id: deletedFlowId })],
+      8: [runtimeLogEntry({ id: "log-8", flow_id: 8 })],
+    },
+    activeFlowId: deletedFlowId,
+    activeFlow: flowEditorPayload(deletedFlowId),
+    selectedNode: "record",
+    editorModalNode: "record",
+    draftDirty: true,
+    view: "detail",
+    error: "old error",
+  });
+
+  const deleteMock = t.mock.method(flowStoreApi, "deleteFlow", async () => {});
+
+  await useFlowStore.getState().deleteFlow(deletedFlowId);
+
+  const state = useFlowStore.getState();
+  assert.equal(deleteMock.mock.callCount(), 1);
+  assert.deepEqual(
+    state.flows.map((flow) => flow.id),
+    [8],
+  );
+  assert.equal(state.runtimeSnapshots[deletedFlowId], undefined);
+  assert.equal(state.runtimeLogs[deletedFlowId], undefined);
+  assert.equal(state.runtimeSnapshots[8]?.flow_id, 8);
+  assert.deepEqual(
+    state.runtimeLogs[8]?.map((entry) => entry.id),
+    ["log-8"],
+  );
+  assert.equal(state.activeFlowId, null);
+  assert.equal(state.activeFlow, null);
+  assert.equal(state.selectedNode, null);
+  assert.equal(state.editorModalNode, null);
+  assert.equal(state.draftDirty, false);
+  assert.equal(state.view, "list");
+  assert.equal(state.error, null);
+});
+
+test("deleteFlow restores previous state and sets error when delete API fails", async (t) => {
+  resetFlowStore();
+
+  const before = {
+    flows: [flowSummary({ id: 7 }), flowSummary({ id: 8 })],
+    runtimeSnapshots: {
+      7: {
+        flow_id: 7,
+        status: "watching",
+        current_node: "record",
+        account_id: 10,
+        username: "demo-account",
+        last_live_at: "2026-04-19T09:41:12.381+07:00",
+        last_error: null,
+        active_flow_run_id: 101,
+      },
+      8: {
+        flow_id: 8,
+        status: "idle",
+        current_node: "start",
+        account_id: 11,
+        username: "other-account",
+        last_live_at: null,
+        last_error: null,
+        active_flow_run_id: null,
+      },
+    } satisfies Record<number, FlowRuntimeSnapshot>,
+    runtimeLogs: {
+      7: [runtimeLogEntry({ id: "log-7", flow_id: 7 })],
+      8: [runtimeLogEntry({ id: "log-8", flow_id: 8 })],
+    },
+    activeFlowId: 8,
+    activeFlow: flowEditorPayload(8),
+    editorModalNode: "clip" as const,
+    draftDirty: true,
+    view: "detail" as const,
+  };
+
+  useFlowStore.setState({ ...before, error: null });
+
+  const expectedError = new Error("delete failed");
+  t.mock.method(flowStoreApi, "deleteFlow", async () => {
+    throw expectedError;
+  });
+
+  await assert.rejects(async () => {
+    await useFlowStore.getState().deleteFlow(7);
+  }, expectedError);
+
+  const state = useFlowStore.getState();
+  assert.deepEqual(state.flows, before.flows);
+  assert.deepEqual(state.runtimeSnapshots, before.runtimeSnapshots);
+  assert.deepEqual(state.runtimeLogs, before.runtimeLogs);
+  assert.equal(state.activeFlowId, before.activeFlowId);
+  assert.deepEqual(state.activeFlow, before.activeFlow);
+  assert.equal(state.editorModalNode, before.editorModalNode);
+  assert.equal(state.draftDirty, before.draftDirty);
+  assert.equal(state.view, before.view);
+  assert.equal(state.error, "delete failed");
+});
+
+test("deleteFlow invalidates stale fetchFlows response so deleted flow is not resurrected", async (t) => {
+  resetFlowStore();
+
+  useFlowStore.setState({
+    flows: [flowSummary({ id: 7 }), flowSummary({ id: 8 })],
+  });
+
+  let resolveListFlows: ((rows: FlowSummary[]) => void) | null = null;
+  t.mock.method(flowStoreApi, "listFlows", async () => {
+    return await new Promise<FlowSummary[]>((resolve) => {
+      resolveListFlows = resolve;
+    });
+  });
+  t.mock.method(flowStoreApi, "deleteFlow", async () => {});
+
+  const fetchPromise = useFlowStore.getState().fetchFlows();
+  await useFlowStore.getState().deleteFlow(7);
+
+  if (resolveListFlows == null) {
+    throw new Error("expected listFlows resolver to be captured");
+  }
+  const resolve: (rows: FlowSummary[]) => void = resolveListFlows;
+  resolve([flowSummary({ id: 7 }), flowSummary({ id: 8 })]);
+  await fetchPromise;
+
+  assert.deepEqual(
+    useFlowStore.getState().flows.map((flow) => flow.id),
+    [8],
+  );
+});
+
+test("deleteFlow rollback keeps newer active/view state changes made while delete is pending", async (t) => {
+  resetFlowStore();
+
+  useFlowStore.setState({
+    flows: [flowSummary({ id: 7 }), flowSummary({ id: 8 })],
+    runtimeSnapshots: {
+      7: {
+        flow_id: 7,
+        status: "watching",
+        current_node: "record",
+        account_id: 10,
+        username: "demo-account",
+        last_live_at: "2026-04-19T09:41:12.381+07:00",
+        last_error: null,
+        active_flow_run_id: 101,
+      },
+    },
+    runtimeLogs: {
+      7: [runtimeLogEntry({ id: "log-7", flow_id: 7 })],
+    },
+    activeFlowId: 7,
+    activeFlow: flowEditorPayload(7),
+    selectedNode: "record",
+    editorModalNode: "record",
+    draftDirty: true,
+    view: "detail",
+  });
+
+  let rejectDelete: ((error: Error) => void) | null = null;
+  t.mock.method(flowStoreApi, "deleteFlow", async () => {
+    return await new Promise<void>((_resolve, reject) => {
+      rejectDelete = reject;
+    });
+  });
+
+  const deletePromise = useFlowStore.getState().deleteFlow(7);
+
+  useFlowStore.setState({
+    activeFlowId: 8,
+    activeFlow: flowEditorPayload(8),
+    selectedNode: "clip",
+    editorModalNode: "clip",
+    draftDirty: true,
+    view: "detail",
+  });
+
+  if (rejectDelete == null) {
+    throw new Error("expected deleteFlow rejecter to be captured");
+  }
+  const reject: (error: Error) => void = rejectDelete;
+  reject(new Error("delete failed"));
+
+  await assert.rejects(async () => {
+    await deletePromise;
+  }, /delete failed/);
+
+  const state = useFlowStore.getState();
+  assert.deepEqual(
+    state.flows.map((flow) => flow.id),
+    [7, 8],
+  );
+  assert.equal(state.activeFlowId, 8);
+  assert.equal(state.activeFlow?.flow.id, 8);
+  assert.equal(state.selectedNode, "clip");
+  assert.equal(state.editorModalNode, "clip");
+  assert.equal(state.draftDirty, true);
+  assert.equal(state.view, "detail");
+  assert.equal(state.error, "delete failed");
 });

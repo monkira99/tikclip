@@ -361,6 +361,10 @@ export async function createFlow(input: CreateFlowInput): Promise<number> {
   return invoke<number>("create_flow", { input });
 }
 
+export async function deleteFlow(flowId: number): Promise<void> {
+  await invoke("delete_flow", { flowId });
+}
+
 export async function saveFlowNodeDraft(input: {
   flow_id: number;
   node_key: FlowNodeKey;

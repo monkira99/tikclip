@@ -79,6 +79,7 @@ pub fn run() {
             commands::flows::update_flow_runtime_by_account,
             commands::flows::apply_sidecar_flow_runtime_hint,
             commands::flows::set_flow_enabled,
+            commands::flows::delete_flow,
             commands::flows::save_flow_node_config,
             commands::flows::list_recordings_by_flow,
             commands::flows::list_clips_by_flow,
