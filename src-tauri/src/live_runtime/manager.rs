@@ -22,6 +22,8 @@ use crate::workflow::start_node;
 use log::warn;
 use rusqlite::{Connection, OptionalExtension};
 use std::collections::HashMap;
+#[cfg(test)]
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -34,7 +36,10 @@ struct LiveRuntimeState {
     sessions_by_flow: HashMap<i64, LiveRuntimeSession>,
     lease_owner_by_lookup_key: HashMap<String, i64>,
     failed_snapshots_by_flow: HashMap<i64, LiveRuntimeSessionSnapshot>,
+    active_poll_tasks_by_flow: HashMap<i64, ActivePollTaskHandle>,
     active_recordings_by_flow: HashMap<i64, ActiveRecordingHandle>,
+    #[cfg(test)]
+    cancelled_poll_generations_by_flow: HashMap<i64, Vec<u64>>,
     log_buffer: FlowRuntimeLogBuffer,
 }
 
@@ -44,6 +49,23 @@ struct ActiveRecordingHandle {
     cancelled: Arc<AtomicBool>,
     cancel_process: Option<Arc<dyn Fn() -> Result<(), String> + Send + Sync>>,
 }
+
+#[derive(Clone)]
+struct ActivePollTaskHandle {
+    generation: u64,
+    cancelled: Arc<AtomicBool>,
+}
+
+#[derive(Clone)]
+struct PollIterationToken {
+    generation: u64,
+    cancelled: Arc<AtomicBool>,
+}
+
+#[cfg(test)]
+type StubbedLiveStatuses = Arc<Mutex<VecDeque<Result<Option<LiveStatus>, String>>>>;
+#[cfg(test)]
+type BeforePollApplyHook = Arc<Mutex<Option<Arc<dyn Fn() + Send + Sync>>>>;
 
 pub struct LiveRuntimeManager {
     state: Arc<Mutex<LiveRuntimeState>>,
@@ -58,6 +80,10 @@ pub struct LiveRuntimeManager {
     latest_runtime_event: Arc<Mutex<Option<FlowRuntimeSnapshot>>>,
     #[cfg(test)]
     worker_threads: Arc<Mutex<Vec<std::thread::JoinHandle<()>>>>,
+    #[cfg(test)]
+    stubbed_live_statuses: StubbedLiveStatuses,
+    #[cfg(test)]
+    before_poll_apply_hook: BeforePollApplyHook,
 }
 
 impl Clone for LiveRuntimeManager {
@@ -75,6 +101,10 @@ impl Clone for LiveRuntimeManager {
             latest_runtime_event: Arc::clone(&self.latest_runtime_event),
             #[cfg(test)]
             worker_threads: Arc::clone(&self.worker_threads),
+            #[cfg(test)]
+            stubbed_live_statuses: Arc::clone(&self.stubbed_live_statuses),
+            #[cfg(test)]
+            before_poll_apply_hook: Arc::clone(&self.before_poll_apply_hook),
         }
     }
 }
@@ -88,9 +118,43 @@ struct FlowRuntimeConfig {
     definition_version: i64,
     username: String,
     lookup_key: String,
+    cookies_json: String,
+    proxy_url: Option<String>,
+    poll_interval_seconds: i64,
 }
 
 impl LiveRuntimeManager {
+    fn cancel_and_remove_poll_task(state: &mut LiveRuntimeState, flow_id: i64) {
+        if let Some(handle) = state.active_poll_tasks_by_flow.remove(&flow_id) {
+            handle.cancelled.store(true, Ordering::SeqCst);
+            #[cfg(test)]
+            {
+                state
+                    .cancelled_poll_generations_by_flow
+                    .entry(flow_id)
+                    .or_default()
+                    .push(handle.generation);
+            }
+        }
+    }
+
+    fn replace_poll_task_for_session(
+        state: &mut LiveRuntimeState,
+        flow_id: i64,
+        session: &mut LiveRuntimeSession,
+    ) -> ActivePollTaskHandle {
+        Self::cancel_and_remove_poll_task(state, flow_id);
+        let generation = session.bump_poll_generation();
+        let handle = ActivePollTaskHandle {
+            generation,
+            cancelled: Arc::new(AtomicBool::new(false)),
+        };
+        state
+            .active_poll_tasks_by_flow
+            .insert(flow_id, handle.clone());
+        handle
+    }
+
     #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
@@ -106,6 +170,10 @@ impl LiveRuntimeManager {
             latest_runtime_event: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             worker_threads: Arc::new(Mutex::new(Vec::new())),
+            #[cfg(test)]
+            stubbed_live_statuses: Arc::new(Mutex::new(VecDeque::new())),
+            #[cfg(test)]
+            before_poll_apply_hook: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -124,6 +192,10 @@ impl LiveRuntimeManager {
             latest_runtime_event: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             worker_threads: Arc::new(Mutex::new(Vec::new())),
+            #[cfg(test)]
+            stubbed_live_statuses: Arc::new(Mutex::new(VecDeque::new())),
+            #[cfg(test)]
+            before_poll_apply_hook: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -153,6 +225,10 @@ impl LiveRuntimeManager {
             latest_runtime_event: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             worker_threads: Arc::new(Mutex::new(Vec::new())),
+            #[cfg(test)]
+            stubbed_live_statuses: Arc::new(Mutex::new(VecDeque::new())),
+            #[cfg(test)]
+            before_poll_apply_hook: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -181,6 +257,8 @@ impl LiveRuntimeManager {
             runtime_log_emit_error: Arc::new(Mutex::new(None)),
             latest_runtime_event: Arc::new(Mutex::new(None)),
             worker_threads: Arc::new(Mutex::new(Vec::new())),
+            stubbed_live_statuses: Arc::new(Mutex::new(VecDeque::new())),
+            before_poll_apply_hook: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -202,6 +280,8 @@ impl LiveRuntimeManager {
             runtime_log_emit_error: Arc::new(Mutex::new(None)),
             latest_runtime_event: Arc::new(Mutex::new(None)),
             worker_threads: Arc::new(Mutex::new(Vec::new())),
+            stubbed_live_statuses: Arc::new(Mutex::new(VecDeque::new())),
+            before_poll_apply_hook: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -369,6 +449,162 @@ impl LiveRuntimeManager {
         }))
     }
 
+    fn resolve_live_status_for_poll(
+        &self,
+        config: &FlowRuntimeConfig,
+    ) -> Result<Option<LiveStatus>, String> {
+        #[cfg(test)]
+        {
+            if let Some(next) = self
+                .stubbed_live_statuses
+                .lock()
+                .map_err(|e| e.to_string())?
+                .pop_front()
+            {
+                return next;
+            }
+        }
+
+        crate::tiktok::check_live::resolve_live_status(&crate::tiktok::types::LiveCheckConfig {
+            username: config.username.as_str(),
+            cookies_json: config.cookies_json.as_str(),
+            proxy_url: config.proxy_url.as_deref(),
+        })
+    }
+
+    fn poll_iteration_token(&self, flow_id: i64) -> Result<Option<PollIterationToken>, String> {
+        let state = self.state.lock().map_err(|e| e.to_string())?;
+        let Some(task) = state.active_poll_tasks_by_flow.get(&flow_id) else {
+            return Ok(None);
+        };
+        Ok(Some(PollIterationToken {
+            generation: task.generation,
+            cancelled: Arc::clone(&task.cancelled),
+        }))
+    }
+
+    fn is_poll_iteration_stale(
+        &self,
+        flow_id: i64,
+        token: &PollIterationToken,
+    ) -> Result<bool, String> {
+        if token.cancelled.load(Ordering::SeqCst) {
+            return Ok(true);
+        }
+
+        let state = self.state.lock().map_err(|e| e.to_string())?;
+        let Some(task) = state.active_poll_tasks_by_flow.get(&flow_id) else {
+            return Ok(true);
+        };
+        if task.generation != token.generation || task.cancelled.load(Ordering::SeqCst) {
+            return Ok(true);
+        }
+
+        let Some(session) = state.sessions_by_flow.get(&flow_id) else {
+            return Ok(true);
+        };
+        Ok(!session.is_polling())
+    }
+
+    pub fn poll_flow_once(&self, conn: &Connection, flow_id: i64) -> Result<(), String> {
+        let config = load_flow_runtime_config(conn, flow_id)?;
+        if !config.enabled {
+            return Ok(());
+        }
+
+        let Some(token) = self.poll_iteration_token(flow_id)? else {
+            return Ok(());
+        };
+        if self.is_poll_iteration_stale(flow_id, &token)? {
+            return Ok(());
+        }
+
+        let live_status = self.resolve_live_status_for_poll(&config)?;
+        #[cfg(test)]
+        {
+            if let Some(hook) = self
+                .before_poll_apply_hook
+                .lock()
+                .map_err(|e| e.to_string())?
+                .clone()
+            {
+                hook();
+            }
+        }
+        if self.is_poll_iteration_stale(flow_id, &token)? {
+            return Ok(());
+        }
+
+        if let Some(status) = live_status {
+            let _ = self.handle_live_detected(conn, flow_id, &status)?;
+        } else {
+            self.mark_source_offline(flow_id)?;
+        }
+
+        Ok(())
+    }
+
+    fn spawn_poll_loop_worker(
+        &self,
+        flow_id: i64,
+        poll_interval_seconds: i64,
+        handle: ActivePollTaskHandle,
+    ) {
+        #[cfg(test)]
+        {
+            let _ = (flow_id, poll_interval_seconds, handle);
+        }
+
+        #[cfg(not(test))]
+        {
+            let Some(db_path) = self.runtime_db_path.clone() else {
+                return;
+            };
+            let runtime_manager = self.clone();
+            let poll_interval = std::time::Duration::from_secs(poll_interval_seconds.max(1) as u64);
+            let token = PollIterationToken {
+                generation: handle.generation,
+                cancelled: Arc::clone(&handle.cancelled),
+            };
+
+            std::thread::spawn(move || loop {
+                let is_stale = runtime_manager
+                    .is_poll_iteration_stale(flow_id, &token)
+                    .unwrap_or(true);
+                if is_stale {
+                    break;
+                }
+
+                let conn = match open_runtime_connection(&db_path) {
+                    Ok(conn) => conn,
+                    Err(err) => {
+                        log::warn!(
+                            "flow_runtime poll worker failed opening DB for flow {}: {}",
+                            flow_id,
+                            err
+                        );
+                        break;
+                    }
+                };
+                if let Err(err) = runtime_manager.poll_flow_once(&conn, flow_id) {
+                    log::warn!(
+                        "flow_runtime poll worker iteration failed for flow {}: {}",
+                        flow_id,
+                        err
+                    );
+                }
+
+                let is_stale = runtime_manager
+                    .is_poll_iteration_stale(flow_id, &token)
+                    .unwrap_or(true);
+                if is_stale {
+                    break;
+                }
+                std::thread::sleep(poll_interval);
+            });
+        }
+    }
+
     #[expect(
         clippy::too_many_arguments,
         reason = "Structured handoff logging keeps runtime identifiers explicit at the sidecar boundary"
@@ -505,6 +741,7 @@ impl LiveRuntimeManager {
 
     pub fn start_flow_session(&self, conn: &Connection, flow_id: i64) -> Result<(), String> {
         let config = load_flow_runtime_config(conn, flow_id)?;
+        let poll_interval_seconds = config.poll_interval_seconds;
         let last_completed_room_id =
             runtime_store::load_last_completed_room_id_for_flow(conn, flow_id)?;
         let active_flow_run_id = runtime_store::load_latest_running_flow_run_id(conn, flow_id)?;
@@ -562,6 +799,7 @@ impl LiveRuntimeManager {
         if let Some(flow_run_id) = active_flow_run_id {
             session.mark_flow_run_started(flow_run_id);
         }
+        let poll_task = Self::replace_poll_task_for_session(&mut state, flow_id, &mut session);
         state
             .lease_owner_by_lookup_key
             .insert(lookup_key.clone(), config.flow_id);
@@ -595,12 +833,14 @@ impl LiveRuntimeManager {
                 "restored_active_flow_run": active_flow_run_id.is_some(),
             }),
         );
+        self.spawn_poll_loop_worker(flow_id, poll_interval_seconds, poll_task);
         self.emit_runtime_update_for_flow(conn, flow_id)?;
         Ok(())
     }
 
     pub fn reconcile_flow(&self, conn: &Connection, flow_id: i64) -> Result<(), String> {
         let config = load_flow_runtime_config(conn, flow_id)?;
+        let poll_interval_seconds = config.poll_interval_seconds;
         let last_completed_room_id =
             runtime_store::load_last_completed_room_id_for_flow(conn, flow_id)?;
         let active_flow_run_id = runtime_store::load_latest_running_flow_run_id(conn, flow_id)?;
@@ -637,6 +877,7 @@ impl LiveRuntimeManager {
                     config.lookup_key, owner
                 );
                 let previous = state.sessions_by_flow.remove(&flow_id);
+                Self::cancel_and_remove_poll_task(&mut state, flow_id);
                 if let Some(previous_session) = previous.as_ref() {
                     state
                         .lease_owner_by_lookup_key
@@ -672,6 +913,7 @@ impl LiveRuntimeManager {
             }
         }
         let previous = state.sessions_by_flow.remove(&flow_id);
+        Self::cancel_and_remove_poll_task(&mut state, flow_id);
         if let Some(previous_session) = previous.as_ref() {
             state
                 .lease_owner_by_lookup_key
@@ -694,9 +936,11 @@ impl LiveRuntimeManager {
             next_generation,
             last_completed_room_id,
         );
+        session.set_poll_generation(next_generation.saturating_sub(1));
         if let Some(flow_run_id) = active_flow_run_id {
             session.mark_flow_run_started(flow_run_id);
         }
+        let poll_task = Self::replace_poll_task_for_session(&mut state, flow_id, &mut session);
         state.sessions_by_flow.insert(flow_id, session);
         drop(state);
         let _ = self.log_runtime_event(
@@ -727,6 +971,7 @@ impl LiveRuntimeManager {
                 "lookup_key": lookup_key.as_str(),
             }),
         );
+        self.spawn_poll_loop_worker(flow_id, poll_interval_seconds, poll_task);
         self.emit_runtime_update_for_flow(conn, flow_id)?;
         Ok(())
     }
@@ -1289,6 +1534,48 @@ impl LiveRuntimeManager {
     }
 
     #[cfg(test)]
+    pub fn session_has_poll_task_for_test(&self, flow_id: i64) -> bool {
+        self.state
+            .lock()
+            .ok()
+            .map(|state| state.active_poll_tasks_by_flow.contains_key(&flow_id))
+            .unwrap_or(false)
+    }
+
+    #[cfg(test)]
+    pub fn session_generation_for_test(&self, flow_id: i64) -> Option<u64> {
+        self.state.lock().ok().and_then(|state| {
+            state
+                .sessions_by_flow
+                .get(&flow_id)
+                .map(LiveRuntimeSession::poll_generation)
+        })
+    }
+
+    #[cfg(test)]
+    pub fn active_poll_task_count_for_test(&self) -> usize {
+        self.state
+            .lock()
+            .ok()
+            .map(|state| state.active_poll_tasks_by_flow.len())
+            .unwrap_or(0)
+    }
+
+    #[cfg(test)]
+    pub fn cancelled_poll_generations_for_test(&self, flow_id: i64) -> Vec<u64> {
+        self.state
+            .lock()
+            .ok()
+            .and_then(|state| {
+                state
+                    .cancelled_poll_generations_by_flow
+                    .get(&flow_id)
+                    .cloned()
+            })
+            .unwrap_or_default()
+    }
+
+    #[cfg(test)]
     pub fn drain_worker_threads_for_test(&self) {
         if let Ok(mut handles) = self.worker_threads.lock() {
             for handle in handles.drain(..) {
@@ -1345,6 +1632,35 @@ impl LiveRuntimeManager {
             .expect("list runtime logs for test")
     }
 
+    #[cfg(test)]
+    pub fn with_stubbed_live_status_for_test(
+        &self,
+        statuses: Vec<Result<Option<LiveStatus>, String>>,
+    ) {
+        if let Ok(mut queue) = self.stubbed_live_statuses.lock() {
+            *queue = statuses.into_iter().collect();
+        }
+    }
+
+    #[cfg(test)]
+    pub fn run_one_poll_iteration_for_test(
+        &self,
+        conn: &Connection,
+        flow_id: i64,
+    ) -> Result<(), String> {
+        self.poll_flow_once(conn, flow_id)
+    }
+
+    #[cfg(test)]
+    pub fn with_before_poll_apply_hook_for_test<F>(&self, hook: F)
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
+        if let Ok(mut slot) = self.before_poll_apply_hook.lock() {
+            *slot = Some(Arc::new(hook));
+        }
+    }
+
     pub fn stop_flow_session(
         &self,
         flow_id: i64,
@@ -1375,6 +1691,7 @@ impl LiveRuntimeManager {
         let mut state = self.state.lock().map_err(|e| e.to_string())?;
         let mut stopped = Vec::new();
         if let Some(mut session) = state.sessions_by_flow.remove(&flow_id) {
+            Self::cancel_and_remove_poll_task(&mut state, flow_id);
             state.lease_owner_by_lookup_key.remove(session.lookup_key());
             state.active_recordings_by_flow.remove(&flow_id);
             session.teardown();
@@ -1410,6 +1727,11 @@ impl LiveRuntimeManager {
             }
         }
         let mut state = self.state.lock().map_err(|e| e.to_string())?;
+        let flow_ids_to_cancel: Vec<i64> =
+            state.active_poll_tasks_by_flow.keys().copied().collect();
+        for flow_id in flow_ids_to_cancel {
+            Self::cancel_and_remove_poll_task(&mut state, flow_id);
+        }
         let mut stopped = Vec::new();
         for (_, mut session) in state.sessions_by_flow.drain() {
             session.teardown();
@@ -1417,6 +1739,7 @@ impl LiveRuntimeManager {
         }
         stopped.sort_by_key(|snapshot| snapshot.flow_id);
         state.lease_owner_by_lookup_key.clear();
+        state.active_poll_tasks_by_flow.clear();
         state.active_recordings_by_flow.clear();
         state.failed_snapshots_by_flow.clear();
         Ok(stopped)
@@ -1473,6 +1796,9 @@ fn load_flow_runtime_config(conn: &Connection, flow_id: i64) -> Result<FlowRunti
         definition_version,
         username: config.username.canonical.clone(),
         lookup_key: config.username.lookup_key,
+        cookies_json: config.cookies_json,
+        proxy_url: config.proxy_url,
+        poll_interval_seconds: config.poll_interval_seconds,
     })
 }
 
@@ -1672,13 +1998,21 @@ impl LiveRuntimeManager {
                     return;
                 }
             };
+            let cancel_handle = process.cancel_handle();
+            let mut should_cancel_after_registration = cancel_flag.load(Ordering::SeqCst);
             if let Ok(mut state) = runtime_manager.state.lock() {
                 if let Some(active) = state
                     .active_recordings_by_flow
                     .get_mut(&execution.start.flow_id)
                 {
-                    active.cancel_process = Some(process.cancel_handle());
+                    active.cancel_process = Some(cancel_handle.clone());
+                    if active.cancelled.load(Ordering::SeqCst) {
+                        should_cancel_after_registration = true;
+                    }
                 }
+            }
+            if should_cancel_after_registration {
+                let _ = cancel_handle();
             }
 
             let finish_result = process.wait();
@@ -3358,6 +3692,82 @@ mod tests {
     }
 
     #[test]
+    fn stop_flow_session_cancels_process_even_when_cancel_handle_registers_late() {
+        let (conn, path) = open_temp_db();
+        insert_flow(&conn, 1, true, "shop_abc");
+        let cancel_call_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let manager = LiveRuntimeManager::with_recording_process_runner_for_test(
+            path.clone(),
+            crate::recording_runtime::worker::RecordingProcessRunner::from_fn({
+                let cancel_call_count = Arc::clone(&cancel_call_count);
+                move |input, output_path| {
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                    let output_path = output_path.to_string();
+                    let input = input.clone();
+                    let cancel_call_count = Arc::clone(&cancel_call_count);
+                    Ok(
+                        crate::recording_runtime::worker::RecordingProcessHandle::from_parts(
+                            Box::new(move || {
+                                std::thread::sleep(std::time::Duration::from_millis(250));
+                                Ok(crate::recording_runtime::types::RecordingFinishInput {
+                                    account_id: input.account_id,
+                                    flow_id: input.flow_id,
+                                    flow_run_id: input.flow_run_id,
+                                    external_recording_id: input.external_recording_id.clone(),
+                                    room_id: input.room_id.clone(),
+                                    file_path: Some(output_path.clone()),
+                                    error_message: None,
+                                    duration_seconds: 0,
+                                    file_size_bytes: 0,
+                                    outcome: RecordingOutcome::Success,
+                                })
+                            }),
+                            Arc::new(move || {
+                                cancel_call_count.fetch_add(1, Ordering::SeqCst);
+                                Ok(())
+                            }),
+                        ),
+                    )
+                }
+            }),
+        );
+
+        manager.start_flow_session(&conn, 1).expect("start session");
+        let flow_run_id = manager
+            .handle_live_detected(
+                &conn,
+                1,
+                &LiveStatus {
+                    room_id: "7312345".to_string(),
+                    stream_url: Some("https://example.com/live.flv".to_string()),
+                    viewer_count: Some(77),
+                },
+            )
+            .expect("handle live")
+            .expect("created run");
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        manager.stop_flow_session(1).expect("stop flow session");
+        manager.drain_worker_threads_for_test();
+
+        assert_eq!(cancel_call_count.load(Ordering::SeqCst), 1);
+
+        let reader = crate::db::init::initialize_database(&path).expect("open reader");
+        let recording_status: String = reader
+            .query_row(
+                "SELECT status FROM recordings WHERE flow_run_id = ?1 ORDER BY id DESC LIMIT 1",
+                [flow_run_id],
+                |row| row.get(0),
+            )
+            .expect("read recording status");
+        assert_eq!(recording_status, "cancelled");
+
+        drop(reader);
+        drop(conn);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn handle_live_detected_creates_rust_owned_recording_row_for_active_run() {
         let (conn, path) = open_temp_db();
         insert_flow(&conn, 1, true, "shop_abc");
@@ -3543,6 +3953,169 @@ mod tests {
     }
 
     #[test]
+    fn poll_loop_autonomous_live_detect_starts_run() {
+        let (conn, path) = open_temp_db();
+        insert_flow(&conn, 1, true, "shop_abc");
+        let manager = LiveRuntimeManager::new();
+
+        manager.start_flow_session(&conn, 1).expect("start session");
+        manager.with_stubbed_live_status_for_test(vec![Ok(Some(LiveStatus {
+            room_id: "7312345".to_string(),
+            stream_url: Some("https://example.com/live.flv".to_string()),
+            viewer_count: Some(77),
+        }))]);
+
+        manager
+            .run_one_poll_iteration_for_test(&conn, 1)
+            .expect("run one poll iteration");
+
+        assert!(manager.session_active_flow_run_id_for_test(1).is_some());
+
+        let run_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM flow_runs WHERE flow_id = 1 AND status = 'running'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count running runs");
+        assert_eq!(run_count, 1);
+
+        drop(conn);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn poll_loop_live_without_stream_keeps_watching() {
+        let (conn, path) = open_temp_db();
+        insert_flow(&conn, 1, true, "shop_abc");
+        let manager = LiveRuntimeManager::new();
+
+        manager.start_flow_session(&conn, 1).expect("start session");
+        manager.with_stubbed_live_status_for_test(vec![Ok(Some(LiveStatus {
+            room_id: "7312345".to_string(),
+            stream_url: None,
+            viewer_count: Some(77),
+        }))]);
+
+        manager
+            .run_one_poll_iteration_for_test(&conn, 1)
+            .expect("run one poll iteration");
+
+        assert!(manager.session_is_polling_for_test(1));
+        assert_eq!(manager.session_active_flow_run_id_for_test(1), None);
+        let run_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM flow_runs WHERE flow_id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count flow runs");
+        assert_eq!(run_count, 0);
+
+        drop(conn);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn poll_loop_offline_resets_dedupe_and_allows_same_room_again() {
+        let (mut conn, path) = open_temp_db();
+        insert_flow(&conn, 1, true, "shop_abc");
+        let manager = LiveRuntimeManager::new();
+
+        manager.start_flow_session(&conn, 1).expect("start session");
+        manager.with_stubbed_live_status_for_test(vec![Ok(Some(LiveStatus {
+            room_id: "7312345".to_string(),
+            stream_url: Some("https://example.com/live.flv".to_string()),
+            viewer_count: Some(77),
+        }))]);
+        manager
+            .run_one_poll_iteration_for_test(&conn, 1)
+            .expect("first live poll iteration");
+        let first_run_id = manager
+            .session_active_flow_run_id_for_test(1)
+            .expect("first run id");
+
+        manager
+            .fail_active_run(&mut conn, 1, Some("7312345"), Some("test failure"))
+            .expect("finalize first run to watching state");
+
+        let duplicate_before_offline = manager
+            .handle_live_detected(
+                &conn,
+                1,
+                &LiveStatus {
+                    room_id: "7312345".to_string(),
+                    stream_url: Some("https://example.com/live.flv".to_string()),
+                    viewer_count: Some(88),
+                },
+            )
+            .expect("duplicate detect before offline reset");
+        assert_eq!(duplicate_before_offline, None);
+
+        manager.with_stubbed_live_status_for_test(vec![
+            Ok(None),
+            Ok(Some(LiveStatus {
+                room_id: "7312345".to_string(),
+                stream_url: Some("https://example.com/live.flv".to_string()),
+                viewer_count: Some(99),
+            })),
+        ]);
+
+        manager
+            .run_one_poll_iteration_for_test(&conn, 1)
+            .expect("offline poll iteration");
+        manager
+            .run_one_poll_iteration_for_test(&conn, 1)
+            .expect("live poll iteration after offline");
+
+        let second_run_id = manager
+            .session_active_flow_run_id_for_test(1)
+            .expect("second run id");
+        assert_ne!(first_run_id, second_run_id);
+
+        drop(conn);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn poll_loop_stale_iteration_is_dropped_before_apply() {
+        let (conn, path) = open_temp_db();
+        insert_flow(&conn, 1, true, "shop_abc");
+        let manager = LiveRuntimeManager::new();
+
+        manager.start_flow_session(&conn, 1).expect("start session");
+        manager.with_stubbed_live_status_for_test(vec![Ok(Some(LiveStatus {
+            room_id: "7312345".to_string(),
+            stream_url: Some("https://example.com/live.flv".to_string()),
+            viewer_count: Some(77),
+        }))]);
+        let manager_for_hook = manager.clone();
+        manager.with_before_poll_apply_hook_for_test(move || {
+            manager_for_hook
+                .stop_flow_session(1)
+                .expect("stop session in stale hook");
+        });
+
+        manager
+            .run_one_poll_iteration_for_test(&conn, 1)
+            .expect("run one poll iteration");
+
+        assert_eq!(manager.session_active_flow_run_id_for_test(1), None);
+        assert!(manager.list_sessions().is_empty());
+        let run_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM flow_runs WHERE flow_id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count flow runs");
+        assert_eq!(run_count, 0);
+
+        drop(conn);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn start_flow_session_emits_lease_conflict_runtime_log() {
         let (conn, path) = open_temp_db();
         insert_flow(&conn, 1, true, "shop_abc");
@@ -3568,6 +4141,65 @@ mod tests {
                     .and_then(|value| value.as_str())
                     == Some("shop_abc")
         }));
+
+        drop(conn);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn start_flow_session_creates_single_poll_task_for_enabled_flow() {
+        let (conn, path) = open_temp_db();
+        insert_flow(&conn, 1, true, "shop_abc");
+        let manager = LiveRuntimeManager::new();
+
+        manager
+            .start_flow_session(&conn, 1)
+            .expect("start enabled flow session");
+        manager
+            .start_flow_session(&conn, 1)
+            .expect("second start should not duplicate task");
+
+        assert!(manager.session_has_poll_task_for_test(1));
+        assert_eq!(manager.active_poll_task_count_for_test(), 1);
+        assert_eq!(manager.session_generation_for_test(1), Some(1));
+
+        drop(conn);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn stop_flow_session_cancels_and_removes_poll_task() {
+        let (conn, path) = open_temp_db();
+        insert_flow(&conn, 1, true, "shop_abc");
+        let manager = LiveRuntimeManager::new();
+
+        manager.start_flow_session(&conn, 1).expect("start flow");
+        manager.stop_flow_session(1).expect("stop flow");
+
+        assert!(!manager.session_has_poll_task_for_test(1));
+        assert_eq!(manager.active_poll_task_count_for_test(), 0);
+        assert_eq!(manager.cancelled_poll_generations_for_test(1), vec![1]);
+
+        drop(conn);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn reconcile_flow_replaces_poll_task_without_duplicates() {
+        let (conn, path) = open_temp_db();
+        insert_flow(&conn, 1, true, "shop_abc");
+        let manager = LiveRuntimeManager::new();
+
+        manager.start_flow_session(&conn, 1).expect("start flow");
+        assert_eq!(manager.session_generation_for_test(1), Some(1));
+        assert_eq!(manager.active_poll_task_count_for_test(), 1);
+
+        manager.reconcile_flow(&conn, 1).expect("reconcile flow");
+
+        assert!(manager.session_has_poll_task_for_test(1));
+        assert_eq!(manager.active_poll_task_count_for_test(), 1);
+        assert_eq!(manager.session_generation_for_test(1), Some(2));
+        assert_eq!(manager.cancelled_poll_generations_for_test(1), vec![1]);
 
         drop(conn);
         let _ = std::fs::remove_file(path);

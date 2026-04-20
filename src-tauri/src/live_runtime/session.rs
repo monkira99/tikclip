@@ -87,6 +87,7 @@ pub struct LiveRuntimeSession {
     username: String,
     lookup_key: String,
     generation: u64,
+    poll_generation: u64,
     stopped: bool,
     last_error: Option<String>,
     active_flow_run_id: Option<i64>,
@@ -109,6 +110,7 @@ impl LiveRuntimeSession {
             username,
             lookup_key,
             generation,
+            poll_generation: 0,
             stopped: false,
             last_error: None,
             active_flow_run_id: None,
@@ -123,6 +125,20 @@ impl LiveRuntimeSession {
 
     pub fn generation(&self) -> u64 {
         self.generation
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn poll_generation(&self) -> u64 {
+        self.poll_generation
+    }
+
+    pub fn bump_poll_generation(&mut self) -> u64 {
+        self.poll_generation += 1;
+        self.poll_generation
+    }
+
+    pub fn set_poll_generation(&mut self, generation: u64) {
+        self.poll_generation = generation;
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
@@ -372,5 +388,22 @@ mod tests {
         assert_eq!(runtime_current_node_for_status("recording"), Some("record"));
         assert_eq!(runtime_current_node_for_status("processing"), Some("clip"));
         assert_eq!(runtime_current_node_for_status("error"), None);
+    }
+
+    #[test]
+    fn live_runtime_session_bumps_poll_generation() {
+        let mut session = LiveRuntimeSession::new(
+            22,
+            "Flow".to_string(),
+            "shop_abc".to_string(),
+            "shop_abc".to_string(),
+            3,
+            None,
+        );
+
+        assert_eq!(session.poll_generation(), 0);
+        assert_eq!(session.bump_poll_generation(), 1);
+        assert_eq!(session.bump_poll_generation(), 2);
+        assert_eq!(session.poll_generation(), 2);
     }
 }

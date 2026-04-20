@@ -1606,6 +1606,46 @@ mod tests {
     }
 
     #[test]
+    fn set_flow_enabled_true_starts_exactly_one_poll_task() {
+        let (mut conn, path) = open_temp_db();
+        insert_enabled_flow(&conn, 1, "shop_abc");
+        let runtime_manager = LiveRuntimeManager::new();
+
+        assert_eq!(runtime_manager.active_poll_task_count_for_test(), 0);
+
+        set_flow_enabled_with_conn(&mut conn, &runtime_manager, 1, true).expect("enable flow");
+
+        assert!(runtime_manager.session_has_poll_task_for_test(1));
+        assert_eq!(runtime_manager.active_poll_task_count_for_test(), 1);
+        assert_eq!(runtime_manager.session_generation_for_test(1), Some(1));
+
+        drop(conn);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn set_flow_enabled_false_stops_and_cancels_poll_task() {
+        let (mut conn, path) = open_temp_db();
+        insert_enabled_flow(&conn, 1, "shop_abc");
+        let runtime_manager = LiveRuntimeManager::new();
+        set_flow_enabled_with_conn(&mut conn, &runtime_manager, 1, true).expect("enable flow");
+        assert!(runtime_manager.session_has_poll_task_for_test(1));
+        assert_eq!(runtime_manager.active_poll_task_count_for_test(), 1);
+
+        set_flow_enabled_with_conn(&mut conn, &runtime_manager, 1, false).expect("disable flow");
+
+        assert!(!runtime_manager.session_has_poll_task_for_test(1));
+        assert_eq!(runtime_manager.active_poll_task_count_for_test(), 0);
+        assert_eq!(
+            runtime_manager.cancelled_poll_generations_for_test(1),
+            vec![1]
+        );
+
+        drop(conn);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn disabling_enabled_flow_with_active_run_cancels_that_run() {
         let (mut conn, path) = open_temp_db();
         insert_enabled_flow(&conn, 1, "shop_abc");

@@ -1067,4 +1067,56 @@ mod tests {
         drop(conn);
         let _ = std::fs::remove_file(&path);
     }
+
+    #[test]
+    fn publish_flow_runtime_reconcile_keeps_one_fresh_poll_task() {
+        let (mut conn, path) = open_temp_db();
+        insert_flow_with_username(&conn, 1, "shop_abc");
+        let runtime_manager = LiveRuntimeManager::new();
+        runtime_manager
+            .start_flow_session(&conn, 1)
+            .expect("start flow session");
+
+        assert_eq!(runtime_manager.session_generation_for_test(1), Some(1));
+        assert_eq!(runtime_manager.active_poll_task_count_for_test(), 1);
+
+        publish_flow_with_runtime_reconcile(&mut conn, &runtime_manager, 1)
+            .expect("publish with reconcile");
+
+        assert!(runtime_manager.session_has_poll_task_for_test(1));
+        assert_eq!(runtime_manager.active_poll_task_count_for_test(), 1);
+        assert_eq!(runtime_manager.session_generation_for_test(1), Some(2));
+        assert_eq!(
+            runtime_manager.cancelled_poll_generations_for_test(1),
+            vec![1]
+        );
+
+        drop(conn);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn restart_flow_run_does_not_replace_poll_task() {
+        let (mut conn, path) = open_temp_db();
+        insert_flow_with_username(&conn, 1, "shop_abc");
+        let runtime_manager = LiveRuntimeManager::new();
+        runtime_manager
+            .start_flow_session(&conn, 1)
+            .expect("start flow session");
+
+        assert_eq!(runtime_manager.session_generation_for_test(1), Some(1));
+        assert_eq!(runtime_manager.active_poll_task_count_for_test(), 1);
+
+        restart_flow_run_with_conn(&mut conn, &runtime_manager, 1).expect("restart flow run");
+
+        assert!(runtime_manager.session_has_poll_task_for_test(1));
+        assert_eq!(runtime_manager.active_poll_task_count_for_test(), 1);
+        assert_eq!(runtime_manager.session_generation_for_test(1), Some(1));
+        assert!(runtime_manager
+            .cancelled_poll_generations_for_test(1)
+            .is_empty());
+
+        drop(conn);
+        let _ = std::fs::remove_file(&path);
+    }
 }
