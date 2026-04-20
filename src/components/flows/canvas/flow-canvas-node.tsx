@@ -38,12 +38,13 @@ export function FlowCanvasNode({
       type="button"
       onClick={onClick}
       style={style}
+      aria-pressed={selected}
       data-runtime-state={visualState}
       data-active-marker={activeMarker ? "true" : "false"}
       className={cn(
         "absolute box-border flex min-h-0 flex-col gap-1 overflow-hidden rounded-2xl border px-3 py-2.5 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-[border-color,background-color,box-shadow]",
         visualState === "running" &&
-          "runtime-pulse border-[rgba(255,99,99,0.72)] bg-[rgba(255,99,99,0.08)] shadow-[0_0_0_1px_rgba(255,99,99,0.22),0_0_28px_rgba(255,99,99,0.12)]",
+          "border-[rgba(255,99,99,0.72)] bg-[rgba(255,99,99,0.08)] shadow-[0_0_0_1px_rgba(255,99,99,0.22)]",
         visualState === "done" && "border-[rgba(95,201,146,0.35)] bg-[rgba(95,201,146,0.06)]",
         visualState === "error" &&
           "border-[rgba(255,99,99,0.58)] bg-[rgba(255,99,99,0.07)] shadow-[0_0_0_1px_rgba(255,99,99,0.12)]",
@@ -52,6 +53,12 @@ export function FlowCanvasNode({
         selected && "ring-1 ring-[color-mix(in_oklab,var(--color-accent)_30%,transparent)]",
       )}
     >
+      {visualState === "running" ? (
+        <span
+          aria-hidden
+          className="runtime-pulse runtime-pulse-glow pointer-events-none absolute inset-[-8px] rounded-[inherit] border border-[rgba(255,99,99,0.24)] bg-[radial-gradient(circle_at_center,rgba(255,99,99,0.18),rgba(255,99,99,0.06)_48%,transparent_72%)]"
+        />
+      ) : null}
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <span

@@ -8,7 +8,7 @@ test("FlowCanvasNode renders running badge and active marker even without motion
   const markup = renderToStaticMarkup(
     <FlowCanvasNode
       nodeKey="record"
-      selected={false}
+      selected
       hasDraftChanges={false}
       runtimeState="Recording live"
       summary="Max 5 min"
@@ -22,8 +22,10 @@ test("FlowCanvasNode renders running badge and active marker even without motion
 
   assert.match(markup, /Running/);
   assert.match(markup, /Recording live/);
+  assert.match(markup, /aria-pressed="true"/);
   assert.match(markup, /data-runtime-state="running"/);
   assert.match(markup, /data-active-marker="true"/);
+  assert.match(markup, /runtime-pulse-glow/);
 });
 
 test("FlowCanvasNode renders error detail without changing node content structure", () => {

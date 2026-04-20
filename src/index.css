@@ -179,25 +179,25 @@
 @keyframes runtime-pulse {
   0%,
   100% {
-    box-shadow:
-      0 0 0 1px rgba(255, 99, 99, 0.22),
-      0 0 18px rgba(255, 99, 99, 0.12);
+    opacity: 0.28;
+    transform: scale(0.985);
   }
 
   50% {
-    box-shadow:
-      0 0 0 1px rgba(255, 99, 99, 0.34),
-      0 0 30px rgba(255, 99, 99, 0.2);
+    opacity: 0.62;
+    transform: scale(1.02);
   }
 }
 
 .runtime-pulse {
   animation: runtime-pulse 1.8s ease-in-out infinite;
+  transform-origin: center;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .runtime-pulse {
     animation: none;
+    transform: none;
   }
 }
 

@@ -173,7 +173,12 @@ export function FlowDetail({ flowId, onBack }: FlowDetailProps) {
         </div>
       ) : null}
 
-      <FlowCanvas flow={flow} selectedNode={selectedNode} onSelectNode={handleCanvasSelect} />
+      <FlowCanvas
+        flow={flow}
+        selectedNode={selectedNode}
+        runtimeSnapshot={runtimeSnapshot}
+        onSelectNode={handleCanvasSelect}
+      />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <FlowRuntimeTimeline runs={flow?.runs ?? []} nodeRuns={flow?.nodeRuns ?? []} />
