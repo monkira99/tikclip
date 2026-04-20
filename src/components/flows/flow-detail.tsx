@@ -50,7 +50,11 @@ export function shouldFetchDiagnosticsLogs({
   runtimeLogs: Record<number, FlowRuntimeLogEntry[]>;
   flowId: number;
 }): boolean {
-  return diagnosticsOpen && !(flowId in runtimeLogs);
+  if (!diagnosticsOpen) {
+    return false;
+  }
+
+  return (runtimeLogs[flowId]?.length ?? 0) === 0;
 }
 
 export function FlowDetail({ flowId, onBack }: FlowDetailProps) {

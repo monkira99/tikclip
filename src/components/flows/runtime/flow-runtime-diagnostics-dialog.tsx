@@ -28,10 +28,10 @@ export function FlowRuntimeDiagnosticsDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="w-full max-w-[min(72rem,calc(100vw-2rem))] gap-0 p-0 sm:max-w-[min(72rem,calc(100vw-2rem))]"
+        className="flex w-full max-w-[min(72rem,calc(100vw-2rem))] max-h-[min(88vh,56rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(72rem,calc(100vw-2rem))]"
         showCloseButton
       >
-        <div className="p-4 pb-0">
+        <div className="shrink-0 p-4 pb-0">
           <DialogHeader className="space-y-2 text-left">
             <DialogTitle className="text-base font-semibold tracking-[0.01em] text-[var(--color-text)]">
               Runtime diagnostics
@@ -42,7 +42,7 @@ export function FlowRuntimeDiagnosticsDialog({
           </DialogHeader>
         </div>
 
-        <div className="px-4 pb-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
           <RuntimeLogsPanel
             flow={flow}
             logs={logs}

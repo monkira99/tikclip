@@ -88,6 +88,7 @@ test("FlowRuntimeStrip surfaces last error and empty log state when runtime is d
   assert.match(markup, /Caption failed/);
   assert.match(markup, /Caption worker crashed/);
   assert.match(markup, /No logs loaded/);
+  assert.match(markup, /line-clamp-1/);
 });
 
 test("FlowRuntimeStrip falls back to non-running copy without a runtime snapshot", () => {

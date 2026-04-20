@@ -106,7 +106,7 @@ export function FlowRuntimeStrip({
               {primaryCopy.title}
             </p>
             {primaryCopy.detail ? (
-              <p className="text-sm leading-relaxed text-[var(--color-primary)]">{primaryCopy.detail}</p>
+              <p className="line-clamp-1 text-sm leading-relaxed text-[var(--color-primary)]">{primaryCopy.detail}</p>
             ) : null}
           </div>
 

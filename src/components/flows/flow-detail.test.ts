@@ -90,7 +90,7 @@ test("runtime snapshot overlay keeps canvas helper focused on node-level state o
   assert.equal(nodeStateMap.clip.runtimeLabel, "Creating clips");
 });
 
-test("shouldFetchDiagnosticsLogs is false before diagnostics open", () => {
+test("shouldFetchDiagnosticsLogs is false when diagnostics is closed", () => {
   assert.equal(
     shouldFetchDiagnosticsLogs({
       diagnosticsOpen: false,
@@ -101,7 +101,7 @@ test("shouldFetchDiagnosticsLogs is false before diagnostics open", () => {
   );
 });
 
-test("shouldFetchDiagnosticsLogs is true when diagnostics opens and no logs exist yet", () => {
+test("shouldFetchDiagnosticsLogs is true when diagnostics opens and bucket is missing", () => {
   assert.equal(
     shouldFetchDiagnosticsLogs({
       diagnosticsOpen: true,
@@ -112,11 +112,38 @@ test("shouldFetchDiagnosticsLogs is true when diagnostics opens and no logs exis
   );
 });
 
-test("shouldFetchDiagnosticsLogs is false when logs bucket already exists", () => {
+test("shouldFetchDiagnosticsLogs is true when diagnostics opens and bucket is empty", () => {
   assert.equal(
     shouldFetchDiagnosticsLogs({
       diagnosticsOpen: true,
       runtimeLogs: { 7: [] },
+      flowId: 7,
+    }),
+    true,
+  );
+});
+
+test("shouldFetchDiagnosticsLogs is false when diagnostics opens and bucket already has logs", () => {
+  assert.equal(
+    shouldFetchDiagnosticsLogs({
+      diagnosticsOpen: true,
+      runtimeLogs: {
+        7: [
+          {
+            id: "log-1",
+            timestamp: "2026-04-19T09:41:12.381+07:00",
+            level: "info",
+            flow_id: 7,
+            flow_run_id: 42,
+            external_recording_id: null,
+            stage: "record",
+            event: "record_spawned",
+            code: null,
+            message: "Spawned Rust-owned recording worker",
+            context: { room_id: "7312345" },
+          },
+        ],
+      },
       flowId: 7,
     }),
     false,
