@@ -8,6 +8,7 @@ pub struct RecordingStartInput {
     pub stream_url: String,
     pub max_duration_seconds: i64,
     pub external_recording_id: String,
+    pub storage_root: String,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]

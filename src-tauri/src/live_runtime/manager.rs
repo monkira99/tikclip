@@ -24,7 +24,7 @@ use rusqlite::{Connection, OptionalExtension};
 use std::collections::HashMap;
 #[cfg(test)]
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -72,6 +72,7 @@ pub struct LiveRuntimeManager {
     recording_runner: RecordingRunner,
     recording_process_runner: RecordingProcessRunner,
     runtime_db_path: Option<PathBuf>,
+    storage_root: Option<PathBuf>,
     auto_spawn_recording_execution: bool,
     app_handle: Option<AppHandle>,
     #[cfg(test)]
@@ -93,6 +94,7 @@ impl Clone for LiveRuntimeManager {
             recording_runner: self.recording_runner.clone(),
             recording_process_runner: self.recording_process_runner.clone(),
             runtime_db_path: self.runtime_db_path.clone(),
+            storage_root: self.storage_root.clone(),
             auto_spawn_recording_execution: self.auto_spawn_recording_execution,
             app_handle: self.app_handle.clone(),
             #[cfg(test)]
@@ -107,6 +109,16 @@ impl Clone for LiveRuntimeManager {
             before_poll_apply_hook: Arc::clone(&self.before_poll_apply_hook),
         }
     }
+}
+
+fn infer_storage_root_from_db_path(db_path: &Path) -> Option<PathBuf> {
+    let parent = db_path.parent()?;
+    if db_path.file_name().and_then(|name| name.to_str()) == Some("app.db")
+        && parent.file_name().and_then(|name| name.to_str()) == Some("data")
+    {
+        return parent.parent().map(Path::to_path_buf);
+    }
+    Some(parent.to_path_buf())
 }
 
 #[derive(Debug, Clone)]
@@ -162,6 +174,7 @@ impl LiveRuntimeManager {
             recording_runner: RecordingRunner::ffmpeg(),
             recording_process_runner: RecordingProcessRunner::ffmpeg(),
             runtime_db_path: None,
+            storage_root: Some(std::env::temp_dir()),
             auto_spawn_recording_execution: !cfg!(test),
             app_handle: None,
             #[cfg(test)]
@@ -179,11 +192,13 @@ impl LiveRuntimeManager {
 
     #[allow(dead_code)]
     pub fn with_runtime_db_path(db_path: PathBuf) -> Self {
+        let storage_root = infer_storage_root_from_db_path(&db_path);
         Self {
             state: Arc::new(Mutex::new(LiveRuntimeState::default())),
             recording_runner: RecordingRunner::ffmpeg(),
             recording_process_runner: RecordingProcessRunner::ffmpeg(),
             runtime_db_path: Some(db_path),
+            storage_root,
             auto_spawn_recording_execution: !cfg!(test),
             app_handle: None,
             #[cfg(test)]
@@ -204,6 +219,7 @@ impl LiveRuntimeManager {
         db_path: PathBuf,
         recording_runner: RecordingRunner,
     ) -> Self {
+        let storage_root = infer_storage_root_from_db_path(&db_path);
         Self {
             state: Arc::new(Mutex::new(LiveRuntimeState::default())),
             recording_runner: recording_runner.clone(),
@@ -219,6 +235,7 @@ impl LiveRuntimeManager {
                 },
             ),
             runtime_db_path: Some(db_path),
+            storage_root,
             auto_spawn_recording_execution: false,
             app_handle: None,
             runtime_log_emit_error: Arc::new(Mutex::new(None)),
@@ -237,6 +254,7 @@ impl LiveRuntimeManager {
         db_path: PathBuf,
         recording_runner: RecordingRunner,
     ) -> Self {
+        let storage_root = infer_storage_root_from_db_path(&db_path);
         Self {
             state: Arc::new(Mutex::new(LiveRuntimeState::default())),
             recording_runner: recording_runner.clone(),
@@ -252,6 +270,7 @@ impl LiveRuntimeManager {
                 },
             ),
             runtime_db_path: Some(db_path),
+            storage_root,
             auto_spawn_recording_execution: true,
             app_handle: None,
             runtime_log_emit_error: Arc::new(Mutex::new(None)),
@@ -268,6 +287,7 @@ impl LiveRuntimeManager {
         db_path: PathBuf,
         recording_process_runner: RecordingProcessRunner,
     ) -> Self {
+        let storage_root = infer_storage_root_from_db_path(&db_path);
         Self {
             state: Arc::new(Mutex::new(LiveRuntimeState::default())),
             recording_runner: RecordingRunner::from_fn(|_, _| {
@@ -275,6 +295,7 @@ impl LiveRuntimeManager {
             }),
             recording_process_runner,
             runtime_db_path: Some(db_path),
+            storage_root,
             auto_spawn_recording_execution: true,
             app_handle: None,
             runtime_log_emit_error: Arc::new(Mutex::new(None)),
@@ -287,6 +308,10 @@ impl LiveRuntimeManager {
 
     pub fn attach_app_handle(&mut self, app_handle: AppHandle) {
         self.app_handle = Some(app_handle);
+    }
+
+    pub fn attach_storage_root(&mut self, storage_root: PathBuf) {
+        self.storage_root = Some(storage_root);
     }
 
     fn runtime_snapshot_for_event(
@@ -1088,6 +1113,12 @@ impl LiveRuntimeManager {
             stream_url: stream_url.to_string(),
             max_duration_seconds: load_record_duration_seconds(conn, flow_id)?,
             external_recording_id: worker::generate_external_recording_id(flow_run_id),
+            storage_root: self
+                .storage_root
+                .as_ref()
+                .ok_or_else(|| "missing storage_root for recording runtime".to_string())?
+                .to_string_lossy()
+                .into_owned(),
         };
         let _ = self.log_runtime_event(
             flow_id,
@@ -2786,7 +2817,7 @@ mod tests {
         assert!(row
             .1
             .as_deref()
-            .is_some_and(|value| value.ends_with(".mp4")));
+            .is_some_and(|value| value.contains("/records/") && value.ends_with(".mp4")));
         assert!(row
             .2
             .as_deref()

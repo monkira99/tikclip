@@ -133,8 +133,8 @@ pub fn build_ffmpeg_command(
 
 #[allow(dead_code)]
 pub fn build_recording_output_path(input: &RecordingStartInput) -> String {
-    std::env::temp_dir()
-        .join("tikclip-recordings")
+    std::path::Path::new(input.storage_root.as_str())
+        .join("records")
         .join(format!(
             "flow-{}-run-{}-{}.mp4",
             input.flow_id, input.flow_run_id, input.external_recording_id
@@ -273,6 +273,7 @@ mod tests {
             stream_url: "https://example.com/live.flv".to_string(),
             max_duration_seconds: 300,
             external_recording_id: "ext-123".to_string(),
+            storage_root: "/Users/test/.tikclip".to_string(),
         };
 
         let argv = build_ffmpeg_argv(&input, "/tmp/out.mp4");
@@ -300,10 +301,12 @@ mod tests {
             stream_url: "https://example.com/live.flv".to_string(),
             max_duration_seconds: 300,
             external_recording_id: "ext-123".to_string(),
+            storage_root: "/Users/test/.tikclip".to_string(),
         };
 
         let path = build_recording_output_path(&input);
 
+        assert!(path.contains("/Users/test/.tikclip/records/"));
         assert!(path.contains("flow-3-run-11-ext-123.mp4"));
     }
 
@@ -324,6 +327,7 @@ mod tests {
             stream_url: "https://example.com/live.flv".to_string(),
             max_duration_seconds: 300,
             external_recording_id: "ext-123".to_string(),
+            storage_root: "/Users/test/.tikclip".to_string(),
         };
         let runner = RecordingRunner::from_fn(|input, output_path| {
             Ok(RecordingFinishInput {
@@ -356,6 +360,7 @@ mod tests {
             stream_url: "https://example.com/live.flv".to_string(),
             max_duration_seconds: 300,
             external_recording_id: "ext-123".to_string(),
+            storage_root: "/Users/test/.tikclip".to_string(),
         };
 
         let execution = build_recording_execution(&input);
@@ -374,6 +379,7 @@ mod tests {
             stream_url: "https://example.com/live.flv".to_string(),
             max_duration_seconds: 300,
             external_recording_id: "ext-123".to_string(),
+            storage_root: "/Users/test/.tikclip".to_string(),
         };
         let cancelled = Arc::new(Mutex::new(false));
         let cancelled_flag = Arc::clone(&cancelled);

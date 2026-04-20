@@ -130,6 +130,7 @@ pub fn run() {
             let tikclip_env = sidecar_env::build_sidecar_env(&conn, &storage_path)
                 .expect("failed to build sidecar env from settings");
             let mut runtime_manager = LiveRuntimeManager::with_runtime_db_path(db_path.clone());
+            runtime_manager.attach_storage_root(storage_path.clone());
             runtime_manager.attach_app_handle(app.handle().clone());
             if let Err(err) = runtime_manager.bootstrap_enabled_flows(&conn) {
                 log::warn!("failed to bootstrap enabled live runtime flows: {}", err);
