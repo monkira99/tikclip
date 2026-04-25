@@ -351,6 +351,7 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
       const result = await flowStoreApi.publishFlowDefinition(flowId);
       if (options.restartCurrentRun && result.isRunning) {
         await flowStoreApi.restartFlowRun(flowId);
+        await get().refreshRuntime();
       }
       await get().fetchFlowDetail(flowId);
       set({ draftDirty: false });

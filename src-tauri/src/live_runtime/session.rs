@@ -178,6 +178,12 @@ impl LiveRuntimeSession {
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
+    pub fn mark_flow_run_stopped(&mut self) {
+        self.active_flow_run_id = None;
+        self.downstream_status = None;
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn mark_downstream_stage(&mut self, flow_run_id: i64, status: &str) {
         self.active_flow_run_id = Some(flow_run_id);
         self.downstream_status = Some(status.to_string());
@@ -199,6 +205,18 @@ impl LiveRuntimeSession {
     ) {
         self.last_checked_at = Some(checked_at);
         self.last_check_live = Some(live);
+        self.next_poll_at = Some(next_poll_at);
+        self.poll_interval_seconds = Some(poll_interval_seconds);
+    }
+
+    pub fn mark_poll_retry(
+        &mut self,
+        checked_at: String,
+        next_poll_at: String,
+        poll_interval_seconds: i64,
+    ) {
+        self.last_checked_at = Some(checked_at);
+        self.last_check_live = None;
         self.next_poll_at = Some(next_poll_at);
         self.poll_interval_seconds = Some(poll_interval_seconds);
     }

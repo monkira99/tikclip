@@ -544,7 +544,27 @@ impl LiveRuntimeManager {
             return Ok(());
         }
 
-        let live_status = self.resolve_live_status_for_poll(&config)?;
+        let live_status = match self.resolve_live_status_for_poll(&config) {
+            Ok(status) => status,
+            Err(err) => {
+                self.mark_poll_retry(flow_id, config.poll_interval_seconds)?;
+                let _ = self.log_runtime_event(
+                    flow_id,
+                    None,
+                    None,
+                    "start",
+                    "poll_failed",
+                    FlowRuntimeLogLevel::Warn,
+                    Some("start.poll_failed"),
+                    "Live check failed; watcher will retry on the next poll",
+                    serde_json::json!({
+                        "error": err,
+                    }),
+                );
+                self.emit_runtime_update_for_flow(conn, flow_id)?;
+                return Ok(());
+            }
+        };
         #[cfg(test)]
         {
             if let Some(hook) = self
@@ -582,6 +602,16 @@ impl LiveRuntimeManager {
         let mut state = self.state.lock().map_err(|e| e.to_string())?;
         if let Some(session) = state.sessions_by_flow.get_mut(&flow_id) {
             session.mark_poll_checked(checked_at, live, next_poll_at, poll_interval_seconds);
+        }
+        Ok(())
+    }
+
+    fn mark_poll_retry(&self, flow_id: i64, poll_interval_seconds: i64) -> Result<(), String> {
+        let checked_at = now_timestamp_hcm();
+        let next_poll_at = timestamp_after_seconds_hcm(poll_interval_seconds);
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
+        if let Some(session) = state.sessions_by_flow.get_mut(&flow_id) {
+            session.mark_poll_retry(checked_at, next_poll_at, poll_interval_seconds);
         }
         Ok(())
     }
@@ -732,16 +762,23 @@ impl LiveRuntimeManager {
         Ok(())
     }
 
-    pub fn bootstrap_enabled_flows(&self, conn: &Connection) -> Result<(), String> {
-        let mut stmt = conn
-            .prepare("SELECT id FROM flows WHERE enabled = 1 ORDER BY id ASC")
-            .map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map([], |row| row.get::<_, i64>(0))
-            .map_err(|e| e.to_string())?;
+    pub fn bootstrap_enabled_flows(&self, conn: &mut Connection) -> Result<(), String> {
+        let flow_ids = {
+            let mut stmt = conn
+                .prepare("SELECT id FROM flows WHERE enabled = 1 ORDER BY id ASC")
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map([], |row| row.get::<_, i64>(0))
+                .map_err(|e| e.to_string())?;
+            let mut flow_ids = Vec::new();
+            for row in rows {
+                flow_ids.push(row.map_err(|e| e.to_string())?);
+            }
+            flow_ids
+        };
 
-        for row in rows {
-            let flow_id = row.map_err(|e| e.to_string())?;
+        for flow_id in flow_ids {
+            self.cancel_orphaned_bootstrap_run(conn, flow_id)?;
             let _ = self.log_runtime_event(
                 flow_id,
                 None,
@@ -877,6 +914,65 @@ impl LiveRuntimeManager {
         );
         self.spawn_poll_loop_worker(flow_id, poll_interval_seconds, poll_task);
         self.emit_runtime_update_for_flow(conn, flow_id)?;
+        Ok(())
+    }
+
+    fn cancel_orphaned_bootstrap_run(
+        &self,
+        conn: &mut Connection,
+        flow_id: i64,
+    ) -> Result<(), String> {
+        let Some(flow_run_id) = runtime_store::load_latest_running_flow_run_id(conn, flow_id)?
+        else {
+            return Ok(());
+        };
+
+        conn.execute(
+            &format!(
+                "UPDATE recordings SET \
+                 status = 'cancelled', \
+                 ended_at = COALESCE(ended_at, {}), \
+                 error_message = COALESCE(NULLIF(error_message, ''), 'Interrupted by app restart'), \
+                 duration_seconds = CASE \
+                   WHEN duration_seconds > 0 THEN duration_seconds \
+                   WHEN started_at IS NOT NULL THEN MAX(0, CAST((julianday({}) - julianday(started_at)) * 86400 AS INTEGER)) \
+                   ELSE 0 END \
+                 WHERE flow_run_id = ?1 AND status = 'recording'",
+                crate::time_hcm::SQL_NOW_HCM,
+                crate::time_hcm::SQL_NOW_HCM
+            ),
+            [flow_run_id],
+        )
+        .map_err(|e| e.to_string())?;
+        runtime_store::cancel_flow_run_by_id(
+            conn,
+            flow_run_id,
+            Some("Interrupted by app restart"),
+        )?;
+        update_flow_runtime_by_flow_id(
+            conn,
+            flow_id,
+            &UpdateFlowRuntimeByAccountInput {
+                status: Some("watching".to_string()),
+                current_node: Some("start".to_string()),
+                last_live_at: None,
+                last_run_at: Some(now_timestamp_hcm()),
+                last_error: Some(String::new()),
+            },
+        )?;
+        let _ = self.log_runtime_event(
+            flow_id,
+            Some(flow_run_id),
+            None,
+            "session",
+            "orphaned_run_cancelled",
+            FlowRuntimeLogLevel::Warn,
+            None,
+            "Cancelled stale runtime run during app bootstrap",
+            serde_json::json!({
+                "flow_run_id": flow_run_id,
+            }),
+        );
         Ok(())
     }
 
@@ -1048,6 +1144,7 @@ impl LiveRuntimeManager {
         if live_status.room_id.trim().is_empty() {
             return Ok(None);
         }
+        let detected_at = now_timestamp_hcm();
         let _ = self.log_runtime_event(
             flow_id,
             None,
@@ -1063,6 +1160,17 @@ impl LiveRuntimeManager {
                 "has_stream_url": live_status.stream_url.is_some(),
             }),
         );
+        update_flow_runtime_by_flow_id(
+            conn,
+            flow_id,
+            &UpdateFlowRuntimeByAccountInput {
+                status: None,
+                current_node: None,
+                last_live_at: Some(detected_at.clone()),
+                last_run_at: None,
+                last_error: Some(String::new()),
+            },
+        )?;
         if !crate::live_runtime::session::should_start_new_run(
             Some(live_status.room_id.as_str()),
             last_completed_room_id.as_deref(),
@@ -1112,7 +1220,7 @@ impl LiveRuntimeManager {
             room_id: live_status.room_id.clone(),
             stream_url: stream_url.to_string(),
             viewer_count: live_status.viewer_count,
-            detected_at: now_timestamp_hcm(),
+            detected_at: detected_at.clone(),
         })
         .map_err(|e| e.to_string())?;
         let flow_run_id = runtime_store::create_run_with_completed_start_node(
@@ -1172,7 +1280,7 @@ impl LiveRuntimeManager {
             &UpdateFlowRuntimeByAccountInput {
                 status: Some("recording".to_string()),
                 current_node: Some("record".to_string()),
-                last_live_at: None,
+                last_live_at: Some(detected_at),
                 last_run_at: Some(now_timestamp_hcm()),
                 last_error: Some(String::new()),
             },
@@ -1526,24 +1634,73 @@ impl LiveRuntimeManager {
         Ok(())
     }
 
-    pub fn restart_active_run(&self, conn: &mut Connection, flow_id: i64) -> Result<i64, String> {
-        {
+    pub fn restart_active_run(&self, conn: &mut Connection, flow_id: i64) -> Result<(), String> {
+        let poll_interval_seconds = load_flow_runtime_config(conn, flow_id)?.poll_interval_seconds;
+        let active_recording = {
             let state = self.state.lock().map_err(|e| e.to_string())?;
             if !state.sessions_by_flow.contains_key(&flow_id) {
                 return Err(format!("missing live runtime session for flow {flow_id}"));
             }
+            state.active_recordings_by_flow.get(&flow_id).cloned()
+        };
+        let running_run_id = runtime_store::load_latest_running_flow_run_id(conn, flow_id)?;
+
+        if let Some(handle) = &active_recording {
+            handle.cancelled.store(true, Ordering::SeqCst);
+            if let Some(cancel_process) = &handle.cancel_process {
+                cancel_process()?;
+            }
+            self.finalize_recording_by_key(
+                conn,
+                &handle.external_recording_id,
+                None,
+                false,
+                Some("Recording cancelled"),
+            )?;
         }
 
-        let new_run_id =
-            runtime_store::restart_running_flow_runs_for_flow(conn, flow_id, "publish_restart")?;
-
+        if let Some(run_id) = running_run_id {
+            runtime_store::cancel_flow_run_by_id(conn, run_id, Some("Publish restart"))?;
+        } else {
+            runtime_store::cancel_latest_running_flow_run(conn, flow_id, Some("Publish restart"))?;
+        }
+        update_flow_runtime_by_flow_id(
+            conn,
+            flow_id,
+            &UpdateFlowRuntimeByAccountInput {
+                status: Some("watching".to_string()),
+                current_node: Some("start".to_string()),
+                last_live_at: None,
+                last_run_at: Some(now_timestamp_hcm()),
+                last_error: Some(String::new()),
+            },
+        )?;
         let mut state = self.state.lock().map_err(|e| e.to_string())?;
-        let session = state
+        let mut session = state
             .sessions_by_flow
-            .get_mut(&flow_id)
+            .remove(&flow_id)
             .ok_or_else(|| format!("missing live runtime session for flow {flow_id}"))?;
-        session.mark_flow_run_started(new_run_id);
-        Ok(new_run_id)
+        session.mark_flow_run_stopped();
+        let poll_task = Self::replace_poll_task_for_session(&mut state, flow_id, &mut session);
+        state.sessions_by_flow.insert(flow_id, session);
+        drop(state);
+        let _ = self.log_runtime_event(
+            flow_id,
+            None,
+            None,
+            "session",
+            "publish_restart_completed",
+            FlowRuntimeLogLevel::Info,
+            None,
+            "Stopped current run after publishing changes",
+            serde_json::json!({
+                "flow_id": flow_id,
+                "active_recording_cancelled": active_recording.is_some(),
+            }),
+        );
+        self.spawn_poll_loop_worker(flow_id, poll_interval_seconds, poll_task);
+        self.emit_runtime_update_for_flow(conn, flow_id)?;
+        Ok(())
     }
 
     #[cfg(test)]
@@ -2404,16 +2561,16 @@ mod tests {
 
     #[test]
     fn bootstrap_enabled_flows_starts_enabled_flows_once() {
-        let (conn, path) = open_temp_db();
+        let (mut conn, path) = open_temp_db();
         insert_flow(&conn, 1, true, "shop_abc");
         insert_flow(&conn, 2, false, "shop_xyz");
         let manager = LiveRuntimeManager::new();
 
         manager
-            .bootstrap_enabled_flows(&conn)
+            .bootstrap_enabled_flows(&mut conn)
             .expect("first bootstrap");
         manager
-            .bootstrap_enabled_flows(&conn)
+            .bootstrap_enabled_flows(&mut conn)
             .expect("second bootstrap");
 
         let sessions = manager.list_sessions();
@@ -2437,8 +2594,8 @@ mod tests {
     }
 
     #[test]
-    fn bootstrap_enabled_flows_restores_active_flow_run_id_from_running_db_run() {
-        let (conn, path) = open_temp_db();
+    fn bootstrap_enabled_flows_cancels_orphaned_running_db_run() {
+        let (mut conn, path) = open_temp_db();
         insert_flow(&conn, 1, true, "shop_abc");
         conn.execute(
             "INSERT INTO flow_runs (id, flow_id, definition_version, status, started_at, trigger_reason) \
@@ -2446,26 +2603,46 @@ mod tests {
             [],
         )
         .expect("insert running flow run");
+        conn.execute(
+            "INSERT INTO accounts (id, username, display_name) VALUES (1, 'shop_abc', 'shop_abc')",
+            [],
+        )
+        .expect("insert account");
+        conn.execute(
+            "INSERT INTO recordings (id, account_id, room_id, status, duration_seconds, flow_id, flow_run_id) \
+             VALUES (91, 1, '7312345', 'recording', 0, 1, 41)",
+            [],
+        )
+        .expect("insert orphaned recording row");
         let manager = LiveRuntimeManager::new();
 
         manager
-            .bootstrap_enabled_flows(&conn)
+            .bootstrap_enabled_flows(&mut conn)
             .expect("bootstrap enabled flows");
-        let flow_run_id = manager.session_active_flow_run_id_for_test(1);
 
-        assert_eq!(flow_run_id, Some(41));
-        let duplicate_attempt = manager
-            .handle_live_detected(
-                &conn,
-                1,
-                &LiveStatus {
-                    room_id: "7312345".to_string(),
-                    stream_url: Some("https://example.com/live.flv".to_string()),
-                    viewer_count: Some(77),
-                },
+        assert_eq!(manager.session_active_flow_run_id_for_test(1), None);
+        assert!(manager.session_is_polling_for_test(1));
+        let (run_status, run_error): (String, Option<String>) = conn
+            .query_row(
+                "SELECT status, error FROM flow_runs WHERE id = 41",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
-            .expect("handle live while run restored");
-        assert_eq!(duplicate_attempt, None);
+            .expect("read flow run");
+        assert_eq!(run_status, "cancelled");
+        assert_eq!(run_error.as_deref(), Some("Interrupted by app restart"));
+        let (recording_status, recording_error): (String, Option<String>) = conn
+            .query_row(
+                "SELECT status, error_message FROM recordings WHERE id = 91",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read recording row");
+        assert_eq!(recording_status, "cancelled");
+        assert_eq!(
+            recording_error.as_deref(),
+            Some("Interrupted by app restart")
+        );
 
         drop(conn);
         let _ = std::fs::remove_file(path);
@@ -2473,7 +2650,7 @@ mod tests {
 
     #[test]
     fn bootstrap_enabled_flows_skips_bad_flow_and_starts_valid_enabled_flow() {
-        let (conn, path) = open_temp_db();
+        let (mut conn, path) = open_temp_db();
         insert_flow(&conn, 1, true, "shop_abc");
         insert_flow(&conn, 2, true, "shop_xyz");
         conn.execute(
@@ -2484,7 +2661,7 @@ mod tests {
         let manager = LiveRuntimeManager::new();
 
         manager
-            .bootstrap_enabled_flows(&conn)
+            .bootstrap_enabled_flows(&mut conn)
             .expect("bootstrap should continue");
 
         let sessions = manager.list_sessions();

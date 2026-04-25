@@ -259,7 +259,7 @@ export async function publishFlowDefinition(flowId: number): Promise<PublishFlow
 
 export type RestartFlowRunResult = {
   flowId: number;
-  newRunId: number;
+  restarted: boolean;
 };
 
 export async function restartFlowRun(flowId: number): Promise<RestartFlowRunResult> {

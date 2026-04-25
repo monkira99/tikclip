@@ -141,7 +141,8 @@ pub fn upsert_running_record_node_run(
     }
 }
 
-/// Cancels in-flight node runs + running `flow_runs`, then starts a new `running` row (publish restart).
+/// Legacy helper for tests/migrations that need to cancel in-flight work and insert a replacement run.
+#[allow(dead_code)]
 pub fn restart_running_flow_runs_for_flow(
     conn: &mut Connection,
     flow_id: i64,

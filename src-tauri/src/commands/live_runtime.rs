@@ -2,8 +2,8 @@ use crate::live_runtime::logs::FlowRuntimeLogEntry;
 use crate::live_runtime::manager::LiveRuntimeManager;
 use crate::live_runtime::session::runtime_current_node_for_status;
 use crate::tiktok::types::LiveStatus;
-use crate::workflow::runtime_store;
 use crate::AppState;
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -39,6 +39,8 @@ pub struct FlowRuntimeSnapshot {
     pub last_live_at: Option<String>,
     pub last_error: Option<String>,
     pub active_flow_run_id: Option<i64>,
+    pub active_flow_run_started_at: Option<String>,
+    pub active_viewer_count: Option<i64>,
     pub last_checked_at: Option<String>,
     pub last_check_live: Option<bool>,
     pub next_poll_at: Option<String>,
@@ -80,6 +82,44 @@ fn load_runtime_current_node(
     Ok(current_node.or_else(|| runtime_current_node_for_status(status).map(str::to_string)))
 }
 
+fn load_runtime_active_flow_run(
+    conn: &rusqlite::Connection,
+    flow_id: i64,
+) -> Result<Option<(i64, String)>, String> {
+    conn.query_row(
+        "SELECT id, started_at FROM flow_runs WHERE flow_id = ?1 AND status = 'running' \
+         ORDER BY id DESC LIMIT 1",
+        [flow_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+fn load_runtime_active_viewer_count(
+    conn: &rusqlite::Connection,
+    flow_run_id: Option<i64>,
+) -> Result<Option<i64>, String> {
+    let Some(flow_run_id) = flow_run_id else {
+        return Ok(None);
+    };
+    let raw: Option<String> = conn
+        .query_row(
+            "SELECT output_json FROM flow_node_runs \
+             WHERE flow_run_id = ?1 AND node_key = 'start' AND status = 'completed' \
+             ORDER BY id DESC LIMIT 1",
+            [flow_run_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    let value: serde_json::Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    Ok(value.get("viewer_count").and_then(|value| value.as_i64()))
+}
+
 pub fn list_live_runtime_snapshots_with_conn(
     conn: &rusqlite::Connection,
     manager: &LiveRuntimeManager,
@@ -88,6 +128,8 @@ pub fn list_live_runtime_snapshots_with_conn(
         .list_sessions()
         .into_iter()
         .map(|session| {
+            let active_flow_run = load_runtime_active_flow_run(conn, session.flow_id)?;
+            let active_flow_run_id = active_flow_run.as_ref().map(|row| row.0);
             Ok(FlowRuntimeSnapshot {
                 flow_id: session.flow_id,
                 status: session.status.clone(),
@@ -96,10 +138,9 @@ pub fn list_live_runtime_snapshots_with_conn(
                 username: session.username,
                 last_live_at: load_runtime_last_live_at(conn, session.flow_id)?,
                 last_error: session.last_error,
-                active_flow_run_id: runtime_store::load_latest_running_flow_run_id(
-                    conn,
-                    session.flow_id,
-                )?,
+                active_flow_run_id,
+                active_flow_run_started_at: active_flow_run.map(|row| row.1),
+                active_viewer_count: load_runtime_active_viewer_count(conn, active_flow_run_id)?,
                 last_checked_at: session.last_checked_at,
                 last_check_live: session.last_check_live,
                 next_poll_at: session.next_poll_at,

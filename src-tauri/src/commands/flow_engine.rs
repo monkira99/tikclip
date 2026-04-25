@@ -484,7 +484,7 @@ pub fn publish_flow_definition(
 #[serde(rename_all = "camelCase")]
 pub struct RestartFlowRunResult {
     pub flow_id: i64,
-    pub new_run_id: i64,
+    pub restarted: bool,
 }
 
 fn restart_flow_run_with_conn(
@@ -503,14 +503,14 @@ fn restart_flow_run_with_conn(
         return Err(format!("flow {flow_id} not found"));
     }
 
-    let new_run_id = runtime_manager.restart_active_run(conn, flow_id)?;
+    runtime_manager.restart_active_run(conn, flow_id)?;
     Ok(RestartFlowRunResult {
         flow_id,
-        new_run_id,
+        restarted: true,
     })
 }
 
-/// Cancels any `running` `flow_runs` / active `flow_node_runs` for this flow and inserts a new `running` run.
+/// Cancels any active run for this flow and returns the live session to watcher mode.
 #[tauri::command]
 pub fn restart_flow_run(
     state: State<'_, AppState>,
@@ -1017,16 +1017,53 @@ mod tests {
             )
             .expect("handle live")
             .expect("create initial run");
+        conn.execute(
+            "UPDATE flows SET status = 'processing', current_node = 'clip' WHERE id = 1",
+            [],
+        )
+        .expect("set stale runtime state");
 
         let result =
             restart_flow_run_with_conn(&mut conn, &runtime_manager, 1).expect("restart flow run");
 
         assert_eq!(result.flow_id, 1);
-        assert_ne!(result.new_run_id, first_run_id);
+        assert!(result.restarted);
+        assert_eq!(runtime_manager.session_active_flow_run_id_for_test(1), None);
+        assert!(runtime_manager.session_is_polling_for_test(1));
+        assert!(runtime_manager.session_has_poll_task_for_test(1));
+        assert_eq!(runtime_manager.active_poll_task_count_for_test(), 1);
         assert_eq!(
-            runtime_manager.session_active_flow_run_id_for_test(1),
-            Some(result.new_run_id)
+            runtime_manager.cancelled_poll_generations_for_test(1),
+            vec![1]
         );
+
+        let (run_status, run_error): (String, Option<String>) = conn
+            .query_row(
+                "SELECT status, error FROM flow_runs WHERE id = ?1",
+                [first_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read cancelled run");
+        assert_eq!(run_status, "cancelled");
+        assert_eq!(run_error.as_deref(), Some("Publish restart"));
+
+        let (flow_status, current_node): (String, Option<String>) = conn
+            .query_row(
+                "SELECT status, current_node FROM flows WHERE id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read flow runtime state");
+        assert_eq!(flow_status, "watching");
+        assert_eq!(current_node.as_deref(), Some("start"));
+
+        let snapshot = runtime_manager
+            .take_latest_runtime_event_for_test()
+            .expect("runtime event");
+        assert_eq!(snapshot.status, "watching");
+        assert_eq!(snapshot.current_node.as_deref(), Some("start"));
+        assert_eq!(snapshot.active_flow_run_id, None);
+        assert_eq!(runtime_manager.session_active_flow_run_id_for_test(1), None);
 
         drop(conn);
         let _ = std::fs::remove_file(&path);
@@ -1096,7 +1133,7 @@ mod tests {
     }
 
     #[test]
-    fn restart_flow_run_does_not_replace_poll_task() {
+    fn restart_flow_run_refreshes_poll_task() {
         let (mut conn, path) = open_temp_db();
         insert_flow_with_username(&conn, 1, "shop_abc");
         let runtime_manager = LiveRuntimeManager::new();
@@ -1111,10 +1148,12 @@ mod tests {
 
         assert!(runtime_manager.session_has_poll_task_for_test(1));
         assert_eq!(runtime_manager.active_poll_task_count_for_test(), 1);
-        assert_eq!(runtime_manager.session_generation_for_test(1), Some(1));
-        assert!(runtime_manager
-            .cancelled_poll_generations_for_test(1)
-            .is_empty());
+        assert_eq!(runtime_manager.session_generation_for_test(1), Some(2));
+        assert!(runtime_manager.session_is_polling_for_test(1));
+        assert_eq!(
+            runtime_manager.cancelled_poll_generations_for_test(1),
+            vec![1]
+        );
 
         drop(conn);
         let _ = std::fs::remove_file(&path);

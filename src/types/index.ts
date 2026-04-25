@@ -127,6 +127,8 @@ export interface FlowRuntimeSnapshot {
   last_live_at: string | null;
   last_error: string | null;
   active_flow_run_id: number | null;
+  active_flow_run_started_at?: string | null;
+  active_viewer_count?: number | null;
   last_checked_at?: string | null;
   last_check_live?: boolean | null;
   next_poll_at?: string | null;

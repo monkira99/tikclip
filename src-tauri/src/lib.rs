@@ -128,13 +128,13 @@ pub fn run() {
             std::fs::create_dir_all(&storage_path).ok();
 
             let db_path = storage_path.join("data").join("app.db");
-            let conn = initialize_database(&db_path).expect("failed to initialize database");
+            let mut conn = initialize_database(&db_path).expect("failed to initialize database");
             let tikclip_env = sidecar_env::build_sidecar_env(&conn, &storage_path)
                 .expect("failed to build sidecar env from settings");
             let mut runtime_manager = LiveRuntimeManager::with_runtime_db_path(db_path.clone());
             runtime_manager.attach_storage_root(storage_path.clone());
             runtime_manager.attach_app_handle(app.handle().clone());
-            if let Err(err) = runtime_manager.bootstrap_enabled_flows(&conn) {
+            if let Err(err) = runtime_manager.bootstrap_enabled_flows(&mut conn) {
                 log::warn!("failed to bootstrap enabled live runtime flows: {}", err);
             }
 
