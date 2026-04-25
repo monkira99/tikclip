@@ -109,10 +109,11 @@ fn load_runtime_active_viewer_count(
              WHERE flow_run_id = ?1 AND node_key = 'start' AND status = 'completed' \
              ORDER BY id DESC LIMIT 1",
             [flow_run_id],
-            |row| row.get(0),
+            |row| row.get::<_, Option<String>>(0),
         )
         .optional()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?
+        .flatten();
     let Some(raw) = raw else {
         return Ok(None);
     };
