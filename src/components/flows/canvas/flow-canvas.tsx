@@ -7,6 +7,7 @@ import {
 } from "@/components/flows/canvas/flow-canvas-layout";
 import { FlowCanvasNode, type FlowCanvasNodeDetail } from "@/components/flows/canvas/flow-canvas-node";
 import { deriveCanvasNodeStateMap } from "@/components/flows/canvas/flow-canvas-runtime-state";
+import { formatDuration } from "@/lib/format";
 import type { FlowEditorPayload, FlowNodeKey, FlowRuntimeSnapshot, FlowRunRow } from "@/types";
 
 /** Vertical center of the node row inside `sceneHeight` (top margin + NODE_H + bottom margin). */
@@ -87,17 +88,6 @@ function formatCountdown(target: string | null | undefined, nowMs: number): stri
   const remaining = Math.max(0, Math.ceil((timestamp - nowMs) / 1000));
   const minutes = Math.floor(remaining / 60);
   const seconds = remaining % 60;
-  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-}
-
-function formatDuration(totalSeconds: number): string {
-  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
-  const hours = Math.floor(safeSeconds / 3600);
-  const minutes = Math.floor((safeSeconds % 3600) / 60);
-  const seconds = safeSeconds % 60;
-  if (hours > 0) {
-    return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
-  }
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 

@@ -17,24 +17,9 @@ import {
   updateClipStatus,
   updateClipTitle,
 } from "@/lib/api";
+import { formatBytes, formatDuration } from "@/lib/format";
 import { useClipStore } from "@/stores/clip-store";
 import type { Clip, ClipStatus, Product } from "@/types";
-
-function formatBytes(n: number): string {
-  if (n < 1024) {
-    return `${n} B`;
-  }
-  if (n < 1024 * 1024) {
-    return `${(n / 1024).toFixed(1)} KB`;
-  }
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatDuration(totalSeconds: number): string {
-  const m = Math.floor(totalSeconds / 60);
-  const s = Math.floor(totalSeconds % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
 
 const STATUS_OPTIONS: ClipStatus[] = ["draft", "ready", "posted", "archived"];
 

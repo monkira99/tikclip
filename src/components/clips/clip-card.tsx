@@ -3,24 +3,9 @@ import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { ClipStatusBadge } from "@/components/clips/clip-status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
+import { formatBytes, formatDuration } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Clip } from "@/types";
-
-function formatDuration(totalSeconds: number): string {
-  const m = Math.floor(totalSeconds / 60);
-  const s = Math.floor(totalSeconds % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) {
-    return `${n} B`;
-  }
-  if (n < 1024 * 1024) {
-    return `${(n / 1024).toFixed(1)} KB`;
-  }
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 interface ClipCardProps {
   clip: Clip;
