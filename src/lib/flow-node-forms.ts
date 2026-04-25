@@ -3,10 +3,6 @@ function num(value: unknown, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function bool(value: unknown): boolean {
-  return value === true || value === 1 || value === "1";
-}
-
 function normalizeUsername(value: unknown): string {
   if (typeof value !== "string") {
     return "";
@@ -77,7 +73,24 @@ export function serializeStartNodeDraft(form: StartNodeForm): string {
 
 export type RecordNodeForm = {
   max_duration_minutes: number;
+  speech_merge_gap_sec: number;
+  stt_num_threads: number;
+  stt_quantize: "auto" | "fp32" | "int8";
 };
+
+function sttQuantize(value: unknown): "auto" | "fp32" | "int8" {
+  if (typeof value !== "string") {
+    return "auto";
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "fp32" || normalized === "float32") {
+    return "fp32";
+  }
+  if (normalized === "int8") {
+    return "int8";
+  }
+  return "auto";
+}
 
 export function parseRecordNodeDraft(raw: string): RecordNodeForm {
   let value: Record<string, unknown> = {};
@@ -99,24 +112,25 @@ export function parseRecordNodeDraft(raw: string): RecordNodeForm {
       minutesValue !== undefined
         ? Math.max(1, Math.floor(num(minutesValue, 5)))
         : secondsToRoundedUpMinutes(secondsValue, 300),
+    speech_merge_gap_sec: Math.max(0, num(value.speech_merge_gap_sec, 0.5)),
+    stt_num_threads: Math.max(1, Math.floor(num(value.stt_num_threads, 4))),
+    stt_quantize: sttQuantize(value.stt_quantize),
   };
 }
 
 export function serializeRecordNodeDraft(form: RecordNodeForm): string {
   return JSON.stringify({
     max_duration_minutes: form.max_duration_minutes,
+    speech_merge_gap_sec: form.speech_merge_gap_sec,
+    stt_num_threads: form.stt_num_threads,
+    stt_quantize: form.stt_quantize,
   });
 }
 
 export type ClipNodeForm = {
-  auto_process_after_record: boolean;
   clip_min_duration: number;
   clip_max_duration: number;
-  audio_processing_enabled: boolean;
-  speech_merge_gap_sec: number;
   speech_cut_tolerance_sec: number;
-  stt_num_threads: number;
-  stt_quantize: boolean;
 };
 
 export function parseClipNodeDraft(raw: string): ClipNodeForm {
@@ -127,27 +141,17 @@ export function parseClipNodeDraft(raw: string): ClipNodeForm {
     value = {};
   }
   return {
-    auto_process_after_record: bool(value.auto_process_after_record),
     clip_min_duration: Math.max(1, Math.floor(num(value.clip_min_duration, 15))),
     clip_max_duration: Math.max(1, Math.floor(num(value.clip_max_duration, 120))),
-    audio_processing_enabled: bool(value.audio_processing_enabled),
-    speech_merge_gap_sec: Math.max(0, num(value.speech_merge_gap_sec, 1.2)),
     speech_cut_tolerance_sec: Math.max(0, num(value.speech_cut_tolerance_sec, 0.4)),
-    stt_num_threads: Math.max(1, Math.floor(num(value.stt_num_threads, 4))),
-    stt_quantize: bool(value.stt_quantize),
   };
 }
 
 export function serializeClipNodeDraft(form: ClipNodeForm): string {
   return JSON.stringify({
-    auto_process_after_record: form.auto_process_after_record,
     clip_min_duration: form.clip_min_duration,
     clip_max_duration: form.clip_max_duration,
-    audio_processing_enabled: form.audio_processing_enabled,
-    speech_merge_gap_sec: form.speech_merge_gap_sec,
     speech_cut_tolerance_sec: form.speech_cut_tolerance_sec,
-    stt_num_threads: form.stt_num_threads,
-    stt_quantize: form.stt_quantize,
   });
 }
 

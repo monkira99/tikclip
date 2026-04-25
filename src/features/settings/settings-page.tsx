@@ -14,10 +14,8 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { PathRow } from "@/features/settings/path-row";
 import {
-  AUTO_PROCESS_AFTER_RECORD_KEY,
   DEFAULTS,
   KEY_ARCHIVE_RETENTION,
-  KEY_AUDIO_PROCESSING,
   KEY_AUTO_TAG_CLIP,
   KEY_AUTO_TAG_FRAMES,
   KEY_AUTO_TAG_MAX_SCORE,
@@ -60,20 +58,12 @@ import { cn } from "@/lib/utils";
 const fieldSurface =
   "border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)]";
 
-function parseAutoProcessAfterRecord(raw: string | null): boolean {
-  return parseBooleanSetting(raw, true);
-}
-
 function parseProductVectorEnabled(raw: string | null): boolean {
   return parseBooleanSetting(raw, false);
 }
 
 function parseAutoTagClipProductEnabled(raw: string | null): boolean {
   return parseProductVectorEnabled(raw);
-}
-
-function parseAudioProcessingEnabled(raw: string | null): boolean {
-  return parseBooleanSetting(raw, true);
 }
 
 export function SettingsPage() {
@@ -91,9 +81,6 @@ export function SettingsPage() {
   const [openingPath, setOpeningPath] = useState<string | null>(null);
   const [storageIsCustom, setStorageIsCustom] = useState(false);
   const [pickingRoot, setPickingRoot] = useState(false);
-  const [autoProcessAfterRecord, setAutoProcessAfterRecord] = useState(true);
-  const [autoProcessToggleBusy, setAutoProcessToggleBusy] = useState(false);
-  const autoProcessSwitchId = useId();
   const [rawRetentionDays, setRawRetentionDays] = useState("7");
   const [archiveRetentionDays, setArchiveRetentionDays] = useState("0");
   const [storageWarnPercent, setStorageWarnPercent] = useState("80");
@@ -116,12 +103,10 @@ export function SettingsPage() {
   const [suggestImageEmbedFocusPrompt, setSuggestImageEmbedFocusPrompt] = useState("");
   const autoTagClipSwitchId = useId();
   const debugSuggestFramesSwitchId = useId();
-  const [audioProcessingEnabled, setAudioProcessingEnabled] = useState(true);
   const [speechMergeGapSec, setSpeechMergeGapSec] = useState("");
   const [speechCutToleranceSec, setSpeechCutToleranceSec] = useState("");
   const [sttNumThreads, setSttNumThreads] = useState("");
   const [sttQuantize, setSttQuantize] = useState<"auto" | "fp32" | "int8">("auto");
-  const audioProcessingSwitchId = useId();
 
   useEffect(() => {
     let cancelled = false;
@@ -137,7 +122,6 @@ export function SettingsPage() {
           cmin,
           cmax,
           sg,
-          autoProc,
           rawR,
           archR,
           sw,
@@ -154,7 +138,6 @@ export function SettingsPage() {
           smf,
           dbgFrames,
           imgFocusPrompt,
-          apEn,
           smg,
           sct,
           sttTh,
@@ -169,7 +152,6 @@ export function SettingsPage() {
           getSetting("clip_min_duration"),
           getSetting("clip_max_duration"),
           getSetting("max_storage_gb"),
-          getSetting(AUTO_PROCESS_AFTER_RECORD_KEY),
           getSetting(KEY_RAW_RETENTION),
           getSetting(KEY_ARCHIVE_RETENTION),
           getSetting(KEY_STORAGE_WARN),
@@ -186,7 +168,6 @@ export function SettingsPage() {
           getSetting(KEY_SUGGEST_MIN_FUSED_SCORE),
           getSetting(KEY_DEBUG_KEEP_SUGGEST_FRAMES),
           getSetting(KEY_SUGGEST_IMAGE_EMBED_FOCUS_PROMPT),
-          getSetting(KEY_AUDIO_PROCESSING),
           getSetting(KEY_SPEECH_MERGE_GAP),
           getSetting(KEY_SPEECH_CUT_TOLERANCE),
           getSetting(KEY_STT_NUM_THREADS),
@@ -208,7 +189,6 @@ export function SettingsPage() {
         setClipMinDuration(valueFromDb(cmin, DEFAULTS.clipMin));
         setClipMaxDuration(valueFromDb(cmax, DEFAULTS.clipMax));
         setMaxStorageGb(sg === null ? "" : sg);
-        setAutoProcessAfterRecord(parseAutoProcessAfterRecord(autoProc));
         setRawRetentionDays(valueFromDb(rawR, "7"));
         setArchiveRetentionDays(valueFromDb(archR, "0"));
         setStorageWarnPercent(valueFromDb(sw, "80"));
@@ -227,7 +207,6 @@ export function SettingsPage() {
         setSuggestImageEmbedFocusPrompt(
           valueFromDb(imgFocusPrompt, DEFAULTS.suggestImageEmbedFocusPrompt),
         );
-        setAudioProcessingEnabled(parseAudioProcessingEnabled(apEn));
         setSpeechMergeGapSec(valueFromDb(smg, DEFAULTS.speechMergeGapSec));
         setSpeechCutToleranceSec(valueFromDb(sct, DEFAULTS.speechCutToleranceSec));
         setSttNumThreads(valueFromDb(sttTh, DEFAULTS.sttNumThreads));
@@ -391,30 +370,6 @@ export function SettingsPage() {
     }
   }, [clearFeedback, maxConcurrent, pollInterval, recordingMaxMinutes]);
 
-  const onAutoProcessAfterRecordChange = useCallback(
-    async (checked: boolean) => {
-      clearFeedback();
-      const previous = autoProcessAfterRecord;
-      setAutoProcessAfterRecord(checked);
-      setAutoProcessToggleBusy(true);
-      try {
-        await setSetting(AUTO_PROCESS_AFTER_RECORD_KEY, checked ? "1" : "0");
-        await restartSidecar();
-          setMessage(
-          checked
-            ? "Đã bật tự xử lý clip sau khi ghi. Sidecar đã khởi động lại."
-            : "Đã tắt tự xử lý clip sau khi ghi. Sidecar đã khởi động lại.",
-        );
-      } catch (e) {
-        setAutoProcessAfterRecord(previous);
-        setError(e instanceof Error ? e.message : "Không lưu được cài đặt");
-      } finally {
-        setAutoProcessToggleBusy(false);
-      }
-    },
-    [autoProcessAfterRecord, clearFeedback],
-  );
-
   const saveProductVector = useCallback(async () => {
     clearFeedback();
     const dimStr = geminiEmbeddingDim.trim();
@@ -553,7 +508,6 @@ export function SettingsPage() {
     try {
       await setSetting("clip_min_duration", mn);
       await setSetting("clip_max_duration", mx);
-      await setSetting(KEY_AUDIO_PROCESSING, audioProcessingEnabled ? "1" : "0");
       await setSetting(KEY_SPEECH_MERGE_GAP, gapStr || DEFAULTS.speechMergeGapSec);
       await setSetting(KEY_SPEECH_CUT_TOLERANCE, tolStr || DEFAULTS.speechCutToleranceSec);
       await setSetting(KEY_STT_NUM_THREADS, thStr || DEFAULTS.sttNumThreads);
@@ -562,7 +516,7 @@ export function SettingsPage() {
       const fresh = await getAppDataPaths();
       setPaths(fresh);
       setMessage(
-        "Đã lưu cài đặt xử lý clip và âm thanh (VAD/STT). Sidecar đã khởi động lại để áp dụng.",
+        "Đã lưu mặc định workflow cho record node và clip node. Sidecar đã khởi động lại để áp dụng fallback.",
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
@@ -573,7 +527,6 @@ export function SettingsPage() {
     clearFeedback,
     clipMinDuration,
     clipMaxDuration,
-    audioProcessingEnabled,
     speechMergeGapSec,
     speechCutToleranceSec,
     sttNumThreads,
@@ -781,90 +734,37 @@ export function SettingsPage() {
 
       <Card className="order-50 bg-[var(--color-bg-subtle)]">
         <CardHeader>
-          <CardTitle>Workflow defaults - Clip processing</CardTitle>
+          <CardTitle>Workflow defaults - Record and clip nodes</CardTitle>
           <CardDescription>
-            Mặc định xử lý clip cho flow mới; chỉnh sâu hơn tại Flow node config khi cần.
+            Mặc định cho flow mới; record node giữ VAD/STT, clip node giữ tách cảnh và cắt clip.
           </CardDescription>
-          <CardAction>
-            <div className="flex items-center gap-2">
-              <Label
-                htmlFor={autoProcessSwitchId}
-                className="cursor-pointer text-xs whitespace-nowrap text-[var(--color-text-muted)]"
-              >
-                Tự động tạo clip sau khi ghi hình
-              </Label>
-              <Switch
-                id={autoProcessSwitchId}
-                checked={autoProcessAfterRecord}
-                onCheckedChange={(v) => {
-                  void onAutoProcessAfterRecordChange(v);
-                }}
-                disabled={loading || autoProcessToggleBusy}
-                aria-label="Tự xử lý clip sau khi ghi hình"
-              />
-            </div>
-          </CardAction>
         </CardHeader>
         <CardContent className="flex flex-col gap-6">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="clip_min">Thời lượng tối thiểu (giây)</Label>
-              <Input
-                id="clip_min"
-                type="text"
-                inputMode="numeric"
-                className={fieldSurface}
-                value={clipMinDuration}
-                onChange={(e) => setClipMinDuration(e.target.value)}
-                placeholder={DEFAULTS.clipMin}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="clip_max">Thời lượng tối đa (giây)</Label>
-              <Input
-                id="clip_max"
-                type="text"
-                inputMode="numeric"
-                className={fieldSurface}
-                value={clipMaxDuration}
-                onChange={(e) => setClipMaxDuration(e.target.value)}
-                placeholder={DEFAULTS.clipMax}
-              />
-            </div>
-          </div>
-          <div className="border-t border-[var(--color-border)] pt-4">
-            <div className="mb-4 flex items-center justify-between gap-4">
-              <div>
-                <Label
-                  htmlFor={audioProcessingSwitchId}
-                  className="text-sm font-medium text-[var(--color-text)]"
-                >
-                  Xử lý âm thanh (VAD + STT)
-                </Label>
-                <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                  Tắt nếu chỉ cần cắt clip theo cảnh, không tải model và không ghi transcript.
-                </p>
-              </div>
-              <Switch
-                id={audioProcessingSwitchId}
-                checked={audioProcessingEnabled}
-                onCheckedChange={setAudioProcessingEnabled}
-                disabled={loading}
-                aria-label="Bật xử lý âm thanh VAD và STT"
-              />
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <p className="mb-3 text-sm font-medium text-[var(--color-text)]">Clip node defaults</p>
+            <div className="grid gap-4 sm:grid-cols-3">
               <div className="space-y-2">
-                <Label htmlFor="speech_merge_gap">Gộp đoạn nói nếu im lặng ngắn hơn (giây)</Label>
+                <Label htmlFor="clip_min">Thời lượng tối thiểu (giây)</Label>
                 <Input
-                  id="speech_merge_gap"
+                  id="clip_min"
                   type="text"
-                  inputMode="decimal"
+                  inputMode="numeric"
                   className={fieldSurface}
-                  value={speechMergeGapSec}
-                  onChange={(e) => setSpeechMergeGapSec(e.target.value)}
-                  placeholder={DEFAULTS.speechMergeGapSec}
-                  disabled={!audioProcessingEnabled}
+                  value={clipMinDuration}
+                  onChange={(e) => setClipMinDuration(e.target.value)}
+                  placeholder={DEFAULTS.clipMin}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="clip_max">Thời lượng tối đa (giây)</Label>
+                <Input
+                  id="clip_max"
+                  type="text"
+                  inputMode="numeric"
+                  className={fieldSurface}
+                  value={clipMaxDuration}
+                  onChange={(e) => setClipMaxDuration(e.target.value)}
+                  placeholder={DEFAULTS.clipMax}
                 />
               </div>
               <div className="space-y-2">
@@ -877,7 +777,32 @@ export function SettingsPage() {
                   value={speechCutToleranceSec}
                   onChange={(e) => setSpeechCutToleranceSec(e.target.value)}
                   placeholder={DEFAULTS.speechCutToleranceSec}
-                  disabled={!audioProcessingEnabled}
+                />
+              </div>
+            </div>
+          </div>
+          <div className="border-t border-[var(--color-border)] pt-4">
+            <div className="mb-4">
+              <div>
+                <p className="text-sm font-medium text-[var(--color-text)]">
+                  Record node defaults - VAD + STT
+                </p>
+                <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                  Luôn chạy sau khi ghi hình xong để tạo speech segments và transcript cho clip node.
+                </p>
+              </div>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="speech_merge_gap">Gộp đoạn nói nếu im lặng ngắn hơn (giây)</Label>
+                <Input
+                  id="speech_merge_gap"
+                  type="text"
+                  inputMode="decimal"
+                  className={fieldSurface}
+                  value={speechMergeGapSec}
+                  onChange={(e) => setSpeechMergeGapSec(e.target.value)}
+                  placeholder={DEFAULTS.speechMergeGapSec}
                 />
               </div>
               <div className="space-y-2">
@@ -890,7 +815,6 @@ export function SettingsPage() {
                   value={sttNumThreads}
                   onChange={(e) => setSttNumThreads(e.target.value)}
                   placeholder={DEFAULTS.sttNumThreads}
-                  disabled={!audioProcessingEnabled}
                 />
               </div>
               <div className="space-y-2">
@@ -907,7 +831,6 @@ export function SettingsPage() {
                   onChange={(e) =>
                     setSttQuantize(e.target.value as "auto" | "fp32" | "int8")
                   }
-                  disabled={!audioProcessingEnabled}
                 >
                   <option value="auto">Tự động (CUDA → fp32, còn lại → int8)</option>
                   <option value="fp32">fp32 (nặng hơn, chính xác hơn)</option>
@@ -919,7 +842,7 @@ export function SettingsPage() {
         </CardContent>
         <CardFooter className="justify-end border-t-0 bg-transparent pt-0">
           <Button type="button" disabled={saving === "clips"} onClick={() => void saveClips()}>
-            {saving === "clips" ? "Đang lưu…" : "Lưu cài đặt xử lý clip"}
+            {saving === "clips" ? "Đang lưu…" : "Lưu mặc định workflow"}
           </Button>
         </CardFooter>
       </Card>

@@ -20,13 +20,10 @@ export const DEFAULTS = {
   sttNumThreads: "4",
 } as const;
 
-export const KEY_AUDIO_PROCESSING = "audio_processing_enabled";
 export const KEY_SPEECH_MERGE_GAP = "speech_merge_gap_sec";
 export const KEY_SPEECH_CUT_TOLERANCE = "speech_cut_tolerance_sec";
 export const KEY_STT_NUM_THREADS = "stt_num_threads";
 export const KEY_STT_QUANTIZE = "stt_quantize";
-
-export const AUTO_PROCESS_AFTER_RECORD_KEY = "auto_process_after_record";
 
 export const KEY_PRODUCT_VECTOR = "product_vector_enabled";
 export const KEY_GEMINI_API_KEY = "gemini_api_key";

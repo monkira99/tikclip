@@ -100,20 +100,60 @@ export function RecordNodeModal({
         <div className="max-h-[min(90vh,640px)] overflow-y-auto p-4">
           <DialogHeader>
             <DialogTitle>Record node</DialogTitle>
-            <DialogDescription>Maximum duration for one live recording.</DialogDescription>
+            <DialogDescription>Recording duration and post-record VAD/STT processing.</DialogDescription>
           </DialogHeader>
 
-          <div className="mt-4 space-y-2">
-            <Label htmlFor={`rec-dur-${flowId}`}>Max duration (min)</Label>
-            <Input
-              id={`rec-dur-${flowId}`}
-              type="number"
-              min={1}
-              value={form.max_duration_minutes}
-              onChange={(e) =>
-                patch({ max_duration_minutes: Math.max(1, Math.floor(Number(e.target.value) || 1)) })
-              }
-            />
+          <div className="mt-4 space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor={`rec-dur-${flowId}`}>Max duration (min)</Label>
+              <Input
+                id={`rec-dur-${flowId}`}
+                type="number"
+                min={1}
+                value={form.max_duration_minutes}
+                onChange={(e) =>
+                  patch({ max_duration_minutes: Math.max(1, Math.floor(Number(e.target.value) || 1)) })
+                }
+              />
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor={`rec-speech-gap-${flowId}`}>Speech merge gap (s)</Label>
+                <Input
+                  id={`rec-speech-gap-${flowId}`}
+                  type="number"
+                  step="0.1"
+                  min={0}
+                  value={form.speech_merge_gap_sec}
+                  onChange={(e) => patch({ speech_merge_gap_sec: Math.max(0, Number(e.target.value) || 0) })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor={`rec-stt-threads-${flowId}`}>STT threads</Label>
+                <Input
+                  id={`rec-stt-threads-${flowId}`}
+                  type="number"
+                  min={1}
+                  value={form.stt_num_threads}
+                  onChange={(e) => patch({ stt_num_threads: Math.max(1, Math.floor(Number(e.target.value) || 1)) })}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor={`rec-stt-quantize-${flowId}`}>STT model quality</Label>
+              <select
+                id={`rec-stt-quantize-${flowId}`}
+                className="h-9 w-full min-w-0 rounded-md border border-white/10 bg-white/[0.03] px-3 py-1 text-sm text-[var(--color-text)] outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50"
+                value={form.stt_quantize}
+                onChange={(e) => patch({ stt_quantize: e.target.value as RecordNodeForm["stt_quantize"] })}
+              >
+                <option value="auto">Auto</option>
+                <option value="fp32">fp32</option>
+                <option value="int8">int8</option>
+              </select>
+            </div>
           </div>
         </div>
 

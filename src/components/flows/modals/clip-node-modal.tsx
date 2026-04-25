@@ -10,7 +10,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import {
   parseClipNodeDraft,
   serializeClipNodeDraft,
@@ -101,19 +100,10 @@ export function ClipNodeModal({
         <div className="max-h-[min(90vh,760px)] overflow-y-auto p-4">
           <DialogHeader>
             <DialogTitle>Clip node</DialogTitle>
-            <DialogDescription>Segment length, speech detection, and post-processing defaults.</DialogDescription>
+            <DialogDescription>Scene segmentation and clip extraction defaults.</DialogDescription>
           </DialogHeader>
 
           <div className="mt-4 space-y-4">
-            <div className="flex items-center justify-between gap-3 rounded-xl border border-white/8 bg-white/[0.02] px-3 py-2">
-              <div>
-                <p className="text-sm font-medium text-[var(--color-text)]">Auto process after record</p>
-              </div>
-              <Switch
-                checked={form.auto_process_after_record}
-                onCheckedChange={(v) => patch({ auto_process_after_record: Boolean(v) })}
-              />
-            </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor={`clip-min-${flowId}`}>Clip min duration (s)</Label>
@@ -136,27 +126,7 @@ export function ClipNodeModal({
                 />
               </div>
             </div>
-            <div className="flex items-center justify-between gap-3 rounded-xl border border-white/8 bg-white/[0.02] px-3 py-2">
-              <div>
-                <p className="text-sm font-medium text-[var(--color-text)]">Audio processing</p>
-              </div>
-              <Switch
-                checked={form.audio_processing_enabled}
-                onCheckedChange={(v) => patch({ audio_processing_enabled: Boolean(v) })}
-              />
-            </div>
             <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor={`clip-gap-${flowId}`}>Speech merge gap (s)</Label>
-                <Input
-                  id={`clip-gap-${flowId}`}
-                  type="number"
-                  step="0.1"
-                  min={0}
-                  value={form.speech_merge_gap_sec}
-                  onChange={(e) => patch({ speech_merge_gap_sec: Math.max(0, Number(e.target.value) || 0) })}
-                />
-              </div>
               <div className="space-y-2">
                 <Label htmlFor={`clip-tol-${flowId}`}>Speech cut tolerance (s)</Label>
                 <Input
@@ -169,24 +139,6 @@ export function ClipNodeModal({
                     patch({ speech_cut_tolerance_sec: Math.max(0, Number(e.target.value) || 0) })
                   }
                 />
-              </div>
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor={`clip-threads-${flowId}`}>STT threads</Label>
-                <Input
-                  id={`clip-threads-${flowId}`}
-                  type="number"
-                  min={1}
-                  value={form.stt_num_threads}
-                  onChange={(e) => patch({ stt_num_threads: Math.max(1, Math.floor(Number(e.target.value) || 1)) })}
-                />
-              </div>
-              <div className="flex items-center justify-between gap-3 rounded-xl border border-white/8 bg-white/[0.02] px-3 py-2 sm:col-span-1">
-                <div>
-                  <p className="text-sm font-medium text-[var(--color-text)]">STT quantize</p>
-                </div>
-                <Switch checked={form.stt_quantize} onCheckedChange={(v) => patch({ stt_quantize: Boolean(v) })} />
               </div>
             </div>
           </div>
