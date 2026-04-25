@@ -25,12 +25,8 @@ import {
   KEY_GEMINI_EMBEDDING_MODEL,
   KEY_PRODUCT_VECTOR,
   KEY_RAW_RETENTION,
-  KEY_SPEECH_CUT_TOLERANCE,
-  KEY_SPEECH_MERGE_GAP,
   KEY_STORAGE_CLEANUP,
   KEY_STORAGE_WARN,
-  KEY_STT_NUM_THREADS,
-  KEY_STT_QUANTIZE,
   KEY_SUGGEST_IMAGE_EMBED_FOCUS_PROMPT,
   KEY_SUGGEST_MIN_FUSED_SCORE,
   KEY_SUGGEST_WEIGHT_IMAGE,
@@ -69,11 +65,6 @@ function parseAutoTagClipProductEnabled(raw: string | null): boolean {
 export function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [paths, setPaths] = useState<AppDataPaths | null>(null);
-  const [maxConcurrent, setMaxConcurrent] = useState("");
-  const [pollInterval, setPollInterval] = useState("");
-  const [recordingMaxMinutes, setRecordingMaxMinutes] = useState("");
-  const [clipMinDuration, setClipMinDuration] = useState("");
-  const [clipMaxDuration, setClipMaxDuration] = useState("");
   const [maxStorageGb, setMaxStorageGb] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -103,10 +94,6 @@ export function SettingsPage() {
   const [suggestImageEmbedFocusPrompt, setSuggestImageEmbedFocusPrompt] = useState("");
   const autoTagClipSwitchId = useId();
   const debugSuggestFramesSwitchId = useId();
-  const [speechMergeGapSec, setSpeechMergeGapSec] = useState("");
-  const [speechCutToleranceSec, setSpeechCutToleranceSec] = useState("");
-  const [sttNumThreads, setSttNumThreads] = useState("");
-  const [sttQuantize, setSttQuantize] = useState<"auto" | "fp32" | "int8">("auto");
 
   useEffect(() => {
     let cancelled = false;
@@ -115,12 +102,6 @@ export function SettingsPage() {
         const [
           pathInfo,
           isCustom,
-          mc,
-          pi,
-          rmin,
-          rhLegacy,
-          cmin,
-          cmax,
           sg,
           rawR,
           archR,
@@ -138,19 +119,9 @@ export function SettingsPage() {
           smf,
           dbgFrames,
           imgFocusPrompt,
-          smg,
-          sct,
-          sttTh,
-          sttQ,
         ] = await Promise.all([
           getAppDataPaths(),
           storageRootIsCustom(),
-          getSetting("max_concurrent"),
-          getSetting("poll_interval"),
-          getSetting("recording_max_minutes"),
-          getSetting("recording_max_hours"),
-          getSetting("clip_min_duration"),
-          getSetting("clip_max_duration"),
           getSetting("max_storage_gb"),
           getSetting(KEY_RAW_RETENTION),
           getSetting(KEY_ARCHIVE_RETENTION),
@@ -168,26 +139,10 @@ export function SettingsPage() {
           getSetting(KEY_SUGGEST_MIN_FUSED_SCORE),
           getSetting(KEY_DEBUG_KEEP_SUGGEST_FRAMES),
           getSetting(KEY_SUGGEST_IMAGE_EMBED_FOCUS_PROMPT),
-          getSetting(KEY_SPEECH_MERGE_GAP),
-          getSetting(KEY_SPEECH_CUT_TOLERANCE),
-          getSetting(KEY_STT_NUM_THREADS),
-          getSetting(KEY_STT_QUANTIZE),
         ]);
         if (cancelled) return;
         setPaths(pathInfo);
         setStorageIsCustom(isCustom);
-        setMaxConcurrent(valueFromDb(mc, DEFAULTS.maxConcurrent));
-        setPollInterval(valueFromDb(pi, DEFAULTS.pollInterval));
-        let initialMinutes = rmin;
-        if (initialMinutes === null && rhLegacy !== null && rhLegacy.trim() !== "") {
-          const h = Number(rhLegacy.trim());
-          if (!Number.isNaN(h) && Number.isInteger(h) && h > 0) {
-            initialMinutes = String(h * 60);
-          }
-        }
-        setRecordingMaxMinutes(valueFromDb(initialMinutes, DEFAULTS.recordingMaxMinutes));
-        setClipMinDuration(valueFromDb(cmin, DEFAULTS.clipMin));
-        setClipMaxDuration(valueFromDb(cmax, DEFAULTS.clipMax));
         setMaxStorageGb(sg === null ? "" : sg);
         setRawRetentionDays(valueFromDb(rawR, "7"));
         setArchiveRetentionDays(valueFromDb(archR, "0"));
@@ -207,17 +162,6 @@ export function SettingsPage() {
         setSuggestImageEmbedFocusPrompt(
           valueFromDb(imgFocusPrompt, DEFAULTS.suggestImageEmbedFocusPrompt),
         );
-        setSpeechMergeGapSec(valueFromDb(smg, DEFAULTS.speechMergeGapSec));
-        setSpeechCutToleranceSec(valueFromDb(sct, DEFAULTS.speechCutToleranceSec));
-        setSttNumThreads(valueFromDb(sttTh, DEFAULTS.sttNumThreads));
-        const q = (sttQ ?? "").trim().toLowerCase();
-        if (q === "fp32" || q === "float32") {
-          setSttQuantize("fp32");
-        } else if (q === "int8") {
-          setSttQuantize("int8");
-        } else {
-          setSttQuantize("auto");
-        }
       } catch (e) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : "Failed to load settings");
@@ -329,47 +273,6 @@ export function SettingsPage() {
     }
   }, [clearFeedback]);
 
-  const saveRecording = useCallback(async () => {
-    clearFeedback();
-    const mc = maxConcurrent.trim();
-    const pi = pollInterval.trim();
-    if (mc && Number.isNaN(Number(mc))) {
-      setError("Max concurrent must be a number.");
-      return;
-    }
-    if (pi && Number.isNaN(Number(pi))) {
-      setError("Poll interval must be a number.");
-      return;
-    }
-    const rmin = recordingMaxMinutes.trim();
-    if (rmin && Number.isNaN(Number(rmin))) {
-      setError("Thời lượng tối đa mỗi lần ghi phải là số (phút).");
-      return;
-    }
-    if (rmin) {
-      const n = Number(rmin);
-      if (!Number.isInteger(n) || n < 1 || n > 10080) {
-        setError("Thời lượng ghi: nhập số nguyên phút từ 1 đến 10080 (tối đa 7 ngày).");
-        return;
-      }
-    }
-    setSaving("recording");
-    try {
-      await setSetting("max_concurrent", mc);
-      await setSetting("poll_interval", pi);
-      await setSetting("recording_max_minutes", rmin);
-      await setSetting("recording_max_hours", "");
-      await restartSidecar();
-      const fresh = await getAppDataPaths();
-      setPaths(fresh);
-      setMessage("Recording settings saved. Sidecar restarted to apply.");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed");
-    } finally {
-      setSaving(null);
-    }
-  }, [clearFeedback, maxConcurrent, pollInterval, recordingMaxMinutes]);
-
   const saveProductVector = useCallback(async () => {
     clearFeedback();
     const dimStr = geminiEmbeddingDim.trim();
@@ -462,75 +365,6 @@ export function SettingsPage() {
     suggestMinFusedScore,
     debugKeepSuggestClipFrames,
     suggestImageEmbedFocusPrompt,
-  ]);
-
-  const saveClips = useCallback(async () => {
-    clearFeedback();
-    const mn = clipMinDuration.trim();
-    const mx = clipMaxDuration.trim();
-    if (mn && Number.isNaN(Number(mn))) {
-      setError("Min duration must be a number.");
-      return;
-    }
-    if (mx && Number.isNaN(Number(mx))) {
-      setError("Max duration must be a number.");
-      return;
-    }
-    if (mn && mx && Number(mn) > Number(mx)) {
-      setError("Min duration cannot be greater than max duration.");
-      return;
-    }
-    const gapStr = speechMergeGapSec.trim();
-    const tolStr = speechCutToleranceSec.trim();
-    const thStr = sttNumThreads.trim();
-    if (gapStr) {
-      const g = Number(gapStr);
-      if (!Number.isFinite(g) || g < 0 || g > 5) {
-        setError("Khoảng gộp khoảng lặng (giây) phải từ 0 đến 5.");
-        return;
-      }
-    }
-    if (tolStr) {
-      const t = Number(tolStr);
-      if (!Number.isFinite(t) || t < 0.05 || t > 10) {
-        setError("Dung sai cắt hybrid (giây) phải từ 0.05 đến 10 (khuyến nghị ~1.5).");
-        return;
-      }
-    }
-    if (thStr) {
-      const n = Number(thStr);
-      if (!Number.isInteger(n) || n < 1 || n > 32) {
-        setError("Số luồng STT phải là số nguyên từ 1 đến 32.");
-        return;
-      }
-    }
-    setSaving("clips");
-    try {
-      await setSetting("clip_min_duration", mn);
-      await setSetting("clip_max_duration", mx);
-      await setSetting(KEY_SPEECH_MERGE_GAP, gapStr || DEFAULTS.speechMergeGapSec);
-      await setSetting(KEY_SPEECH_CUT_TOLERANCE, tolStr || DEFAULTS.speechCutToleranceSec);
-      await setSetting(KEY_STT_NUM_THREADS, thStr || DEFAULTS.sttNumThreads);
-      await setSetting(KEY_STT_QUANTIZE, sttQuantize);
-      await restartSidecar();
-      const fresh = await getAppDataPaths();
-      setPaths(fresh);
-      setMessage(
-        "Đã lưu mặc định workflow cho record node và clip node. Sidecar đã khởi động lại để áp dụng fallback.",
-      );
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed");
-    } finally {
-      setSaving(null);
-    }
-  }, [
-    clearFeedback,
-    clipMinDuration,
-    clipMaxDuration,
-    speechMergeGapSec,
-    speechCutToleranceSec,
-    sttNumThreads,
-    sttQuantize,
   ]);
 
   const saveStorageCard = useCallback(async () => {
@@ -675,177 +509,6 @@ export function SettingsPage() {
           </CardFooter>
         </Card>
       ) : null}
-
-      <Card className="order-40 bg-[var(--color-bg-subtle)]">
-        <CardHeader>
-          <CardTitle>Workflow defaults - Recording</CardTitle>
-          <CardDescription>
-            Mặc định ghi hình cho flow mới; có thể override theo từng flow trong workspace.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div className="space-y-2">
-            <Label htmlFor="max_concurrent">Số luồng record đồng thời tối đa</Label>
-            <Input
-              id="max_concurrent"
-              type="text"
-              inputMode="numeric"
-              className={fieldSurface}
-              value={maxConcurrent}
-              onChange={(e) => setMaxConcurrent(e.target.value)}
-              placeholder={DEFAULTS.maxConcurrent}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="poll_interval">Thời gian poll (giây)</Label>
-            <Input
-              id="poll_interval"
-              type="text"
-              inputMode="numeric"
-              className={fieldSurface}
-              value={pollInterval}
-              onChange={(e) => setPollInterval(e.target.value)}
-              placeholder={DEFAULTS.pollInterval}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="recording_max_minutes">Thời lượng tối đa mỗi lần ghi (phút)</Label>
-            <Input
-              id="recording_max_minutes"
-              type="text"
-              inputMode="numeric"
-              className={fieldSurface}
-              value={recordingMaxMinutes}
-              onChange={(e) => setRecordingMaxMinutes(e.target.value)}
-              placeholder={DEFAULTS.recordingMaxMinutes}
-            />
-          </div>
-        </CardContent>
-        <CardFooter className="justify-end border-t-0 bg-transparent pt-0">
-          <Button
-            type="button"
-            disabled={saving === "recording"}
-            onClick={() => void saveRecording()}
-          >
-            {saving === "recording" ? "Đang lưu…" : "Lưu cài đặt ghi hình"}
-          </Button>
-        </CardFooter>
-      </Card>
-
-      <Card className="order-50 bg-[var(--color-bg-subtle)]">
-        <CardHeader>
-          <CardTitle>Workflow defaults - Record and clip nodes</CardTitle>
-          <CardDescription>
-            Mặc định cho flow mới; record node giữ VAD/STT, clip node giữ tách cảnh và cắt clip.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-6">
-          <div>
-            <p className="mb-3 text-sm font-medium text-[var(--color-text)]">Clip node defaults</p>
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div className="space-y-2">
-                <Label htmlFor="clip_min">Thời lượng tối thiểu (giây)</Label>
-                <Input
-                  id="clip_min"
-                  type="text"
-                  inputMode="numeric"
-                  className={fieldSurface}
-                  value={clipMinDuration}
-                  onChange={(e) => setClipMinDuration(e.target.value)}
-                  placeholder={DEFAULTS.clipMin}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="clip_max">Thời lượng tối đa (giây)</Label>
-                <Input
-                  id="clip_max"
-                  type="text"
-                  inputMode="numeric"
-                  className={fieldSurface}
-                  value={clipMaxDuration}
-                  onChange={(e) => setClipMaxDuration(e.target.value)}
-                  placeholder={DEFAULTS.clipMax}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="speech_cut_tol">Dung sai cắt hybrid (giây)</Label>
-                <Input
-                  id="speech_cut_tol"
-                  type="text"
-                  inputMode="decimal"
-                  className={fieldSurface}
-                  value={speechCutToleranceSec}
-                  onChange={(e) => setSpeechCutToleranceSec(e.target.value)}
-                  placeholder={DEFAULTS.speechCutToleranceSec}
-                />
-              </div>
-            </div>
-          </div>
-          <div className="border-t border-[var(--color-border)] pt-4">
-            <div className="mb-4">
-              <div>
-                <p className="text-sm font-medium text-[var(--color-text)]">
-                  Record node defaults - VAD + STT
-                </p>
-                <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                  Luôn chạy sau khi ghi hình xong để tạo speech segments và transcript cho clip node.
-                </p>
-              </div>
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="speech_merge_gap">Gộp đoạn nói nếu im lặng ngắn hơn (giây)</Label>
-                <Input
-                  id="speech_merge_gap"
-                  type="text"
-                  inputMode="decimal"
-                  className={fieldSurface}
-                  value={speechMergeGapSec}
-                  onChange={(e) => setSpeechMergeGapSec(e.target.value)}
-                  placeholder={DEFAULTS.speechMergeGapSec}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="stt_threads">Luồng STT</Label>
-                <Input
-                  id="stt_threads"
-                  type="text"
-                  inputMode="numeric"
-                  className={fieldSurface}
-                  value={sttNumThreads}
-                  onChange={(e) => setSttNumThreads(e.target.value)}
-                  placeholder={DEFAULTS.sttNumThreads}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="stt_quantize">Chất lượng mô hình</Label>
-                <select
-                  id="stt_quantize"
-                  className={cn(
-                    "h-8 w-full min-w-0 rounded-lg border px-2.5 py-1 text-sm outline-none transition-colors",
-                    "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
-                    "disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
-                    fieldSurface,
-                  )}
-                  value={sttQuantize}
-                  onChange={(e) =>
-                    setSttQuantize(e.target.value as "auto" | "fp32" | "int8")
-                  }
-                >
-                  <option value="auto">Tự động (CUDA → fp32, còn lại → int8)</option>
-                  <option value="fp32">fp32 (nặng hơn, chính xác hơn)</option>
-                  <option value="int8">int8 (nhẹ, nhanh hơn)</option>
-                </select>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-        <CardFooter className="justify-end border-t-0 bg-transparent pt-0">
-          <Button type="button" disabled={saving === "clips"} onClick={() => void saveClips()}>
-            {saving === "clips" ? "Đang lưu…" : "Lưu mặc định workflow"}
-          </Button>
-        </CardFooter>
-      </Card>
 
       <Card className="order-30 bg-[var(--color-bg-elevated)]">
         <CardHeader>
