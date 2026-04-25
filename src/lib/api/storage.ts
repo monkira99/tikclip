@@ -28,11 +28,3 @@ export async function runStorageCleanupNow(input: {
 }): Promise<StorageCleanupSummary> {
   return invoke<StorageCleanupSummary>("run_storage_cleanup_now", { input });
 }
-
-export async function deleteRecordingFiles(recordingId: number): Promise<void> {
-  await invoke("delete_recording_files", { recordingId });
-}
-
-export async function listRecordingsForCleanup(retentionDays: number): Promise<unknown[]> {
-  return invoke<unknown[]>("list_recordings_for_cleanup", { retentionDays });
-}

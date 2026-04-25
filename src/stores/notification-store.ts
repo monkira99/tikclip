@@ -84,7 +84,7 @@ export const useNotificationStore = create<NotificationStoreState>((set, get) =>
     })),
 }));
 
-export function selectUnreadCount(items: AppNotification[]): number {
+function selectUnreadCount(items: AppNotification[]): number {
   return items.filter((n) => !n.read).length;
 }
 

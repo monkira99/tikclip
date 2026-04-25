@@ -8,14 +8,6 @@ type AccountInvokeRow = Omit<Account, "auto_record_schedule" | "type"> & {
   auto_record_schedule: string | AutoRecordSchedule | null;
 };
 
-/** Persist live flag into app SQLite (drives Accounts UI). */
-export async function updateAccountLiveStatus(id: number, isLive: boolean): Promise<void> {
-  if (import.meta.env.DEV) {
-    console.debug("[TikClip] invoke update_account_live_status", { id, isLive });
-  }
-  await invoke("update_account_live_status", { id, isLive });
-}
-
 /** Batch persist live flags into SQLite. */
 export async function syncAccountsLiveStatus(
   rows: { account_id: number; is_live: boolean }[],

@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 const HCM_TIMEZONE = "Asia/Ho_Chi_Minh";
 
 /** Calendar date in GMT+7 (Vietnam), `YYYY-MM-DD` — matches DB wall clock and clip paths. */
-export function hcmDateYmd(): string {
+function hcmDateYmd(): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: HCM_TIMEZONE,
     year: "numeric",
@@ -22,9 +22,6 @@ export function hcmDateYmd(): string {
   const dd = String(d0.getDate()).padStart(2, "0");
   return `${yy}-${mm}-${dd}`;
 }
-
-/** @deprecated Use `hcmDateYmd` — kept for any external imports. */
-export const localDateYmd = hcmDateYmd;
 
 export type DashboardStats = {
   clipsToday: number;

@@ -1,7 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import {
-  BarChart3,
   Boxes,
   Network,
   LayoutDashboard,
@@ -12,7 +11,6 @@ const navItems = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "flows", label: "Flows", icon: Network },
   { id: "products", label: "Products", icon: Boxes },
-  { id: "statistics", label: "Statistics", icon: BarChart3 },
 ] as const;
 
 /** Collapsed rail — same horizontal padding as expanded so content does not shift on width tween. */

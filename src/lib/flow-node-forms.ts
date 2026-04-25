@@ -178,25 +178,3 @@ export function serializeCaptionNodeDraft(form: CaptionNodeForm): string {
   }
   return JSON.stringify(o);
 }
-
-export type UploadNodeForm = {
-  inherit_global_defaults: boolean;
-};
-
-export function parseUploadNodeDraft(raw: string): UploadNodeForm {
-  let value: Record<string, unknown> = {};
-  try {
-    value = JSON.parse(raw || "{}") as Record<string, unknown>;
-  } catch {
-    value = {};
-  }
-  return {
-    inherit_global_defaults: value.inherit_global_defaults !== false,
-  };
-}
-
-export function serializeUploadNodeDraft(form: UploadNodeForm): string {
-  return JSON.stringify({
-    inherit_global_defaults: form.inherit_global_defaults,
-  });
-}

@@ -4,7 +4,7 @@ type WsHandler = (data: Record<string, unknown>) => void;
 
 const RECONNECT_MS = 2000;
 
-export class WebSocketClient {
+class WebSocketClient {
   private ws: WebSocket | null = null;
   private port: number | null = null;
   private readonly handlers = new Map<string, Set<WsHandler>>();

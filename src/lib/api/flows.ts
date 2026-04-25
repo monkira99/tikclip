@@ -1,51 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type {
-  Clip,
   CreateFlowInput,
   FlowEditorPayload,
-  FlowNodeConfig,
   FlowNodeKey,
   FlowRuntimeLogEntry,
   FlowRuntimeSnapshot,
-  FlowStatus,
   FlowSummary,
   PublishFlowResult,
 } from "@/types";
-
-export type FlowRecording = {
-  id: number;
-  account_id: number;
-  account_username: string;
-  room_id: string | null;
-  status: string;
-  started_at: string;
-  ended_at: string | null;
-  duration_seconds: number;
-  file_path: string | null;
-  file_size_bytes: number;
-  sidecar_recording_id: string | null;
-  error_message: string | null;
-  flow_id: number | null;
-  created_at: string;
-};
-
-export type UpdateFlowInput = {
-  name?: string;
-  status?: FlowStatus;
-  current_node?: FlowNodeKey | null;
-  last_live_at?: string | null;
-  last_run_at?: string | null;
-  last_error?: string | null;
-};
-
-export type UpdateFlowRuntimeByAccountInput = {
-  status?: FlowStatus;
-  current_node?: FlowNodeKey | null;
-  last_live_at?: string | null;
-  last_run_at?: string | null;
-  last_error?: string | null;
-};
 
 export async function listFlows(): Promise<FlowSummary[]> {
   return invoke<FlowSummary[]>("list_flows");
@@ -99,24 +62,6 @@ export async function restartFlowRun(flowId: number): Promise<RestartFlowRunResu
   return invoke<RestartFlowRunResult>("restart_flow_run", { flowId });
 }
 
-function optionalBlank(value: string | null | undefined): string | undefined {
-  return value === undefined ? undefined : value === null ? "" : value;
-}
-
-export async function updateFlow(flowId: number, input: UpdateFlowInput): Promise<void> {
-  await invoke("update_flow", {
-    flowId,
-    input: {
-      name: input.name,
-      status: input.status,
-      current_node: optionalBlank(input.current_node),
-      last_live_at: optionalBlank(input.last_live_at),
-      last_run_at: optionalBlank(input.last_run_at),
-      last_error: optionalBlank(input.last_error),
-    },
-  });
-}
-
 export type SidecarFlowRuntimeHint =
   | "clip_ready"
   | "caption_ready";
@@ -138,38 +83,6 @@ export async function applySidecarFlowRuntimeHint(input: {
   });
 }
 
-export async function updateFlowRuntimeByAccount(
-  accountId: number,
-  input: UpdateFlowRuntimeByAccountInput,
-): Promise<void> {
-  await invoke("update_flow_runtime_by_account", {
-    accountId,
-    input: {
-      status: input.status,
-      current_node: optionalBlank(input.current_node),
-      last_live_at: optionalBlank(input.last_live_at),
-      last_run_at: optionalBlank(input.last_run_at),
-      last_error: optionalBlank(input.last_error),
-    },
-  });
-}
-
 export async function setFlowEnabled(flowId: number, enabled: boolean): Promise<void> {
   await invoke("set_flow_enabled", { flowId, enabled });
-}
-
-export async function saveFlowNodeConfig(input: {
-  flow_id: number;
-  node_key: FlowNodeKey;
-  config_json: string;
-}): Promise<FlowNodeConfig> {
-  return invoke<FlowNodeConfig>("save_flow_node_config", { input });
-}
-
-export async function listRecordingsByFlow(flowId: number): Promise<FlowRecording[]> {
-  return invoke<FlowRecording[]>("list_recordings_by_flow", { flowId });
-}
-
-export async function listClipsByFlow(flowId: number): Promise<Clip[]> {
-  return invoke<Clip[]>("list_clips_by_flow", { flowId });
 }

@@ -279,15 +279,11 @@ export function useNavigationTargetSync(setCurrentPage: Dispatch<SetStateAction<
         : raw === "dashboard" ||
             raw === "flows" ||
             raw === "products" ||
-            raw === "statistics" ||
             raw === "settings"
           ? raw
           : null;
     if (p) {
       setCurrentPage(p);
-    }
-    if (navigationTarget.clipId != null) {
-      useClipStore.getState().setActiveClipId(navigationTarget.clipId);
     }
     useAppStore.getState().clearNavigationTarget();
   }, [navigationTarget, setCurrentPage]);

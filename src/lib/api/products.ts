@@ -8,10 +8,6 @@ export async function listProducts(): Promise<Product[]> {
   return invoke<Product[]>("list_products");
 }
 
-export async function getProductById(productId: number): Promise<Product> {
-  return invoke<Product>("get_product_by_id", { productId });
-}
-
 export async function createProduct(input: CreateProductInput): Promise<number> {
   return invoke<number>("create_product", { input });
 }
@@ -32,20 +28,8 @@ export async function deleteProduct(productId: number): Promise<void> {
   }
 }
 
-export async function listClipProducts(clipId: number): Promise<Product[]> {
-  return invoke<Product[]>("list_clip_products", { clipId });
-}
-
 export async function tagClipProduct(clipId: number, productId: number): Promise<void> {
   await invoke("tag_clip_product", { clipId, productId });
-}
-
-export async function untagClipProduct(clipId: number, productId: number): Promise<void> {
-  await invoke("untag_clip_product", { clipId, productId });
-}
-
-export async function batchTagClipProducts(clipIds: number[], productId: number): Promise<void> {
-  await invoke("batch_tag_clip_products", { clipIds, productId });
 }
 
 export type FetchedProductMediaFile = {
@@ -127,34 +111,4 @@ export async function deleteProductEmbeddings(productId: number): Promise<void> 
     method: "POST",
     body: JSON.stringify({ product_id: productId }),
   });
-}
-
-export type ProductEmbeddingIndexedProductRow = {
-  product_id: number;
-  image_doc_count: number;
-  video_doc_count: number;
-  text_doc_count: number;
-  product_name: string | null;
-};
-
-export type ProductEmbeddingsIndexedSummary = {
-  product_vector_enabled: boolean;
-  store_ready: boolean;
-  vector_store_relative: string;
-  total_documents_scanned: number;
-  scan_truncated: boolean;
-  product_count: number;
-  products: ProductEmbeddingIndexedProductRow[];
-  message: string | null;
-};
-
-export async function getProductEmbeddingsIndexedSummary(options?: {
-  maxDocs?: number;
-}): Promise<ProductEmbeddingsIndexedSummary> {
-  const max = options?.maxDocs ?? 100_000;
-  const q = new URLSearchParams({ max_docs: String(max) });
-  return sidecarJson<ProductEmbeddingsIndexedSummary>(
-    `/api/products/embeddings/indexed-summary?${q.toString()}`,
-    { method: "GET" },
-  );
 }

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type NavigationTarget = { page: string; clipId?: number; flowId?: number };
+export type NavigationTarget = { page: string; flowId?: number };
 
 type AppStore = {
   sidecarConnected: boolean;
