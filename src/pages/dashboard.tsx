@@ -5,22 +5,23 @@ import { RecordingProgress } from "@/components/recordings/recording-progress";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getDashboardStats, getStorageStats, type DashboardStats } from "@/lib/api";
 import { useAppStore } from "@/stores/app-store";
-import { useAccountStore } from "@/stores/account-store";
 import { useClipStore } from "@/stores/clip-store";
+import { useFlowStore } from "@/stores/flow-store";
 import { countActiveRecordings, useRecordingStore } from "@/stores/recording-store";
 
 export function DashboardPage() {
   const sidecarConnected = useAppStore((s) => s.sidecarConnected);
   const dashboardRevision = useAppStore((s) => s.dashboardRevision);
   const recordings = useRecordingStore((s) => s.recordings);
-  const accounts = useAccountStore((s) => s.accounts);
-  const fetchAccounts = useAccountStore((s) => s.fetchAccounts);
-  const accountsLoading = useAccountStore((s) => s.loading);
+  const flows = useFlowStore((s) => s.flows);
+  const flowRuntimeSnapshots = useFlowStore((s) => s.runtimeSnapshots);
+  const fetchFlows = useFlowStore((s) => s.fetchFlows);
+  const flowsLoading = useFlowStore((s) => s.loading);
   const clipsRevision = useClipStore((s) => s.clipsRevision);
   const [dashStats, setDashStats] = useState<DashboardStats | null>(null);
-  const [sidecarUsagePct, setSidecarUsagePct] = useState<number | null>(null);
-  /** Sidecar filesystem scan — matches debug log; preferred for Storage card when connected. */
-  const [sidecarTotalBytes, setSidecarTotalBytes] = useState<number | null>(null);
+  const [storageUsagePct, setStorageUsagePct] = useState<number | null>(null);
+  /** Rust filesystem scan; preferred for Storage card because it does not depend on sidecar. */
+  const [storageTotalBytes, setStorageTotalBytes] = useState<number | null>(null);
 
   const loadDashboardStats = useCallback(async () => {
     try {
@@ -34,24 +35,19 @@ export function DashboardPage() {
     }
   }, []);
 
-  const loadSidecarStorageStats = useCallback(async () => {
-    if (!sidecarConnected) {
-      setSidecarUsagePct(null);
-      setSidecarTotalBytes(null);
-      return;
-    }
+  const loadStorageStats = useCallback(async () => {
     try {
       const s = await getStorageStats();
-      setSidecarUsagePct(s.usage_percent);
-      setSidecarTotalBytes(s.total_bytes);
+      setStorageUsagePct(s.usage_percent);
+      setStorageTotalBytes(s.total_bytes);
     } catch (e) {
       if (import.meta.env.DEV) {
         console.warn("[TikClip] getStorageStats failed", e);
       }
-      setSidecarUsagePct(null);
-      setSidecarTotalBytes(null);
+      setStorageUsagePct(null);
+      setStorageTotalBytes(null);
     }
-  }, [sidecarConnected]);
+  }, []);
 
   /** Refetch stats when sidecar updates recording progress / finish (not only clip_revision). */
   const recordingsSnapshot = useMemo(
@@ -71,68 +67,72 @@ export function DashboardPage() {
   );
 
   useEffect(() => {
-    void fetchAccounts();
-  }, [fetchAccounts]);
+    void fetchFlows({ quiet: true });
+  }, [fetchFlows, dashboardRevision]);
 
   useEffect(() => {
     const t = window.setTimeout(() => {
       void loadDashboardStats();
-      void loadSidecarStorageStats();
+      void loadStorageStats();
     }, 500);
     return () => window.clearTimeout(t);
   }, [
     loadDashboardStats,
-    loadSidecarStorageStats,
+    loadStorageStats,
     clipsRevision,
     dashboardRevision,
     sidecarConnected,
     recordingsSnapshot,
   ]);
 
-  /** Refresh storage card when user returns to the app (sidecar totals change while away). */
+  /** Refresh storage card when user returns to the app; disk totals can change while away. */
   useEffect(() => {
     const onVis = () => {
       if (document.visibilityState === "visible") {
         void loadDashboardStats();
-        void loadSidecarStorageStats();
+        void loadStorageStats();
       }
     };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
-  }, [loadDashboardStats, loadSidecarStorageStats]);
+  }, [loadDashboardStats, loadStorageStats]);
 
-  /** Periodic refresh: DB-backed stat can lag vs disk; sidecar scan picks up new recordings/clips. */
+  /** Periodic refresh: DB-backed stat can lag vs disk; Rust scan picks up new recordings/clips. */
   useEffect(() => {
-    if (!sidecarConnected) {
-      return;
-    }
     const id = window.setInterval(() => {
       void loadDashboardStats();
-      void loadSidecarStorageStats();
+      void loadStorageStats();
     }, 60_000);
     return () => window.clearInterval(id);
-  }, [sidecarConnected, loadDashboardStats, loadSidecarStorageStats]);
+  }, [loadDashboardStats, loadStorageStats]);
 
   const activeList = Object.values(recordings).filter(
     (r) => r.status === "pending" || r.status === "recording",
   );
   const activeCount = countActiveRecordings(recordings);
-  const liveAccounts = accounts.filter((a) => a.is_live);
+  const liveFlows = flows.filter((flow) => {
+    const snapshot = flowRuntimeSnapshots[flow.id];
+    return (
+      snapshot?.last_check_live === true ||
+      flow.status === "recording" ||
+      flow.status === "processing"
+    );
+  });
 
   const storageDisplayBytes =
-    sidecarConnected && sidecarTotalBytes != null
-      ? sidecarTotalBytes
+    storageTotalBytes != null
+      ? storageTotalBytes
       : (dashStats?.storageUsedBytes ?? 0);
 
   return (
     <div className="flex flex-col gap-6">
       <StatCards
         activeRecordings={activeCount}
-        accountCount={accounts.length}
+        flowCount={flows.length}
         clipsToday={dashStats?.clipsToday ?? 0}
         storageUsedBytes={storageDisplayBytes}
         storageQuotaGb={dashStats?.storageQuotaGb ?? null}
-        storageSidecarUsagePercent={sidecarUsagePct}
+        storageUsagePercent={storageUsagePct}
       />
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -162,20 +162,20 @@ export function DashboardPage() {
             <CardTitle>Live now</CardTitle>
           </CardHeader>
           <CardContent>
-            {accountsLoading && accounts.length === 0 ? (
-              <p className="text-sm text-[var(--color-text-muted)]">Loading accounts…</p>
-            ) : liveAccounts.length === 0 ? (
-              <p className="text-sm text-[var(--color-text-muted)]">No accounts are live.</p>
+            {flowsLoading && flows.length === 0 ? (
+              <p className="text-sm text-[var(--color-text-muted)]">Loading flows…</p>
+            ) : liveFlows.length === 0 ? (
+              <p className="text-sm text-[var(--color-text-muted)]">No flows are live.</p>
             ) : (
               <ul className="space-y-2 text-sm">
-                {liveAccounts.map((a) => (
+                {liveFlows.map((flow) => (
                   <li
-                    key={a.id}
+                    key={flow.id}
                     className="flex items-center justify-between rounded-xl border border-white/8 bg-white/[0.03] px-4 py-3"
                   >
-                    <span className="font-medium">@{a.username}</span>
+                    <span className="font-medium">{flow.name}</span>
                     <span className="text-[var(--color-text-muted)]">
-                      {a.display_name || "—"}
+                      {flow.account_username ? `@${flow.account_username}` : flow.status}
                     </span>
                   </li>
                 ))}

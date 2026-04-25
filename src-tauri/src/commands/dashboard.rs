@@ -9,7 +9,7 @@ use tauri::State;
 pub struct DashboardStats {
     pub clips_today: i64,
     /// Max of DB column sums, bytes at stored paths, and recursive size under `clips/`, `records/`,
-    /// legacy `recordings/`, and `products/`.
+    /// and legacy `recordings/`.
     pub storage_used_bytes: i64,
     /// From `app_settings.max_storage_gb` when set and positive; otherwise null (no quota in UI).
     pub storage_quota_gb: Option<f64>,
@@ -82,11 +82,9 @@ fn layout_media_usage_bytes(storage_root: &Path) -> i64 {
     let clips = storage_root.join("clips");
     let records = storage_root.join("records");
     let recordings_legacy = storage_root.join("recordings");
-    let products = storage_root.join("products");
     sum_files_recursive(&clips)
         .saturating_add(sum_files_recursive(&records))
         .saturating_add(sum_files_recursive(&recordings_legacy))
-        .saturating_add(sum_files_recursive(&products))
 }
 
 #[tauri::command]

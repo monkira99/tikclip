@@ -1,17 +1,17 @@
-import { Clapperboard, HardDrive, Radio, Users } from "lucide-react";
+import { Clapperboard, GitBranch, HardDrive, Radio } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 type StatCardsProps = {
   activeRecordings: number;
-  accountCount: number;
+  flowCount: number;
   clipsToday: number;
   /** Bytes used: max(DB totals, paths in DB, recursive scan of `clips/` + `records/` under storage root). */
   storageUsedBytes: number;
   /** Max storage (GB) from Settings when set; `null` if quota disabled. */
   storageQuotaGb: number | null;
-  /** Optional: usage % from sidecar scan vs quota (when quota set). Drives warn/critical card styling. */
-  storageSidecarUsagePercent?: number | null;
+  /** Optional: usage % from Rust storage scan vs quota (when quota set). Drives warn/critical styling. */
+  storageUsagePercent?: number | null;
 };
 
 /** Human-readable used size; avoids showing "0.00 GB" for hundreds of MB. */
@@ -62,11 +62,11 @@ function storageCardClass(usagePct: number | null | undefined): string {
 
 export function StatCards({
   activeRecordings,
-  accountCount,
+  flowCount,
   clipsToday,
   storageUsedBytes,
   storageQuotaGb,
-  storageSidecarUsagePercent,
+  storageUsagePercent,
 }: StatCardsProps) {
   const cards = [
     {
@@ -75,9 +75,9 @@ export function StatCards({
       icon: Radio,
     },
     {
-      title: "Accounts",
-      value: String(accountCount),
-      icon: Users,
+      title: "Flows",
+      value: String(flowCount),
+      icon: GitBranch,
     },
     {
       title: "Clips today",
@@ -97,7 +97,7 @@ export function StatCards({
         const isStorage = title === "Storage";
         const pct =
           isStorage && storageQuotaGb != null && storageQuotaGb > 0
-            ? storageSidecarUsagePercent
+            ? storageUsagePercent
             : null;
         return (
           <Card
@@ -121,7 +121,7 @@ export function StatCards({
               </p>
               <p className="text-sm leading-relaxed text-[var(--color-text-muted)]">
                 {title === "Active recordings" && "Jobs that are still capturing stream data."}
-                {title === "Accounts" && "Monitored profiles available for polling and recording."}
+                {title === "Flows" && "Published automations available for polling and recording."}
                 {title === "Clips today" && "Short-form assets created from recent live sessions."}
                 {title === "Storage" && "Current media footprint across recordings and generated clips."}
               </p>
@@ -131,7 +131,7 @@ export function StatCards({
               storageQuotaGb != null &&
               storageQuotaGb > 0 ? (
                 <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--color-text-muted)] tabular-nums">
-                  ~{pct.toFixed(1)}% quota (sidecar)
+                  ~{pct.toFixed(1)}% quota
                 </p>
               ) : null}
             </CardContent>
