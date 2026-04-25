@@ -130,7 +130,10 @@ fn publish_flow_definition_canonicalizes_record_legacy_keys_to_snake_case() {
             |row| row.get(0),
         )
         .expect("read published record config");
-    assert_eq!(published_config, r#"{"max_duration_minutes":2}"#);
+    assert_eq!(
+        published_config,
+        r#"{"max_duration_minutes":2,"speech_merge_gap_sec":0.5,"stt_num_threads":4,"stt_quantize":"auto"}"#
+    );
 
     drop(conn);
     let _ = std::fs::remove_file(&path);

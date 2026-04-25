@@ -1,17 +1,23 @@
 use super::PublishFlowResult;
 use crate::live_runtime::manager::LiveRuntimeManager;
 use crate::time_hcm::SQL_NOW_HCM;
-use crate::workflow::{record_node, start_node};
+use crate::workflow::{clip_node, record_node, start_node};
 use rusqlite::{params, Connection};
+
+struct CanonicalNodeConfigs {
+    start: Option<String>,
+    record: Option<String>,
+    clip: Option<String>,
+}
 
 fn validate_publishable_node_configs(
     conn: &Connection,
     flow_id: i64,
-) -> Result<(Option<String>, Option<String>), String> {
+) -> Result<CanonicalNodeConfigs, String> {
     let mut stmt = conn
         .prepare(
             "SELECT node_key, draft_config_json FROM flow_nodes \
-             WHERE flow_id = ?1 AND node_key IN ('start', 'record')",
+             WHERE flow_id = ?1 AND node_key IN ('start', 'record', 'clip')",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
@@ -22,6 +28,7 @@ fn validate_publishable_node_configs(
 
     let mut canonical_start_json = None;
     let mut canonical_record_json = None;
+    let mut canonical_clip_json = None;
     for row in rows {
         let (node_key, draft_config_json) = row.map_err(|e| e.to_string())?;
         match node_key.as_str() {
@@ -41,11 +48,23 @@ fn validate_publishable_node_configs(
                         .map_err(|e| format!("invalid record config: {e}"))?,
                 );
             }
+            "clip" => {
+                clip_node::parse_clip_config(&draft_config_json)
+                    .map_err(|e| format!("invalid clip config: {e}"))?;
+                canonical_clip_json = Some(
+                    clip_node::canonicalize_clip_config_json(&draft_config_json)
+                        .map_err(|e| format!("invalid clip config: {e}"))?,
+                );
+            }
             _ => {}
         }
     }
 
-    Ok((canonical_start_json, canonical_record_json))
+    Ok(CanonicalNodeConfigs {
+        start: canonical_start_json,
+        record: canonical_record_json,
+        clip: canonical_clip_json,
+    })
 }
 
 pub(crate) fn publish_flow_definition_with_conn(
@@ -71,8 +90,7 @@ pub(crate) fn publish_flow_definition_with_conn(
         return Err(format!("flow {flow_id} not found"));
     }
 
-    let (canonical_start_json, canonical_record_json) =
-        validate_publishable_node_configs(&tx, flow_id)?;
+    let canonical_node_configs = validate_publishable_node_configs(&tx, flow_id)?;
 
     tx.execute(
         &format!(
@@ -82,17 +100,24 @@ pub(crate) fn publish_flow_definition_with_conn(
         [flow_id],
     )
     .map_err(|e| e.to_string())?;
-    if let Some(canonical_start_json) = canonical_start_json {
+    if let Some(canonical_start_json) = canonical_node_configs.start {
         tx.execute(
             "UPDATE flow_nodes SET published_config_json = ?1 WHERE flow_id = ?2 AND node_key = 'start'",
             params![canonical_start_json, flow_id],
         )
         .map_err(|e| e.to_string())?;
     }
-    if let Some(canonical_record_json) = canonical_record_json {
+    if let Some(canonical_record_json) = canonical_node_configs.record {
         tx.execute(
             "UPDATE flow_nodes SET published_config_json = ?1 WHERE flow_id = ?2 AND node_key = 'record'",
             params![canonical_record_json, flow_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    if let Some(canonical_clip_json) = canonical_node_configs.clip {
+        tx.execute(
+            "UPDATE flow_nodes SET published_config_json = ?1 WHERE flow_id = ?2 AND node_key = 'clip'",
+            params![canonical_clip_json, flow_id],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -138,6 +163,13 @@ pub(crate) fn publish_flow_with_runtime_reconcile(
             |row| row.get(0),
         )
         .ok();
+    let previous_clip_published_config: Option<String> = conn
+        .query_row(
+            "SELECT published_config_json FROM flow_nodes WHERE flow_id = ?1 AND node_key = 'clip'",
+            [flow_id],
+            |row| row.get(0),
+        )
+        .ok();
 
     let result = publish_flow_definition_with_conn(conn, flow_id)?;
     let enabled: bool = conn
@@ -172,6 +204,13 @@ pub(crate) fn publish_flow_with_runtime_reconcile(
             tx.execute(
                 "UPDATE flow_nodes SET published_config_json = ?1 WHERE flow_id = ?2 AND node_key = 'record'",
                 params![previous_record_published_config, flow_id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        if let Some(previous_clip_published_config) = previous_clip_published_config {
+            tx.execute(
+                "UPDATE flow_nodes SET published_config_json = ?1 WHERE flow_id = ?2 AND node_key = 'clip'",
+                params![previous_clip_published_config, flow_id],
             )
             .map_err(|e| e.to_string())?;
         }

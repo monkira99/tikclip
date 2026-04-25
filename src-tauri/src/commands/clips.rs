@@ -76,7 +76,7 @@ pub struct InsertClipFromSidecarInput {
 }
 
 /// Persist one generated clip when the sidecar emits `clip_ready` over WebSocket.
-fn insert_clip_from_sidecar_with_conn(
+pub(crate) fn insert_clip_from_sidecar_with_conn(
     conn: &rusqlite::Connection,
     input: &InsertClipFromSidecarInput,
 ) -> Result<i64, String> {

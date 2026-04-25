@@ -79,14 +79,21 @@ pub(super) fn load_flow_runtime_config(
 }
 
 pub(super) fn load_record_duration_seconds(conn: &Connection, flow_id: i64) -> Result<i64, String> {
-    let raw: String = conn
-        .query_row(
-            "SELECT published_config_json FROM flow_nodes WHERE flow_id = ?1 AND node_key = 'record'",
-            [flow_id],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
+    let raw = load_published_node_config(conn, flow_id, "record")?;
     Ok(crate::workflow::record_node::parse_record_config(&raw)?.max_duration_seconds())
+}
+
+pub(super) fn load_published_node_config(
+    conn: &Connection,
+    flow_id: i64,
+    node_key: &str,
+) -> Result<String, String> {
+    conn.query_row(
+        "SELECT published_config_json FROM flow_nodes WHERE flow_id = ?1 AND node_key = ?2",
+        rusqlite::params![flow_id, node_key],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
 }
 
 pub(super) fn update_flow_runtime_by_flow_id(

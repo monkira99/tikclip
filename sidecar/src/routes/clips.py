@@ -12,6 +12,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 
 from config import settings
+from core.audio_processor import SpeechSpan
 from core.captioner import generate_caption
 from core.model_manager import ModelManager
 from core.processor import VideoProcessor
@@ -46,6 +47,8 @@ async def try_schedule_video_processing(
     clip_min_duration: int | None = None,
     clip_max_duration: int | None = None,
     scene_threshold: float | None = None,
+    speech_cut_tolerance_sec: float | None = None,
+    speech_segments: list[SpeechSegmentOutput] | None = None,
 ) -> str | None:
     """Enqueue clip processing in the background.
 
@@ -72,6 +75,20 @@ async def try_schedule_video_processing(
             clip_min_duration=cmin,
             clip_max_duration=cmax,
             scene_threshold=sthr,
+            speech_cut_tolerance_sec=speech_cut_tolerance_sec,
+            precomputed_speech_segments=(
+                [
+                    SpeechSpan(
+                        start_sec=s.start_sec,
+                        end_sec=s.end_sec,
+                        text=s.text,
+                        confidence=s.confidence,
+                    )
+                    for s in speech_segments
+                ]
+                if speech_segments is not None
+                else None
+            ),
         )
         _active_processors[recording_id] = processor
 
@@ -124,6 +141,8 @@ async def process_video(body: ProcessVideoRequest):
         clip_min_duration=body.clip_min_duration,
         clip_max_duration=body.clip_max_duration,
         scene_threshold=body.scene_threshold,
+        speech_cut_tolerance_sec=body.speech_cut_tolerance_sec,
+        speech_segments=body.speech_segments,
     )
     if err == "file_not_found":
         raise HTTPException(status_code=400, detail="file not found")

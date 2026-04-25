@@ -1,98 +1,131 @@
-use super::store::load_sidecar_base_url;
-use super::{store::open_runtime_connection, LiveRuntimeManager};
+use super::{
+    store::{load_published_node_config, open_runtime_connection},
+    LiveRuntimeManager,
+};
 use crate::live_runtime::logs::FlowRuntimeLogLevel;
 use crate::recording_runtime::types::{RecordingOutcome, RecordingStartInput};
 use crate::recording_runtime::worker;
+use crate::workflow::record_node::{self, RecordPostProcessInput, SpeechSpan};
 use rusqlite::{Connection, OptionalExtension};
+use std::path::Path;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
 
+pub(super) enum RecordNodePostProcessHandoff {
+    Completed { speech_segments: Vec<SpeechSpan> },
+    Disabled,
+    Failed,
+}
+
+impl RecordNodePostProcessHandoff {
+    pub(super) fn completed_or_disabled(&self) -> bool {
+        matches!(
+            self,
+            RecordNodePostProcessHandoff::Completed { .. } | RecordNodePostProcessHandoff::Disabled
+        )
+    }
+
+    pub(super) fn speech_segments_or_empty(&self) -> &[SpeechSpan] {
+        match self {
+            RecordNodePostProcessHandoff::Completed { speech_segments } => speech_segments,
+            RecordNodePostProcessHandoff::Disabled | RecordNodePostProcessHandoff::Failed => &[],
+        }
+    }
+
+    pub(super) fn speech_segments(&self) -> Option<&[SpeechSpan]> {
+        match self {
+            RecordNodePostProcessHandoff::Completed { speech_segments } => Some(speech_segments),
+            RecordNodePostProcessHandoff::Disabled | RecordNodePostProcessHandoff::Failed => None,
+        }
+    }
+}
+
 impl LiveRuntimeManager {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "Structured handoff logging keeps runtime identifiers explicit at the sidecar boundary"
-    )]
-    pub(super) fn handoff_recording_to_sidecar_processing(
+    pub(super) fn run_record_node_post_processing(
         &self,
         conn: &Connection,
+        recording_id: i64,
         flow_id: i64,
         flow_run_id: i64,
         external_recording_id: &str,
-        account_id: i64,
-        username: &str,
         file_path: &str,
-    ) -> Result<(), String> {
-        let Some(sidecar_base_url) = load_sidecar_base_url(conn)? else {
+    ) -> RecordNodePostProcessHandoff {
+        let Some(storage_root) = self.storage_root.as_deref() else {
             let _ = self.log_runtime_event(
                 flow_id,
                 Some(flow_run_id),
                 Some(external_recording_id),
-                "clip",
-                "sidecar_handoff_failed",
+                "record",
+                "rust_audio_processing_failed",
                 FlowRuntimeLogLevel::Warn,
-                Some("handoff.sidecar_unavailable"),
-                "Skipped sidecar handoff because sidecar base URL is unavailable",
-                serde_json::json!({
-                    "sidecar_url_present": false,
-                    "file_path_present": true,
-                }),
+                Some("audio.storage_root_missing"),
+                "Skipped record-node audio processing because storage root is unavailable",
+                serde_json::json!({ "file_path_present": true }),
             );
-            return Ok(());
+            return RecordNodePostProcessHandoff::Failed;
         };
-        let body = serde_json::json!({
-            "recording_id": external_recording_id,
-            "username": username,
-            "file_path": file_path,
-            "account_id": account_id,
-        });
-        let handoff_result = tokio::runtime::Runtime::new()
-            .map_err(|e| e.to_string())?
-            .block_on(async {
-                reqwest::Client::new()
-                    .post(format!("{sidecar_base_url}/api/video/process"))
-                    .json(&body)
-                    .send()
-                    .await
-                    .map_err(|e| e.to_string())?
-                    .error_for_status()
-                    .map_err(|e| e.to_string())?;
-                Ok::<(), String>(())
-            });
-        if let Err(err) = handoff_result {
-            let _ = self.log_runtime_event(
-                flow_id,
-                Some(flow_run_id),
-                Some(external_recording_id),
-                "clip",
-                "sidecar_handoff_failed",
-                FlowRuntimeLogLevel::Error,
-                Some("handoff.http_failed"),
-                "Failed to hand off recording to sidecar processing",
-                serde_json::json!({
-                    "sidecar_url_present": true,
-                    "file_path_present": true,
-                    "error": err,
-                }),
-            );
-            return Err(err);
-        }
+
         let _ = self.log_runtime_event(
             flow_id,
             Some(flow_run_id),
             Some(external_recording_id),
-            "clip",
-            "sidecar_handoff_completed",
+            "record",
+            "rust_audio_processing_started",
             FlowRuntimeLogLevel::Info,
             None,
-            "Handed recording off to sidecar processing",
-            serde_json::json!({
-                "sidecar_url_present": true,
-                "file_path_present": true,
-            }),
+            "Started record-node Rust sherpa-onnx audio processing",
+            serde_json::json!({ "file_path_present": true }),
         );
-        Ok(())
+
+        match record_node::run_post_record_audio(
+            conn,
+            storage_root,
+            load_published_node_config(conn, flow_id, "record")
+                .unwrap_or_else(|_| "{}".to_string())
+                .as_str(),
+            &RecordPostProcessInput {
+                recording_id,
+                file_path: Path::new(file_path).to_path_buf(),
+            },
+        ) {
+            Ok(output) => {
+                let segment_count = output.speech_segments.len();
+                let _ = self.log_runtime_event(
+                    flow_id,
+                    Some(flow_run_id),
+                    Some(external_recording_id),
+                    "record",
+                    "rust_audio_processing_completed",
+                    FlowRuntimeLogLevel::Info,
+                    None,
+                    "Completed record-node Rust sherpa-onnx audio processing",
+                    serde_json::json!({ "speech_segments": segment_count }),
+                );
+                if output.audio_enabled {
+                    RecordNodePostProcessHandoff::Completed {
+                        speech_segments: output.speech_segments,
+                    }
+                } else {
+                    RecordNodePostProcessHandoff::Disabled
+                }
+            }
+            Err(err) => {
+                let _ = self.log_runtime_event(
+                    flow_id,
+                    Some(flow_run_id),
+                    Some(external_recording_id),
+                    "record",
+                    "rust_audio_processing_failed",
+                    FlowRuntimeLogLevel::Warn,
+                    Some("audio.processing_failed"),
+                    "Record-node Rust audio processing failed; sidecar audio fallback remains enabled",
+                    serde_json::json!({ "error": err }),
+                );
+                RecordNodePostProcessHandoff::Failed
+            }
+        }
     }
 
     pub fn list_active_rust_recordings(

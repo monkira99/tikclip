@@ -10,6 +10,13 @@ class HealthResponse(BaseModel):
     ws_connections: int = 0
 
 
+class SpeechSegmentOutput(BaseModel):
+    start_sec: float
+    end_sec: float
+    text: str
+    confidence: float | None = None
+
+
 class ProcessVideoRequest(BaseModel):
     recording_id: str
     username: str
@@ -18,6 +25,8 @@ class ProcessVideoRequest(BaseModel):
     clip_min_duration: int = 15
     clip_max_duration: int = 90
     scene_threshold: float = 30.0
+    speech_cut_tolerance_sec: float | None = None
+    speech_segments: list[SpeechSegmentOutput] | None = None
 
 
 class ClipOutput(BaseModel):
@@ -28,13 +37,6 @@ class ClipOutput(BaseModel):
     end_sec: float
     duration_sec: float
     transcript_text: str | None = None
-
-
-class SpeechSegmentOutput(BaseModel):
-    start_sec: float
-    end_sec: float
-    text: str
-    confidence: float | None = None
 
 
 class ProcessingStatusResponse(BaseModel):

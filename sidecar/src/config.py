@@ -37,7 +37,6 @@ class Settings(BaseSettings):
     clip_min_duration: int = 15
     clip_max_duration: int = 90
     scene_threshold: float = 30.0
-    auto_process_after_record: bool = True
     auto_cleanup_raw: bool = True
     raw_retention_days: int = 7
     # No clip DB here: default 0 skips age-based deletion under clips/.

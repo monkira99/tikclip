@@ -1,4 +1,5 @@
 use super::{
+    clips::ClipNodeExecutionHandoff,
     store::{
         finalize_latest_recording_row, load_flow_runtime_config, load_record_duration_seconds,
         open_runtime_connection, update_flow_runtime_by_flow_id,
@@ -315,10 +316,10 @@ impl LiveRuntimeManager {
         success: bool,
         error_message: Option<&str>,
     ) -> Result<(), String> {
-        type RecordingFinalizeRow = (i64, i64, i64, Option<String>, Option<String>);
+        type RecordingFinalizeRow = (i64, i64, i64, i64, Option<String>, Option<String>);
         let row: Option<RecordingFinalizeRow> = conn
             .query_row(
-                "SELECT account_id, flow_id, flow_run_id, room_id, file_path FROM recordings WHERE sidecar_recording_id = ?1",
+                "SELECT id, account_id, flow_id, flow_run_id, room_id, file_path FROM recordings WHERE sidecar_recording_id = ?1",
                 [external_recording_id],
                 |row| {
                     Ok((
@@ -327,12 +328,15 @@ impl LiveRuntimeManager {
                         row.get(2)?,
                         row.get(3)?,
                         row.get(4)?,
+                        row.get(5)?,
                     ))
                 },
             )
             .optional()
             .map_err(|e| e.to_string())?;
-        let Some((account_id, flow_id, flow_run_id, existing_room_id, file_path)) = row else {
+        let Some((recording_id, account_id, flow_id, flow_run_id, existing_room_id, file_path)) =
+            row
+        else {
             return Ok(());
         };
 
@@ -397,14 +401,43 @@ impl LiveRuntimeManager {
                 }),
             );
             if let Some(file_path) = file_path.as_deref() {
+                let username = load_flow_runtime_config(conn, flow_id)?.username;
+                let audio_handoff = self.run_record_node_post_processing(
+                    conn,
+                    recording_id,
+                    flow_id,
+                    flow_run_id,
+                    external_recording_id,
+                    file_path,
+                );
+                if audio_handoff.completed_or_disabled() {
+                    let speech_segments = audio_handoff.speech_segments_or_empty();
+                    if matches!(
+                        self.run_clip_node_or_fallback(
+                            conn,
+                            flow_id,
+                            flow_run_id,
+                            external_recording_id,
+                            account_id,
+                            username.as_str(),
+                            file_path,
+                            speech_segments,
+                        ),
+                        ClipNodeExecutionHandoff::Completed
+                    ) {
+                        self.emit_runtime_update_for_flow(conn, flow_id)?;
+                        return Ok(());
+                    }
+                }
                 if let Err(err) = self.handoff_recording_to_sidecar_processing(
                     conn,
                     flow_id,
                     flow_run_id,
                     external_recording_id,
                     account_id,
-                    &load_flow_runtime_config(conn, flow_id)?.username,
+                    username.as_str(),
                     file_path,
+                    audio_handoff.speech_segments(),
                 ) {
                     runtime_store::append_failed_pipeline_node_run(
                         conn,

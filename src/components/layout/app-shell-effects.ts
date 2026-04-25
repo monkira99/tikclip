@@ -369,6 +369,39 @@ export function useTauriRuntimeEvents(): void {
       unlisten?.();
     };
   }, []);
+
+  useEffect(() => {
+    if (!isTauri()) {
+      return;
+    }
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    void listen<Record<string, unknown>>("rust-clip-ready", (event) => {
+      if (cancelled) {
+        return;
+      }
+      const data = event.payload;
+      dispatchSidecarNotification("clip_ready", data);
+      useAppStore.getState().bumpDashboardRevision();
+      useClipStore.getState().bumpClipsRevision();
+      const clipId = parseClipId(data.clip_id);
+      if (clipId != null) {
+        void maybeGenerateCaptionAfterInsert(clipId, data);
+        void maybeAutoTagClipAfterInsert(clipId, data);
+      }
+      void refreshRuntimeAndSyncAccountLiveFlags();
+    }).then((fn) => {
+      if (cancelled) {
+        fn();
+        return;
+      }
+      unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
 }
 
 export function useStorageRuntimeEvents(): void {

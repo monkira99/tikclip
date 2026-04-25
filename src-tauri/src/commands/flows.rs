@@ -149,33 +149,6 @@ fn get_float_setting_or_default(conn: &rusqlite::Connection, key: &str, default:
     }
 }
 
-fn get_bool_setting_or_default(conn: &rusqlite::Connection, key: &str, default: bool) -> bool {
-    match get_setting_trimmed(conn, key) {
-        Ok(Some(raw)) => {
-            let t = raw.trim().to_ascii_lowercase();
-            if matches!(t.as_str(), "1" | "true" | "yes" | "on") {
-                true
-            } else if matches!(t.as_str(), "0" | "false" | "no" | "off") {
-                false
-            } else {
-                warn!(
-                    "invalid boolean app_settings value for key '{}': '{}'; using default {}",
-                    key, raw, default
-                );
-                default
-            }
-        }
-        Ok(None) => default,
-        Err(err) => {
-            warn!(
-                "failed to read app_settings key '{}': {}; using default {}",
-                key, err, default
-            );
-            default
-        }
-    }
-}
-
 #[derive(Debug, Serialize)]
 pub struct FlowListItem {
     pub id: i64,
@@ -300,7 +273,7 @@ pub struct ApplySidecarFlowRuntimeHintInput {
     pub clip_id: Option<i64>,
 }
 
-fn append_pipeline_hint_node_run(
+pub(crate) fn append_pipeline_hint_node_run(
     conn: &Connection,
     hint: &str,
     clip_id: i64,
@@ -442,26 +415,22 @@ pub fn create_flow(state: State<'_, AppState>, input: CreateFlowInput) -> Result
 
     let record_max_duration_minutes =
         get_int_setting_or_default(&conn, "recording_max_minutes", 5).max(1);
-
-    let clip_min_duration_sec = get_int_setting_or_default(&conn, "clip_min_duration", 15).max(1);
-    let clip_max_duration_sec =
-        get_int_setting_or_default(&conn, "clip_max_duration", 90).max(clip_min_duration_sec);
-    let clip_auto_process_after_record =
-        get_bool_setting_or_default(&conn, "auto_process_after_record", true);
-    let clip_audio_processing_enabled =
-        get_bool_setting_or_default(&conn, "audio_processing_enabled", true);
-    let clip_speech_merge_gap_sec =
+    let record_speech_merge_gap_sec =
         get_float_setting_or_default(&conn, "speech_merge_gap_sec", 0.5).max(0.0);
-    let clip_speech_cut_tolerance_sec =
-        get_float_setting_or_default(&conn, "speech_cut_tolerance_sec", 1.5).max(0.0);
-    let clip_stt_num_threads = get_int_setting_or_default(&conn, "stt_num_threads", 4).max(1);
-    let clip_stt_quantize = get_setting_trimmed(&conn, "stt_quantize")?
+    let record_stt_num_threads = get_int_setting_or_default(&conn, "stt_num_threads", 4).max(1);
+    let record_stt_quantize = get_setting_trimmed(&conn, "stt_quantize")?
         .map(|q| match q.trim().to_ascii_lowercase().as_str() {
             "fp32" | "float32" => "fp32".to_string(),
             "int8" => "int8".to_string(),
             _ => "auto".to_string(),
         })
         .unwrap_or_else(|| "auto".to_string());
+
+    let clip_min_duration_sec = get_int_setting_or_default(&conn, "clip_min_duration", 15).max(1);
+    let clip_max_duration_sec =
+        get_int_setting_or_default(&conn, "clip_max_duration", 90).max(clip_min_duration_sec);
+    let clip_speech_cut_tolerance_sec =
+        get_float_setting_or_default(&conn, "speech_cut_tolerance_sec", 1.5).max(0.0);
 
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     tx.execute(
@@ -492,17 +461,15 @@ pub fn create_flow(state: State<'_, AppState>, input: CreateFlowInput) -> Result
     .to_string();
     let record_config = json!({
         "max_duration_minutes": record_max_duration_minutes,
+        "speech_merge_gap_sec": record_speech_merge_gap_sec,
+        "stt_num_threads": record_stt_num_threads,
+        "stt_quantize": record_stt_quantize,
     })
     .to_string();
     let clip_config = json!({
-        "auto_process_after_record": clip_auto_process_after_record,
         "clip_min_duration": clip_min_duration_sec,
         "clip_max_duration": clip_max_duration_sec,
-        "audio_processing_enabled": clip_audio_processing_enabled,
-        "speech_merge_gap_sec": clip_speech_merge_gap_sec,
         "speech_cut_tolerance_sec": clip_speech_cut_tolerance_sec,
-        "stt_num_threads": clip_stt_num_threads,
-        "stt_quantize": clip_stt_quantize,
     })
     .to_string();
     let caption_config = json!({

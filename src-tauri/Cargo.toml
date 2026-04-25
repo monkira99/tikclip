@@ -25,7 +25,8 @@ chrono = { version = "0.4", features = ["serde"] }
 log = "0.4"
 env_logger = "0.11"
 open = "5"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 tokio = { version = "1", features = ["process", "rt-multi-thread", "macros", "time"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 thiserror = "1"
+sherpa-onnx = "1.12.40"

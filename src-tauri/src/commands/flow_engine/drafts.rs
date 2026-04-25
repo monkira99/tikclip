@@ -1,5 +1,5 @@
 use crate::time_hcm::SQL_NOW_HCM;
-use crate::workflow::{record_node, start_node};
+use crate::workflow::{clip_node, record_node, start_node};
 use rusqlite::{params, Connection};
 
 /// Persists draft JSON for one node (engine reads published only until publish).
@@ -14,6 +14,7 @@ pub(crate) fn apply_flow_node_draft(
     let draft_config_json = match node_key {
         "start" => start_node::canonicalize_start_draft_config_json(draft_config_json)?,
         "record" => record_node::canonicalize_record_config_json(draft_config_json)?,
+        "clip" => clip_node::canonicalize_clip_config_json(draft_config_json)?,
         _ => draft_config_json.to_string(),
     };
     let changed = conn

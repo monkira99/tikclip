@@ -55,6 +55,8 @@ class VideoProcessor:
     clip_min_duration: int
     clip_max_duration: int
     scene_threshold: float
+    speech_cut_tolerance_sec: float | None = None
+    precomputed_speech_segments: list[SpeechSpan] | None = None
     date_str: str = field(default_factory=today_ymd_hcm)
     status: str = "pending"
     progress_percent: float = 0.0
@@ -82,7 +84,9 @@ class VideoProcessor:
         try:
             total_duration = await asyncio.to_thread(_probe_duration_seconds, self.source_path)
 
-            if settings.audio_processing_enabled:
+            if self.precomputed_speech_segments is not None:
+                self.speech_segments = list(self.precomputed_speech_segments)
+            elif settings.audio_processing_enabled:
                 audio = AudioProcessor(
                     recording_id=self.recording_id,
                     username=self.username,
@@ -293,7 +297,11 @@ class VideoProcessor:
             return visual
         gaps = self._speech_gap_intervals(self.speech_segments, total_duration)
         bounds = self._raw_scene_boundary_times(segments)
-        tol = settings.speech_cut_tolerance_sec
+        tol = (
+            self.speech_cut_tolerance_sec
+            if self.speech_cut_tolerance_sec is not None
+            else settings.speech_cut_tolerance_sec
+        )
         safe = self._hybrid_internal_cuts(bounds, gaps, tol)
         if not safe:
             return visual

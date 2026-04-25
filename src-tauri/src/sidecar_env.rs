@@ -133,12 +133,6 @@ pub fn build_sidecar_env(
         "TIKCLIP_CLIP_MAX_DURATION",
     )?;
     push_float_if_valid(&mut env, conn, "max_storage_gb", "TIKCLIP_STORAGE_QUOTA_GB")?;
-    push_bool_setting(
-        &mut env,
-        conn,
-        "auto_process_after_record",
-        "TIKCLIP_AUTO_PROCESS_AFTER_RECORD",
-    )?;
     push_int_if_valid(
         &mut env,
         conn,

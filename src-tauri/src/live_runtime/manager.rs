@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use tauri::AppHandle;
 
+mod clips;
 mod events;
 mod polling;
 mod recordings;
