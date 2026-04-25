@@ -134,7 +134,7 @@ export function Sidebar({
                     />
                     <Badge
                       variant="destructive"
-                      className="ml-auto hidden min-w-6 shrink-0 justify-center px-2 group-hover:inline-flex group-focus-within:inline-flex"
+                      className="ml-auto mr-2 hidden min-w-6 shrink-0 self-center justify-center px-2 group-hover:inline-flex group-focus-within:inline-flex"
                     >
                       {activeRecordings}
                     </Badge>
