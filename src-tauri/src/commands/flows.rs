@@ -6,6 +6,7 @@ use crate::live_runtime::account_binding::{
 use crate::live_runtime::manager::LiveRuntimeManager;
 use crate::live_runtime::normalize::username_lookup_key;
 use crate::time_hcm::SQL_NOW_HCM;
+use crate::workflow::constants::{is_valid_flow_node, is_valid_flow_status};
 use crate::workflow::runtime_store;
 use crate::AppState;
 use chrono::{SecondsFormat, Utc};
@@ -15,24 +16,6 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::State;
-
-const FLOW_NODE_KEYS: [&str; 5] = ["start", "record", "clip", "caption", "upload"];
-const FLOW_STATUS_KEYS: [&str; 6] = [
-    "idle",
-    "watching",
-    "recording",
-    "processing",
-    "error",
-    "disabled",
-];
-
-fn is_valid_flow_node(node_key: &str) -> bool {
-    FLOW_NODE_KEYS.contains(&node_key)
-}
-
-fn is_valid_flow_status(status: &str) -> bool {
-    FLOW_STATUS_KEYS.contains(&status)
-}
 
 fn map_flow_node_config_row(row: &Row) -> SqlResult<FlowNodeConfig> {
     Ok(FlowNodeConfig {

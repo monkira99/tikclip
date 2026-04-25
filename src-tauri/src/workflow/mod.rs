@@ -4,6 +4,7 @@ pub mod types;
 
 pub mod caption_node;
 pub mod clip_node;
+pub mod constants;
 pub mod node_runner;
 pub mod record_node;
 pub mod runtime_store;
