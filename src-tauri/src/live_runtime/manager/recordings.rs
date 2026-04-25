@@ -144,39 +144,6 @@ impl LiveRuntimeManager {
         Ok(rows)
     }
 
-    pub fn stop_rust_recording_by_key(
-        &self,
-        conn: &mut Connection,
-        external_recording_id: &str,
-    ) -> Result<(), String> {
-        let external_recording_id = external_recording_id.trim();
-        if external_recording_id.is_empty() {
-            return Err("recording_id is required".to_string());
-        }
-
-        let handle = self
-            .state
-            .lock()
-            .map_err(|e| e.to_string())?
-            .active_recordings_by_flow
-            .values()
-            .find(|handle| handle.external_recording_id == external_recording_id)
-            .cloned()
-            .ok_or_else(|| format!("active recording not found: {external_recording_id}"))?;
-
-        handle.cancelled.store(true, Ordering::SeqCst);
-        if let Some(cancel_process) = &handle.cancel_process {
-            cancel_process()?;
-        }
-        self.finalize_recording_by_key(
-            conn,
-            external_recording_id,
-            None,
-            false,
-            Some("Recording cancelled"),
-        )
-    }
-
     pub(super) fn spawn_recording_execution(
         &self,
         start_input: RecordingStartInput,

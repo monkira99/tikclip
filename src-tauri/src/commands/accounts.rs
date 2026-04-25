@@ -166,39 +166,6 @@ pub fn sync_accounts_live_status(
     Ok(())
 }
 
-#[tauri::command]
-pub fn update_account_live_status(
-    state: State<'_, AppState>,
-    id: i64,
-    is_live: bool,
-) -> Result<(), String> {
-    debug!("update_account_live_status: enter id={id} is_live={is_live}");
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
-    let flag = if is_live { 1i64 } else { 0i64 };
-    let n = conn
-        .execute(
-            &format!(
-                "UPDATE accounts SET \
-                 is_live = ?1, \
-                 last_checked_at = {}, \
-                 last_live_at = CASE WHEN ?1 != 0 THEN {} ELSE last_live_at END, \
-                 updated_at = {} \
-                 WHERE id = ?2",
-                SQL_NOW_HCM, SQL_NOW_HCM, SQL_NOW_HCM
-            ),
-            params![flag, id],
-        )
-        .map_err(|e| e.to_string())?;
-    if n == 0 {
-        warn!(
-            "update_account_live_status: no row updated (id={id} is_live={is_live}) — id missing in SQLite"
-        );
-        return Err(format!("account id {id} not found"));
-    }
-    info!("update_account_live_status: ok id={id} is_live={is_live} rows_updated={n}");
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

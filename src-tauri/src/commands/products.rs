@@ -43,17 +43,6 @@ pub fn list_products(state: State<'_, AppState>) -> Result<Vec<Product>, String>
     Ok(out)
 }
 
-#[tauri::command]
-pub fn get_product_by_id(state: State<'_, AppState>, product_id: i64) -> Result<Product, String> {
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
-    conn.query_row(
-        &format!("SELECT {PRODUCT_COLS} FROM products WHERE id = ?1"),
-        [product_id],
-        map_product_row,
-    )
-    .map_err(|e| e.to_string())
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct CreateProductInput {
@@ -216,32 +205,6 @@ pub fn delete_product(state: State<'_, AppState>, product_id: i64) -> Result<(),
 }
 
 #[tauri::command]
-pub fn list_clip_products(
-    state: State<'_, AppState>,
-    clip_id: i64,
-) -> Result<Vec<Product>, String> {
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT p.id, p.name, p.description, p.sku, p.image_url, p.tiktok_shop_id, \
-             p.tiktok_url, p.price, p.category, p.media_files_json, p.created_at, p.updated_at \
-             FROM products p \
-             INNER JOIN clip_products cp ON cp.product_id = p.id \
-             WHERE cp.clip_id = ?1 \
-             ORDER BY p.name",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([clip_id], map_product_row)
-        .map_err(|e| e.to_string())?;
-    let mut out = Vec::new();
-    for r in rows {
-        out.push(r.map_err(|e| e.to_string())?);
-    }
-    Ok(out)
-}
-
-#[tauri::command]
 pub fn tag_clip_product(
     state: State<'_, AppState>,
     clip_id: i64,
@@ -253,40 +216,5 @@ pub fn tag_clip_product(
         params![clip_id, product_id],
     )
     .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-pub fn untag_clip_product(
-    state: State<'_, AppState>,
-    clip_id: i64,
-    product_id: i64,
-) -> Result<(), String> {
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "DELETE FROM clip_products WHERE clip_id = ?1 AND product_id = ?2",
-        params![clip_id, product_id],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-pub fn batch_tag_clip_products(
-    state: State<'_, AppState>,
-    clip_ids: Vec<i64>,
-    product_id: i64,
-) -> Result<(), String> {
-    if clip_ids.is_empty() {
-        return Ok(());
-    }
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
-    for clip_id in &clip_ids {
-        conn.execute(
-            "INSERT OR IGNORE INTO clip_products (clip_id, product_id) VALUES (?1, ?2)",
-            params![clip_id, product_id],
-        )
-        .map_err(|e| e.to_string())?;
-    }
     Ok(())
 }

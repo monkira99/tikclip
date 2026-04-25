@@ -1,9 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-fn default_caption_status() -> String {
-    "pending".to_string()
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Account {
     pub id: i64,
@@ -48,36 +44,6 @@ pub struct Recording {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Clip {
-    pub id: i64,
-    pub recording_id: i64,
-    pub account_id: i64,
-    pub account_username: Option<String>,
-    pub title: Option<String>,
-    pub file_path: String,
-    pub thumbnail_path: Option<String>,
-    pub duration_seconds: i64,
-    pub file_size_bytes: i64,
-    pub start_time: f64,
-    pub end_time: f64,
-    pub status: String, // "draft" | "ready" | "posted" | "archived"
-    pub quality_score: Option<f64>,
-    pub scene_type: Option<String>,
-    pub ai_tags_json: Option<String>,
-    pub notes: Option<String>,
-    pub flow_id: Option<i64>,
-    pub flow_run_id: Option<i64>,
-    pub transcript_text: Option<String>,
-    pub caption_text: Option<String>,
-    #[serde(default = "default_caption_status")]
-    pub caption_status: String,
-    pub caption_error: Option<String>,
-    pub caption_generated_at: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Flow {
     pub id: i64,
     pub account_id: i64,
@@ -104,26 +70,6 @@ pub struct FlowNodeDefinition {
     pub published_config_json: String,
     pub draft_updated_at: String,
     pub published_at: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct FlowNodeConfig {
-    pub id: i64,
-    pub flow_id: i64,
-    pub node_key: String,
-    pub config_json: String,
-    pub updated_at: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct SpeechSegment {
-    pub id: i64,
-    pub recording_id: i64,
-    pub start_time: f64,
-    pub end_time: f64,
-    pub text: String,
-    pub confidence: Option<f64>,
-    pub created_at: String,
 }
 
 #[allow(dead_code)]

@@ -1,5 +1,3 @@
-use crate::commands::flow_engine;
-use crate::db::models::{Clip, FlowNodeConfig};
 use crate::live_runtime::account_binding::{
     find_account_by_start_username, find_flow_id_for_account,
 };
@@ -11,51 +9,10 @@ use crate::workflow::runtime_store;
 use crate::AppState;
 use chrono::{SecondsFormat, Utc};
 use log::warn;
-use rusqlite::Result as SqlResult;
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::State;
-
-fn map_flow_node_config_row(row: &Row) -> SqlResult<FlowNodeConfig> {
-    Ok(FlowNodeConfig {
-        id: row.get(0)?,
-        flow_id: row.get(1)?,
-        node_key: row.get(2)?,
-        config_json: row.get(3)?,
-        updated_at: row.get(4)?,
-    })
-}
-
-fn map_clip_row(row: &Row) -> SqlResult<Clip> {
-    Ok(Clip {
-        id: row.get(0)?,
-        recording_id: row.get(1)?,
-        account_id: row.get(2)?,
-        account_username: row.get(3)?,
-        title: row.get(4)?,
-        file_path: row.get(5)?,
-        thumbnail_path: row.get(6)?,
-        duration_seconds: row.get(7)?,
-        file_size_bytes: row.get(8)?,
-        start_time: row.get(9)?,
-        end_time: row.get(10)?,
-        status: row.get(11)?,
-        quality_score: row.get(12)?,
-        scene_type: row.get(13)?,
-        ai_tags_json: row.get(14)?,
-        notes: row.get(15)?,
-        flow_id: row.get(16)?,
-        flow_run_id: row.get(17)?,
-        transcript_text: row.get(18)?,
-        caption_text: row.get(19)?,
-        caption_status: row.get(20)?,
-        caption_error: row.get(21)?,
-        caption_generated_at: row.get(22)?,
-        created_at: row.get(23)?,
-        updated_at: row.get(24)?,
-    })
-}
 
 fn merge_start_runtime_fields(
     conn: &rusqlite::Connection,
@@ -240,40 +197,11 @@ pub struct FlowListItem {
     pub updated_at: String,
 }
 
-#[derive(Debug, Serialize)]
-pub struct FlowRecording {
-    pub id: i64,
-    pub account_id: i64,
-    pub account_username: String,
-    pub room_id: Option<String>,
-    pub status: String,
-    pub started_at: String,
-    pub ended_at: Option<String>,
-    pub duration_seconds: i64,
-    pub file_path: Option<String>,
-    pub file_size_bytes: i64,
-    pub sidecar_recording_id: Option<String>,
-    pub error_message: Option<String>,
-    pub flow_id: Option<i64>,
-    pub created_at: String,
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct CreateFlowInput {
     pub name: String,
     pub enabled: Option<bool>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct UpdateFlowInput {
-    pub name: Option<String>,
-    pub status: Option<String>,
-    pub current_node: Option<String>,
-    pub last_live_at: Option<String>,
-    pub last_run_at: Option<String>,
-    pub last_error: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -370,25 +298,6 @@ pub struct ApplySidecarFlowRuntimeHintInput {
     pub hint: String,
     /// Desktop DB clip row; used to append `clip`/`caption` `flow_node_runs` and to resolve `account_id` for `caption_ready`.
     pub clip_id: Option<i64>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct SaveFlowNodeConfigInput {
-    pub flow_id: i64,
-    pub node_key: String,
-    pub config_json: String,
-}
-
-fn normalize_flow_node_config_json(node_key: &str, config_json: &str) -> Result<String, String> {
-    serde_json::from_str::<serde_json::Value>(config_json)
-        .map_err(|e| format!("config_json must be valid JSON: {e}"))?;
-
-    match node_key {
-        "start" => crate::workflow::start_node::canonicalize_start_config_json(config_json),
-        "record" => crate::workflow::record_node::canonicalize_record_config_json(config_json),
-        _ => Ok(config_json.to_string()),
-    }
 }
 
 fn append_pipeline_hint_node_run(
@@ -627,118 +536,6 @@ pub fn create_flow(state: State<'_, AppState>, input: CreateFlowInput) -> Result
     Ok(flow_id)
 }
 
-#[tauri::command]
-pub fn update_flow(
-    state: State<'_, AppState>,
-    flow_id: i64,
-    input: UpdateFlowInput,
-) -> Result<(), String> {
-    if flow_id <= 0 {
-        return Err("flow_id must be positive".to_string());
-    }
-
-    let mut sets: Vec<String> = Vec::new();
-    let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    let mut idx: usize = 1;
-
-    if let Some(name) = input.name {
-        let trimmed = name.trim();
-        if trimmed.is_empty() {
-            return Err("name cannot be empty".to_string());
-        }
-        sets.push(format!("name = ?{idx}"));
-        params_vec.push(Box::new(trimmed.to_string()));
-        idx += 1;
-    }
-
-    if let Some(status) = input.status {
-        let trimmed = status.trim();
-        if trimmed.is_empty() {
-            return Err("status cannot be empty".to_string());
-        }
-        if !is_valid_flow_status(trimmed) {
-            return Err(format!("invalid status: {trimmed}"));
-        }
-        sets.push(format!("status = ?{idx}"));
-        params_vec.push(Box::new(trimmed.to_string()));
-        idx += 1;
-    }
-
-    if let Some(current_node) = input.current_node {
-        let trimmed = current_node.trim().to_string();
-        if trimmed.is_empty() {
-            sets.push("current_node = NULL".to_string());
-        } else {
-            if !is_valid_flow_node(trimmed.as_str()) {
-                return Err(format!("invalid current_node: {}", trimmed));
-            }
-            sets.push(format!("current_node = ?{idx}"));
-            params_vec.push(Box::new(trimmed));
-            idx += 1;
-        }
-    }
-
-    let touch_telemetry =
-        input.last_live_at.is_some() || input.last_run_at.is_some() || input.last_error.is_some();
-
-    if sets.is_empty() && !touch_telemetry {
-        return Ok(());
-    }
-
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
-
-    if !sets.is_empty() {
-        sets.push(format!("updated_at = {SQL_NOW_HCM}"));
-        let sql = format!("UPDATE flows SET {} WHERE id = ?{idx}", sets.join(", "));
-        params_vec.push(Box::new(flow_id));
-
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-            params_vec.iter().map(|p| p.as_ref()).collect();
-        let changed = conn
-            .execute(sql.as_str(), params_refs.as_slice())
-            .map_err(|e| e.to_string())?;
-        if changed == 0 {
-            return Err(format!("flow {flow_id} not found"));
-        }
-    } else if touch_telemetry {
-        let exists: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM flows WHERE id = ?1",
-                [flow_id],
-                |row| row.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-        if exists == 0 {
-            return Err(format!("flow {flow_id} not found"));
-        }
-    }
-
-    if touch_telemetry {
-        merge_start_runtime_fields(
-            &conn,
-            flow_id,
-            input.last_live_at.as_deref(),
-            input.last_run_at.as_deref(),
-            input.last_error.as_deref(),
-        )?;
-    }
-    Ok(())
-}
-
-#[tauri::command]
-pub fn update_flow_runtime_by_account(
-    state: State<'_, AppState>,
-    account_id: i64,
-    input: UpdateFlowRuntimeByAccountInput,
-) -> Result<(), String> {
-    if account_id <= 0 {
-        return Err("account_id must be positive".to_string());
-    }
-
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
-    apply_flow_runtime_patch_for_account(&conn, account_id, &input)
-}
-
 /// Maps sidecar processing events to `flows` pipeline telemetry (desktop engine boundary).
 #[tauri::command]
 pub fn apply_sidecar_flow_runtime_hint(
@@ -918,164 +715,9 @@ pub fn delete_flow(
     delete_flow_with_conn(&mut conn, &runtime_manager, flow_id)
 }
 
-#[tauri::command]
-pub fn save_flow_node_config(
-    state: State<'_, AppState>,
-    input: SaveFlowNodeConfigInput,
-) -> Result<FlowNodeConfig, String> {
-    if input.flow_id <= 0 {
-        return Err("flow_id must be positive".to_string());
-    }
-
-    let node_key = input.node_key.trim();
-    if !is_valid_flow_node(node_key) {
-        return Err(format!("invalid node_key: {}", input.node_key));
-    }
-
-    let config_json = input.config_json.trim();
-    if config_json.is_empty() {
-        return Err("config_json is required".to_string());
-    }
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
-    let flow_exists: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM flows WHERE id = ?1",
-            [input.flow_id],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-    if flow_exists == 0 {
-        return Err(format!("flow {} not found", input.flow_id));
-    }
-
-    let node_exists: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM flow_nodes WHERE flow_id = ?1 AND node_key = ?2",
-            params![input.flow_id, node_key],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-    if node_exists > 0 {
-        flow_engine::apply_flow_node_draft(&conn, input.flow_id, node_key, config_json)?;
-    } else {
-        let normalized_config_json = normalize_flow_node_config_json(node_key, config_json)?;
-        let position: i64 = match node_key {
-            "start" => 1,
-            "record" => 2,
-            "clip" => 3,
-            "caption" => 4,
-            "upload" => 5,
-            _ => 1,
-        };
-        conn.execute(
-            &format!(
-                "INSERT INTO flow_nodes (flow_id, node_key, position, draft_config_json, published_config_json, draft_updated_at, published_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?4, {}, {})",
-                SQL_NOW_HCM, SQL_NOW_HCM
-            ),
-            params![input.flow_id, node_key, position, normalized_config_json],
-        )
-        .map_err(|e| e.to_string())?;
-    }
-
-    conn.query_row(
-        "SELECT id, flow_id, node_key, draft_config_json, draft_updated_at \
-         FROM flow_nodes WHERE flow_id = ?1 AND node_key = ?2",
-        params![input.flow_id, node_key],
-        map_flow_node_config_row,
-    )
-    .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn list_recordings_by_flow(
-    state: State<'_, AppState>,
-    flow_id: i64,
-) -> Result<Vec<FlowRecording>, String> {
-    if flow_id <= 0 {
-        return Err("flow_id must be positive".to_string());
-    }
-
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT \
-             r.id, r.account_id, a.username, r.room_id, r.status, r.started_at, r.ended_at, \
-             r.duration_seconds, r.file_path, r.file_size_bytes, r.sidecar_recording_id, \
-             r.error_message, r.flow_id, r.created_at \
-             FROM recordings r \
-             INNER JOIN accounts a ON a.id = r.account_id \
-             WHERE r.flow_id = ?1 \
-             ORDER BY r.started_at DESC",
-        )
-        .map_err(|e| e.to_string())?;
-
-    let rows = stmt
-        .query_map([flow_id], |row| {
-            Ok(FlowRecording {
-                id: row.get(0)?,
-                account_id: row.get(1)?,
-                account_username: row.get(2)?,
-                room_id: row.get(3)?,
-                status: row.get(4)?,
-                started_at: row.get(5)?,
-                ended_at: row.get(6)?,
-                duration_seconds: row.get(7)?,
-                file_path: row.get(8)?,
-                file_size_bytes: row.get(9)?,
-                sidecar_recording_id: row.get(10)?,
-                error_message: row.get(11)?,
-                flow_id: row.get(12)?,
-                created_at: row.get(13)?,
-            })
-        })
-        .map_err(|e| e.to_string())?;
-
-    let mut out = Vec::new();
-    for r in rows {
-        out.push(r.map_err(|e| e.to_string())?);
-    }
-    Ok(out)
-}
-
-#[tauri::command]
-pub fn list_clips_by_flow(state: State<'_, AppState>, flow_id: i64) -> Result<Vec<Clip>, String> {
-    if flow_id <= 0 {
-        return Err("flow_id must be positive".to_string());
-    }
-
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT \
-             c.id, c.recording_id, c.account_id, a.username, \
-             c.title, c.file_path, c.thumbnail_path, c.duration_seconds, c.file_size_bytes, \
-             c.start_time, c.end_time, c.status, c.quality_score, c.scene_type, c.ai_tags_json, \
-             c.notes, c.flow_id, c.flow_run_id, c.transcript_text, c.caption_text, c.caption_status, c.caption_error, c.caption_generated_at, c.created_at, c.updated_at \
-             FROM clips c \
-             INNER JOIN accounts a ON a.id = c.account_id \
-             WHERE c.flow_id = ?1 \
-             ORDER BY c.created_at DESC",
-        )
-        .map_err(|e| e.to_string())?;
-
-    let rows = stmt
-        .query_map([flow_id], map_clip_row)
-        .map_err(|e| e.to_string())?;
-
-    let mut out = Vec::new();
-    for row in rows {
-        out.push(row.map_err(|e| e.to_string())?);
-    }
-    Ok(out)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        delete_flow_with_conn, map_flow_node_config_row, normalize_flow_node_config_json,
-        set_flow_enabled_with_conn,
-    };
+    use super::{delete_flow_with_conn, set_flow_enabled_with_conn};
     use crate::db::init::initialize_database;
     use crate::live_runtime::manager::LiveRuntimeManager;
     use rusqlite::{params, Connection};
@@ -1112,100 +754,6 @@ mod tests {
             params![flow_id, format!(r#"{{"username":"{username}"}}"#)],
         )
         .expect("insert start node");
-    }
-
-    #[test]
-    fn save_flow_node_config_insert_path_canonicalizes_start_username() {
-        let (conn, path) = open_temp_db();
-        conn.execute(
-            "INSERT INTO flows (name, enabled, status, published_version, draft_version) VALUES ('t', 1, 'idle', 1, 1)",
-            [],
-        )
-        .expect("insert flow");
-        let flow_id = conn.last_insert_rowid();
-
-        let node_exists: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM flow_nodes WHERE flow_id = ?1 AND node_key = 'start'",
-                [flow_id],
-                |row| row.get(0),
-            )
-            .expect("count nodes");
-        assert_eq!(node_exists, 0);
-
-        let config_json = r#"{"username":" @shop_abc ","cookies_json":"{}"}"#;
-        let normalized_config_json =
-            normalize_flow_node_config_json("start", config_json).expect("normalize start config");
-        let position = 1i64;
-        conn.execute(
-            "INSERT INTO flow_nodes (flow_id, node_key, position, draft_config_json, published_config_json, draft_updated_at, published_at) \
-             VALUES (?1, ?2, ?3, ?4, ?4, datetime('now', '+7 hours'), datetime('now', '+7 hours'))",
-            params![flow_id, "start", position, normalized_config_json],
-        )
-        .expect("insert canonicalized start node");
-
-        let persisted_username: String = conn
-            .query_row(
-                "SELECT json_extract(draft_config_json, '$.username') FROM flow_nodes WHERE flow_id = ?1 AND node_key = 'start'",
-                [flow_id],
-                |row| row.get(0),
-            )
-            .expect("read draft username");
-        assert_eq!(persisted_username, "shop_abc");
-
-        let _: crate::db::models::FlowNodeConfig = conn
-            .query_row(
-                "SELECT id, flow_id, node_key, draft_config_json, draft_updated_at FROM flow_nodes WHERE flow_id = ?1 AND node_key = 'start'",
-                [flow_id],
-                map_flow_node_config_row,
-            )
-            .expect("read row");
-
-        drop(conn);
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn save_flow_node_config_insert_path_canonicalizes_record_config() {
-        let (conn, path) = open_temp_db();
-        conn.execute(
-            "INSERT INTO flows (name, enabled, status, published_version, draft_version) VALUES ('t', 1, 'idle', 1, 1)",
-            [],
-        )
-        .expect("insert flow");
-        let flow_id = conn.last_insert_rowid();
-
-        let node_exists: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM flow_nodes WHERE flow_id = ?1 AND node_key = 'record'",
-                [flow_id],
-                |row| row.get(0),
-            )
-            .expect("count nodes");
-        assert_eq!(node_exists, 0);
-
-        let config_json = r#"{"maxDurationSeconds":61}"#;
-        let normalized_config_json = normalize_flow_node_config_json("record", config_json)
-            .expect("normalize record config");
-        let position = 2i64;
-        conn.execute(
-            "INSERT INTO flow_nodes (flow_id, node_key, position, draft_config_json, published_config_json, draft_updated_at, published_at) \
-             VALUES (?1, ?2, ?3, ?4, ?4, datetime('now', '+7 hours'), datetime('now', '+7 hours'))",
-            params![flow_id, "record", position, normalized_config_json],
-        )
-        .expect("insert canonicalized record node");
-
-        let persisted_config: String = conn
-            .query_row(
-                "SELECT draft_config_json FROM flow_nodes WHERE flow_id = ?1 AND node_key = 'record'",
-                [flow_id],
-                |row| row.get(0),
-            )
-            .expect("read draft config");
-        assert_eq!(persisted_config, r#"{"max_duration_minutes":2}"#);
-
-        drop(conn);
-        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

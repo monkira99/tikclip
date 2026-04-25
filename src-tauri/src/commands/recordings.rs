@@ -236,48 +236,6 @@ pub fn finalize_rust_recording_row(
     )
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct FinalizeRustRecordingRuntimeInput {
-    pub external_recording_id: String,
-    pub worker_status: String,
-    pub room_id: Option<String>,
-    pub error_message: Option<String>,
-}
-
-#[tauri::command]
-pub fn finalize_rust_recording_runtime(
-    state: State<'_, AppState>,
-    runtime_manager: State<'_, LiveRuntimeManager>,
-    input: FinalizeRustRecordingRuntimeInput,
-) -> Result<(), String> {
-    if input.external_recording_id.trim().is_empty() {
-        return Err("external_recording_id is required".to_string());
-    }
-
-    let mut conn = state.db.lock().map_err(|e| e.to_string())?;
-    let worker_status = input.worker_status.trim().to_ascii_lowercase();
-    if matches!(worker_status.as_str(), "completed" | "done") {
-        runtime_manager.finalize_recording_by_key(
-            &mut conn,
-            input.external_recording_id.as_str(),
-            input.room_id.as_deref(),
-            true,
-            None,
-        )
-    } else if matches!(worker_status.as_str(), "error" | "failed") {
-        runtime_manager.finalize_recording_by_key(
-            &mut conn,
-            input.external_recording_id.as_str(),
-            input.room_id.as_deref(),
-            false,
-            input.error_message.as_deref(),
-        )
-    } else {
-        Ok(())
-    }
-}
-
 #[tauri::command]
 pub fn list_active_rust_recordings(
     state: State<'_, AppState>,
@@ -285,16 +243,6 @@ pub fn list_active_rust_recordings(
 ) -> Result<Vec<ActiveRustRecordingStatus>, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
     runtime_manager.list_active_rust_recordings(&conn)
-}
-
-#[tauri::command]
-pub fn stop_rust_recording(
-    state: State<'_, AppState>,
-    runtime_manager: State<'_, LiveRuntimeManager>,
-    recording_id: String,
-) -> Result<(), String> {
-    let mut conn = state.db.lock().map_err(|e| e.to_string())?;
-    runtime_manager.stop_rust_recording_by_key(&mut conn, recording_id.as_str())
 }
 
 /// Shared upsert used by the Tauri command and `insert_clip_from_sidecar`.
@@ -404,16 +352,6 @@ pub(super) fn sync_recording_from_sidecar_conn(
         .map_err(|e| e.to_string())?;
         Ok(conn.last_insert_rowid())
     }
-}
-
-/// Upsert a `recordings` row keyed by `sidecar_recording_id` (sidecar UUID).
-#[tauri::command]
-pub fn sync_recording_from_sidecar(
-    state: State<'_, AppState>,
-    input: SyncRecordingFromSidecarInput,
-) -> Result<i64, String> {
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
-    sync_recording_from_sidecar_conn(&conn, &input)
 }
 
 #[cfg(test)]
