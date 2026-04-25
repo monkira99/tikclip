@@ -23,6 +23,17 @@ function pickAccountId(data: Record<string, unknown>): number | null {
   return null;
 }
 
+function pickNotificationId(data: Record<string, unknown>): string | undefined {
+  const raw = data.notification_id;
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return String(raw);
+  }
+  if (typeof raw === "string" && raw.trim()) {
+    return raw.trim();
+  }
+  return undefined;
+}
+
 function formatSidecarMessage(
   eventType: string,
   data: Record<string, unknown>,
@@ -180,6 +191,32 @@ export function dispatchSidecarNotification(
     const description = body || undefined;
     toast(title, {
       description,
+      duration: 6500,
+    });
+
+    await trySendOsNotification(title, body);
+  })();
+}
+
+/**
+ * Rust-owned events are already persisted before emission; only mirror them into UI surfaces.
+ */
+export function displayRuntimeNotification(
+  eventType: string,
+  data: Record<string, unknown>,
+): void {
+  void (async () => {
+    const { kind, title, body } = formatSidecarMessage(eventType, data);
+    useNotificationStore.getState().addNotification({
+      kind,
+      title,
+      body,
+      id: pickNotificationId(data),
+      createdAt: Date.now(),
+    });
+
+    toast(title, {
+      description: body || undefined,
       duration: 6500,
     });
 

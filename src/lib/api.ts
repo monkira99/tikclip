@@ -791,13 +791,14 @@ export type StorageStats = {
   clips_bytes: number;
   clips_count: number;
   products_bytes: number;
+  products_count: number;
   total_bytes: number;
   quota_bytes: number | null;
   usage_percent: number;
 };
 
 export async function getStorageStats(): Promise<StorageStats> {
-  return sidecarJson<StorageStats>("/api/storage/stats");
+  return invoke<StorageStats>("get_storage_stats");
 }
 
 export type StorageCleanupSummary = {
@@ -810,10 +811,7 @@ export async function runStorageCleanupNow(input: {
   raw_retention_days: number;
   archive_retention_days: number;
 }): Promise<StorageCleanupSummary> {
-  return sidecarJson<StorageCleanupSummary>("/api/storage/cleanup-run", {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
+  return invoke<StorageCleanupSummary>("run_storage_cleanup_now", { input });
 }
 
 export async function deleteRecordingFiles(recordingId: number): Promise<void> {

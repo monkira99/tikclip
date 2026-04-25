@@ -716,11 +716,10 @@ export function SettingsPage() {
       await setSetting(KEY_ARCHIVE_RETENTION, arch || "0");
       await setSetting(KEY_STORAGE_WARN, w || "80");
       await setSetting(KEY_STORAGE_CLEANUP, c || "95");
-      await restartSidecar();
       const fresh = await getAppDataPaths();
       setPaths(fresh);
       setMessage(
-        "Đã lưu giới hạn dung lượng, dọn dữ liệu và cảnh báo. Sidecar đã khởi động lại để áp dụng.",
+        "Đã lưu giới hạn dung lượng, dọn dữ liệu và cảnh báo. Rust cleanup sẽ áp dụng ở lần chạy kế tiếp.",
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
@@ -1269,7 +1268,10 @@ export function SettingsPage() {
                   <li>
                     Clips: {formatBytes(storageStats.clips_bytes)} ({storageStats.clips_count} files)
                   </li>
-                  <li>Products: {formatBytes(storageStats.products_bytes)}</li>
+                  <li>
+                    Products: {formatBytes(storageStats.products_bytes)} (
+                    {storageStats.products_count} files, không tính vào quota)
+                  </li>
                 </ul>
                 {storageStats.quota_bytes != null && storageStats.quota_bytes > 0 ? (
                   <div className="pt-1">

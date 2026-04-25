@@ -19,7 +19,10 @@ import {
 } from "@/lib/sidecar-db-sync";
 import { deriveAccountLiveFlagsFromRuntime } from "@/lib/account-live-from-runtime";
 import { hydrateNotificationsFromDb } from "@/lib/notifications-sync";
-import { dispatchSidecarNotification } from "@/lib/sidecar-notifications";
+import {
+  dispatchSidecarNotification,
+  displayRuntimeNotification,
+} from "@/lib/sidecar-notifications";
 import { cn } from "@/lib/utils";
 import { useAccountStore } from "@/stores/account-store";
 import { useAppStore } from "@/stores/app-store";
@@ -385,6 +388,52 @@ export function AppShell() {
       return;
     }
     let cancelled = false;
+    let unlistenCleanup: (() => void) | null = null;
+    let unlistenStorageWarn: (() => void) | null = null;
+
+    const handleStorageEvent = (eventType: "cleanup_completed" | "storage_warning") => {
+      return (event: { payload: Record<string, unknown> }) => {
+        if (cancelled) {
+          return;
+        }
+        displayRuntimeNotification(eventType, event.payload);
+        useAppStore.getState().bumpDashboardRevision();
+      };
+    };
+
+    void listen<Record<string, unknown>>(
+      "cleanup_completed",
+      handleStorageEvent("cleanup_completed"),
+    ).then((fn) => {
+      if (cancelled) {
+        fn();
+        return;
+      }
+      unlistenCleanup = fn;
+    });
+    void listen<Record<string, unknown>>(
+      "storage_warning",
+      handleStorageEvent("storage_warning"),
+    ).then((fn) => {
+      if (cancelled) {
+        fn();
+        return;
+      }
+      unlistenStorageWarn = fn;
+    });
+
+    return () => {
+      cancelled = true;
+      unlistenCleanup?.();
+      unlistenStorageWarn?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isTauri()) {
+      return;
+    }
+    let cancelled = false;
     let unlisten: (() => void) | null = null;
     void listen<FlowRuntimeLogEntry>("flow-runtime-log", (event) => {
       if (cancelled) {
@@ -488,23 +537,12 @@ export function AppShell() {
       })();
     });
 
-    const unsubCleanup = wsClient.on("cleanup_completed", (data) => {
-      dispatchSidecarNotification("cleanup_completed", data);
-      useAppStore.getState().bumpDashboardRevision();
-    });
-    const unsubStorageWarn = wsClient.on("storage_warning", (data) => {
-      dispatchSidecarNotification("storage_warning", data);
-      useAppStore.getState().bumpDashboardRevision();
-    });
-
     wsClient.connect(sidecarPort);
 
     return () => {
       unsubClip();
       unsubCaptionReady();
       unsubSpeechSeg();
-      unsubCleanup();
-      unsubStorageWarn();
       wsClient.disconnect();
     };
   }, [sidecarPort]);

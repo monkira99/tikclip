@@ -103,8 +103,10 @@ pub fn run() {
             commands::settings::get_setting,
             commands::settings::set_setting,
             commands::storage::delete_recording_files,
+            commands::storage::get_storage_stats,
             commands::storage::list_recordings_for_cleanup,
             commands::storage::list_activity_feed,
+            commands::storage::run_storage_cleanup_now,
             commands::paths::get_app_data_paths,
             commands::paths::open_path,
             commands::paths::storage_root_is_custom,
@@ -143,6 +145,11 @@ pub fn run() {
                 storage_path: storage_path.clone(),
             });
             app.manage(runtime_manager);
+            app.manage(commands::storage::StorageCleanupWorker::start(
+                app.handle().clone(),
+                db_path.clone(),
+                storage_path.clone(),
+            ));
 
             let sidecar = SidecarManager::new();
             if let Err(e) = sidecar.start(&tikclip_env) {
@@ -159,6 +166,8 @@ pub fn run() {
 
     app.run(|app_handle, event| {
         if let RunEvent::Exit = event {
+            let cleanup_worker = app_handle.state::<commands::storage::StorageCleanupWorker>();
+            cleanup_worker.shutdown();
             let runtime_manager = app_handle.state::<LiveRuntimeManager>();
             let _ = runtime_manager.shutdown();
         }

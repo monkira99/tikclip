@@ -3,12 +3,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from core.cleanup import cleanup_worker
 from embeddings.zvec_runtime import setup_zvec
 from routes import clips as clips_routes
 from routes import health
 from routes import products as product_routes
-from routes import storage as storage_routes
 from routes import trim as trim_routes
 from ws.manager import ws_manager
 
@@ -16,9 +14,7 @@ from ws.manager import ws_manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_zvec()
-    await cleanup_worker.start()
     yield
-    await cleanup_worker.stop()
 
 
 def create_app() -> FastAPI:
@@ -35,7 +31,6 @@ def create_app() -> FastAPI:
     app.include_router(clips_routes.router)
     app.include_router(trim_routes.router)
     app.include_router(product_routes.router, tags=["products"])
-    app.include_router(storage_routes.router, tags=["storage"])
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):
