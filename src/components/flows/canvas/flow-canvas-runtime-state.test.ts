@@ -80,6 +80,8 @@ test("deriveCanvasNodeStateMap marks snapshot current node as running", () => {
   assert.equal(stateMap.record.visualState, "running");
   assert.equal(stateMap.record.badgeLabel, "Running");
   assert.equal(stateMap.record.runtimeLabel, "Recording live");
+  assert.equal(stateMap.start.visualState, "done");
+  assert.equal(stateMap.start.badgeLabel, "Done");
 });
 
 test("deriveCanvasNodeStateMap prefers error over running when snapshot status is error", () => {
@@ -215,6 +217,7 @@ test("deriveCanvasNodeStateMap does not leak historical node rows into active sn
   });
 
   assert.equal(stateMap.record.visualState, "running");
+  assert.equal(stateMap.start.visualState, "done");
   assert.equal(stateMap.clip.visualState, "idle");
   assert.equal(stateMap.clip.badgeLabel, null);
   assert.equal(stateMap.caption.visualState, "idle");

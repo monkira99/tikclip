@@ -60,7 +60,8 @@ export function FlowCanvasNode({
         "absolute box-border flex min-h-0 flex-col gap-2 overflow-hidden rounded-2xl border px-4 py-3.5 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-[border-color,background-color,box-shadow]",
         visualState === "running" &&
           "border-[rgba(255,99,99,0.72)] bg-[rgba(255,99,99,0.08)] shadow-[0_0_0_1px_rgba(255,99,99,0.22)]",
-        visualState === "done" && "border-[rgba(95,201,146,0.35)] bg-[rgba(95,201,146,0.06)]",
+        visualState === "done" &&
+          "border-[rgba(95,201,146,0.58)] bg-[rgba(95,201,146,0.09)] shadow-[0_0_0_1px_rgba(95,201,146,0.12)]",
         visualState === "error" &&
           "border-[rgba(255,99,99,0.58)] bg-[rgba(255,99,99,0.07)] shadow-[0_0_0_1px_rgba(255,99,99,0.12)]",
         visualState === "idle" &&
@@ -81,6 +82,7 @@ export function FlowCanvasNode({
             className={cn(
               "size-2 shrink-0 rounded-full border border-white/10 bg-white/12",
               activeMarker && "bg-[var(--color-primary)] shadow-[0_0_0_4px_rgba(255,99,99,0.12)]",
+              visualState === "done" && "bg-[var(--color-success)] shadow-[0_0_0_4px_rgba(95,201,146,0.12)]",
             )}
           />
           <span className="truncate text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-text-muted)]">
@@ -88,7 +90,14 @@ export function FlowCanvasNode({
           </span>
         </div>
         {badgeLabel ? (
-          <span className="shrink-0 rounded-md border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--color-text-soft)]">
+          <span
+            className={cn(
+              "shrink-0 rounded-md border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--color-text-soft)]",
+              visualState === "done"
+                ? "border-[rgba(95,201,146,0.24)] bg-[rgba(95,201,146,0.12)] text-[var(--color-success)]"
+                : "border-white/10 bg-white/[0.04]",
+            )}
+          >
             {badgeLabel}
           </span>
         ) : hasDraftChanges ? (

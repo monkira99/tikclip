@@ -74,6 +74,15 @@ function latestNodeRunByKey(nodeRuns: FlowNodeRunRow[], flowRunId: number | null
   return latest;
 }
 
+function nodePrecedesCurrent(nodeKey: FlowNodeKey, currentNode: FlowNodeKey | null): boolean {
+  if (currentNode == null) {
+    return false;
+  }
+  const currentIndex = FLOW_NODE_ORDER.indexOf(currentNode);
+  const nodeIndex = FLOW_NODE_ORDER.indexOf(nodeKey);
+  return currentIndex > -1 && nodeIndex > -1 && nodeIndex < currentIndex;
+}
+
 export function deriveCanvasNodeStateMap({
   flowEnabled,
   runs,
@@ -148,6 +157,19 @@ export function deriveCanvasNodeStateMap({
       }
 
       if (latest?.status === "completed") {
+        return [
+          nodeKey,
+          {
+            visualState: "done",
+            badgeLabel: "Done",
+            runtimeLabel: `${FLOW_NODE_LABEL[nodeKey]} complete`,
+            inlineDetail: null,
+            activeMarker: false,
+          },
+        ];
+      }
+
+      if (snapshotIsActive && nodePrecedesCurrent(nodeKey, currentNode)) {
         return [
           nodeKey,
           {
