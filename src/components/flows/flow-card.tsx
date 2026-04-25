@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { AlertTriangle, Loader2, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -73,6 +74,11 @@ export function FlowCard({
 }: FlowCardProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const currentNodeIndex = flow.current_node ? FLOW_STEPS.indexOf(flow.current_node) : -1;
+  const affectedItems = [
+    { label: "Recordings", value: formatCount(flow.recordings_count) },
+    { label: "Clips", value: formatCount(flow.clips_count) },
+    { label: "Captions", value: formatCount(flow.captions_count) },
+  ];
 
   const handleConfirmDelete = async () => {
     const deleted = await onDelete(flow.id);
@@ -170,20 +176,83 @@ export function FlowCard({
         </div>
       </CardFooter>
 
-      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <DialogContent showCloseButton={!deleting} className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Delete flow?</DialogTitle>
-            <DialogDescription>
-              "{flow.name}" will be removed permanently. This cannot be undone.
-            </DialogDescription>
+      <Dialog
+        open={confirmOpen}
+        onOpenChange={(nextOpen) => {
+          if (!deleting) {
+            setConfirmOpen(nextOpen);
+          }
+        }}
+      >
+        <DialogContent showCloseButton={!deleting} className="gap-5 overflow-hidden p-0 sm:max-w-[480px]">
+          <DialogHeader className="gap-3 border-b border-white/10 px-5 pb-4 pt-5">
+            <div className="flex items-start gap-3 pr-8">
+              <span
+                className="grid size-10 shrink-0 place-items-center rounded-xl border border-[rgba(255,99,99,0.24)] bg-[rgba(255,99,99,0.12)] text-[var(--color-primary)]"
+                aria-hidden
+              >
+                <AlertTriangle className="size-5" />
+              </span>
+              <div className="min-w-0 space-y-1.5">
+                <DialogTitle>Delete flow?</DialogTitle>
+                <DialogDescription>
+                  This permanently removes the flow and its workflow state. Recorded media files are not deleted here.
+                </DialogDescription>
+              </div>
+            </div>
           </DialogHeader>
-          <DialogFooter className="border-0 bg-transparent p-0 sm:justify-end">
-            <Button type="button" variant="outline" disabled={deleting} onClick={() => setConfirmOpen(false)}>
-              Cancel
+
+          <div className="space-y-4 px-5">
+            <div className="rounded-xl border border-white/10 bg-white/[0.035] p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-[var(--color-text)]">{flow.name}</p>
+                  <p className="mt-1 truncate text-xs text-[var(--color-text-muted)]">@{flow.account_username}</p>
+                </div>
+                <Badge variant="secondary" className={cn("shrink-0 text-[10px] capitalize", STATUS_CLASS[flow.status])}>
+                  {flow.status}
+                </Badge>
+              </div>
+              <div className="mt-4 grid grid-cols-3 gap-2">
+                {affectedItems.map((item) => (
+                  <div
+                    key={item.label}
+                    className="flex min-h-[68px] flex-col items-center justify-center rounded-lg border border-white/8 bg-black/15 px-2 py-2 text-center"
+                  >
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-text-muted)]">
+                      {item.label}
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-[var(--color-text)]">{item.value}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <p className="text-xs leading-5 text-[var(--color-text-muted)]">
+              After deletion, this flow cannot be recovered from the app. Create a new flow if you need to watch the same
+              account again.
+            </p>
+          </div>
+
+          <DialogFooter className="mx-0 mb-0 mt-0 min-h-[88px] flex-col items-center gap-2 rounded-b-xl border-white/10 bg-white/[0.035] px-6 py-5 sm:flex-row sm:justify-end sm:gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={deleting}
+              onClick={() => setConfirmOpen(false)}
+              className="h-11 w-full rounded-full border-white/12 bg-white/[0.045] px-5 text-sm shadow-none sm:w-auto sm:min-w-[142px]"
+            >
+              Keep flow
             </Button>
-            <Button type="button" variant="destructive" disabled={deleting} onClick={() => void handleConfirmDelete()}>
-              {deleting ? "Deleting..." : "Delete"}
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={deleting}
+              onClick={() => void handleConfirmDelete()}
+              className="h-11 w-full rounded-full border-[rgba(255,99,99,0.32)] bg-[rgba(255,99,99,0.18)] px-5 text-sm text-[#ff6b6b] shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_10px_24px_rgba(255,99,99,0.1)] sm:w-auto sm:min-w-[170px]"
+            >
+              {deleting ? <Loader2 className="animate-spin" /> : <Trash2 />}
+              {deleting ? "Deleting..." : "Delete flow"}
             </Button>
           </DialogFooter>
         </DialogContent>
