@@ -7,7 +7,6 @@ from embeddings.zvec_runtime import setup_zvec
 from routes import clips as clips_routes
 from routes import health
 from routes import products as product_routes
-from routes import trim as trim_routes
 from ws.manager import ws_manager
 
 
@@ -29,7 +28,6 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(clips_routes.router)
-    app.include_router(trim_routes.router)
     app.include_router(product_routes.router, tags=["products"])
 
     @app.websocket("/ws")
