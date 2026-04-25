@@ -127,6 +127,10 @@ export interface FlowRuntimeSnapshot {
   last_live_at: string | null;
   last_error: string | null;
   active_flow_run_id: number | null;
+  last_checked_at?: string | null;
+  last_check_live?: boolean | null;
+  next_poll_at?: string | null;
+  poll_interval_seconds?: number | null;
 }
 
 export type JsonValue =
@@ -224,8 +228,8 @@ export interface CreateFlowInput {
   enabled?: boolean;
 }
 
-/** Row returned by sidecar `GET /api/recording/status` and recording WebSocket payloads. */
-export interface SidecarRecordingStatus {
+/** Active Rust-owned recording row returned by Tauri runtime commands. */
+export interface ActiveRecordingStatus {
   recording_id: string;
   account_id: number;
   username: string;

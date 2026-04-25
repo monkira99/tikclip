@@ -16,7 +16,7 @@ use crate::recording_runtime::types::{
 use crate::recording_runtime::worker::RecordingProcessHandle;
 use crate::recording_runtime::worker::{self, RecordingProcessRunner, RecordingRunner};
 use crate::tiktok::types::LiveStatus;
-use crate::time_hcm::now_timestamp_hcm;
+use crate::time_hcm::{now_timestamp_hcm, timestamp_after_seconds_hcm};
 use crate::workflow::runtime_store;
 use crate::workflow::start_node;
 use log::warn;
@@ -561,11 +561,28 @@ impl LiveRuntimeManager {
         }
 
         if let Some(status) = live_status {
+            self.mark_poll_checked(flow_id, true, config.poll_interval_seconds)?;
             let _ = self.handle_live_detected(conn, flow_id, &status)?;
         } else {
+            self.mark_poll_checked(flow_id, false, config.poll_interval_seconds)?;
             self.mark_source_offline(flow_id)?;
         }
 
+        Ok(())
+    }
+
+    fn mark_poll_checked(
+        &self,
+        flow_id: i64,
+        live: bool,
+        poll_interval_seconds: i64,
+    ) -> Result<(), String> {
+        let checked_at = now_timestamp_hcm();
+        let next_poll_at = timestamp_after_seconds_hcm(poll_interval_seconds);
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
+        if let Some(session) = state.sessions_by_flow.get_mut(&flow_id) {
+            session.mark_poll_checked(checked_at, live, next_poll_at, poll_interval_seconds);
+        }
         Ok(())
     }
 
@@ -1986,6 +2003,88 @@ fn open_runtime_connection(db_path: &std::path::Path) -> Result<Connection, Stri
 }
 
 impl LiveRuntimeManager {
+    pub fn list_active_rust_recordings(
+        &self,
+        conn: &Connection,
+    ) -> Result<Vec<crate::commands::recordings::ActiveRustRecordingStatus>, String> {
+        let active_keys: Vec<String> = self
+            .state
+            .lock()
+            .map_err(|e| e.to_string())?
+            .active_recordings_by_flow
+            .values()
+            .map(|handle| handle.external_recording_id.clone())
+            .collect();
+        if active_keys.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut rows = Vec::with_capacity(active_keys.len());
+        for key in active_keys {
+            let row = conn
+                .query_row(
+                    "SELECT r.sidecar_recording_id, r.account_id, a.username, r.status, \
+                            r.duration_seconds, r.file_size_bytes, r.file_path, r.error_message \
+                     FROM recordings r \
+                     JOIN accounts a ON a.id = r.account_id \
+                     WHERE r.sidecar_recording_id = ?1",
+                    [key.as_str()],
+                    |row| {
+                        Ok(crate::commands::recordings::ActiveRustRecordingStatus {
+                            recording_id: row.get::<_, Option<String>>(0)?.unwrap_or_default(),
+                            account_id: row.get(1)?,
+                            username: row.get(2)?,
+                            status: row.get(3)?,
+                            duration_seconds: row.get(4)?,
+                            file_size_bytes: row.get(5)?,
+                            file_path: row.get(6)?,
+                            error_message: row.get(7)?,
+                        })
+                    },
+                )
+                .optional()
+                .map_err(|e| e.to_string())?;
+            if let Some(row) = row {
+                rows.push(row);
+            }
+        }
+        rows.sort_by(|a, b| a.recording_id.cmp(&b.recording_id));
+        Ok(rows)
+    }
+
+    pub fn stop_rust_recording_by_key(
+        &self,
+        conn: &mut Connection,
+        external_recording_id: &str,
+    ) -> Result<(), String> {
+        let external_recording_id = external_recording_id.trim();
+        if external_recording_id.is_empty() {
+            return Err("recording_id is required".to_string());
+        }
+
+        let handle = self
+            .state
+            .lock()
+            .map_err(|e| e.to_string())?
+            .active_recordings_by_flow
+            .values()
+            .find(|handle| handle.external_recording_id == external_recording_id)
+            .cloned()
+            .ok_or_else(|| format!("active recording not found: {external_recording_id}"))?;
+
+        handle.cancelled.store(true, Ordering::SeqCst);
+        if let Some(cancel_process) = &handle.cancel_process {
+            cancel_process()?;
+        }
+        self.finalize_recording_by_key(
+            conn,
+            external_recording_id,
+            None,
+            false,
+            Some("Recording cancelled"),
+        )
+    }
+
     fn spawn_recording_execution(
         &self,
         start_input: RecordingStartInput,
@@ -2120,6 +2219,10 @@ fn failed_snapshot(
         generation,
         status: "error".to_string(),
         last_error: Some(error.to_string()),
+        last_checked_at: None,
+        last_check_live: None,
+        next_poll_at: None,
+        poll_interval_seconds: Some(config.poll_interval_seconds),
     }
 }
 

@@ -39,6 +39,10 @@ pub struct FlowRuntimeSnapshot {
     pub last_live_at: Option<String>,
     pub last_error: Option<String>,
     pub active_flow_run_id: Option<i64>,
+    pub last_checked_at: Option<String>,
+    pub last_check_live: Option<bool>,
+    pub next_poll_at: Option<String>,
+    pub poll_interval_seconds: Option<i64>,
 }
 
 fn load_runtime_account_id(
@@ -96,6 +100,10 @@ pub fn list_live_runtime_snapshots_with_conn(
                     conn,
                     session.flow_id,
                 )?,
+                last_checked_at: session.last_checked_at,
+                last_check_live: session.last_check_live,
+                next_poll_at: session.next_poll_at,
+                poll_interval_seconds: session.poll_interval_seconds,
             })
         })
         .collect()

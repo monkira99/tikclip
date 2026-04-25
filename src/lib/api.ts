@@ -20,7 +20,7 @@ import type {
   PublishFlowResult,
   CreateProductInput,
   Product,
-  SidecarRecordingStatus,
+  ActiveRecordingStatus,
   UpdateProductInput,
 } from "@/types";
 
@@ -65,94 +65,7 @@ async function sidecarJson<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export async function startRecording(body: {
-  account_id: number;
-  username: string;
-  room_id?: string | null;
-  stream_url?: string | null;
-  cookies_json?: string | null;
-  proxy_url?: string | null;
-  max_duration_seconds?: number | null;
-}): Promise<SidecarRecordingStatus> {
-  return sidecarJson<SidecarRecordingStatus>("/api/recording/start", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-}
-
-export async function stopRecording(recordingId: string): Promise<SidecarRecordingStatus> {
-  return sidecarJson<SidecarRecordingStatus>("/api/recording/stop", {
-    method: "POST",
-    body: JSON.stringify({ recording_id: recordingId }),
-  });
-}
-
-export async function getRecordingStatus(): Promise<SidecarRecordingStatus[]> {
-  return sidecarJson<SidecarRecordingStatus[]>("/api/recording/status");
-}
-
-export async function getRecordingStatusOne(recordingId: string): Promise<SidecarRecordingStatus> {
-  return sidecarJson<SidecarRecordingStatus>(`/api/recording/status/${encodeURIComponent(recordingId)}`);
-}
-
-export async function checkAccountStatus(body: {
-  username: string;
-  cookies_json?: string | null;
-  proxy_url?: string | null;
-}): Promise<{
-  username: string;
-  is_live: boolean;
-  room_id: string | null;
-  stream_url: string | null;
-  viewer_count: number | null;
-}> {
-  return sidecarJson("/api/accounts/check-status", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-}
-
-export type WatchAccountBody = {
-  account_id: number;
-  username: string;
-  auto_record: boolean;
-  cookies_json?: string | null;
-  proxy_url?: string | null;
-};
-
-function normalizeUsername(username: string): string {
-  return username.trim().replace(/^@/, "");
-}
-
-/** Register account with sidecar poller (required for live checks + auto-record). */
-export async function watchAccount(body: WatchAccountBody): Promise<void> {
-  await sidecarJson<{ ok: boolean }>("/api/accounts/watch", {
-    method: "POST",
-    body: JSON.stringify({
-      account_id: body.account_id,
-      username: normalizeUsername(body.username),
-      auto_record: body.auto_record,
-      cookies_json: body.cookies_json ?? null,
-      proxy_url: body.proxy_url ?? null,
-    }),
-  });
-}
-
-export async function unwatchAccount(accountId: number): Promise<void> {
-  const base = getSidecarBaseUrl();
-  if (!base) {
-    return;
-  }
-  const res = await fetch(`${base}/api/accounts/watch/${accountId}`, {
-    method: "DELETE",
-  });
-  if (!res.ok && res.status !== 404) {
-    const text = await res.text().catch(() => "");
-    throw new Error(text || `unwatch failed: ${res.status}`);
-  }
-}
-
-/** Persist live flag from sidecar into app SQLite (drives Accounts UI). */
+/** Persist live flag into app SQLite (drives Accounts UI). */
 export async function updateAccountLiveStatus(id: number, isLive: boolean): Promise<void> {
   if (import.meta.env.DEV) {
     console.debug("[TikClip] invoke update_account_live_status", { id, isLive });
@@ -160,7 +73,7 @@ export async function updateAccountLiveStatus(id: number, isLive: boolean): Prom
   await invoke("update_account_live_status", { id, isLive });
 }
 
-/** Single transaction — avoids N× invoke racing with list_accounts (StrictMode / duplicate fetches). */
+/** Batch persist live flags into SQLite. */
 export async function syncAccountsLiveStatus(
   rows: { account_id: number; is_live: boolean }[],
 ): Promise<void> {
@@ -171,51 +84,6 @@ export async function syncAccountsLiveStatus(
     console.debug("[TikClip] invoke sync_accounts_live_status", { count: rows.length, rows });
   }
   await invoke("sync_accounts_live_status", { rows });
-}
-
-/** Last poller snapshot (HTTP); works when WebSocket from sidecar → webview is blocked. */
-export type LiveOverviewAccount = {
-  account_id: number;
-  username: string;
-  is_live: boolean;
-};
-
-export async function getLiveOverview(): Promise<LiveOverviewAccount[]> {
-  const data = await sidecarJson<{ accounts: LiveOverviewAccount[] }>("/api/accounts/live-overview");
-  return data.accounts;
-}
-
-/** Force an immediate poll of all watched accounts and return fresh live flags. */
-export async function pollNow(): Promise<LiveOverviewAccount[]> {
-  const data = await sidecarJson<{ accounts: LiveOverviewAccount[] }>("/api/accounts/poll-now", {
-    method: "POST",
-  });
-  return data.accounts;
-}
-
-/** Re-register every DB account with the sidecar after connect/restart. */
-export async function syncWatcherForAccounts(
-  accounts: {
-    id: number;
-    username: string;
-    auto_record: boolean;
-    cookies_json: string | null;
-    proxy_url: string | null;
-  }[],
-): Promise<void> {
-  await Promise.all(
-    accounts.map((a) =>
-      watchAccount({
-        account_id: a.id,
-        username: a.username,
-        auto_record: a.auto_record,
-        cookies_json: a.cookies_json,
-        proxy_url: a.proxy_url,
-      }).catch(() => {
-        /* sidecar may be mid-restart */
-      }),
-    ),
-  );
 }
 
 export async function listClips(): Promise<Clip[]> {
@@ -357,6 +225,14 @@ export async function listLiveRuntimeLogs(
   return invoke<FlowRuntimeLogEntry[]>("list_live_runtime_logs", { flowId, limit });
 }
 
+export async function listActiveRustRecordings(): Promise<ActiveRecordingStatus[]> {
+  return invoke<ActiveRecordingStatus[]>("list_active_rust_recordings");
+}
+
+export async function stopRustRecording(recordingId: string): Promise<void> {
+  await invoke("stop_rust_recording", { recordingId });
+}
+
 export async function createFlow(input: CreateFlowInput): Promise<number> {
   return invoke<number>("create_flow", { input });
 }
@@ -425,8 +301,6 @@ export async function updateFlow(flowId: number, input: UpdateFlowInput): Promis
 }
 
 export type SidecarFlowRuntimeHint =
-  | "recording_started"
-  | "recording_finished"
   | "clip_ready"
   | "caption_ready";
 
@@ -434,38 +308,15 @@ export type SidecarFlowRuntimeHint =
 export async function applySidecarFlowRuntimeHint(input: {
   account_id: number;
   hint: SidecarFlowRuntimeHint;
-  worker_status?: string | null;
-  error_message?: string | null;
   /** Desktop SQLite `clips.id` for `clip_ready` / `caption_ready` pipeline node runs. */
   clip_id?: number | null;
-  room_id?: string | null;
-  stream_url?: string | null;
-  viewer_count?: number | null;
 }): Promise<void> {
   await invoke("apply_sidecar_flow_runtime_hint", {
     input: {
       account_id: input.account_id,
       hint: input.hint,
-      worker_status:
-        input.worker_status === undefined || input.worker_status === null
-          ? undefined
-          : input.worker_status,
-      error_message:
-        input.error_message === undefined || input.error_message === null
-          ? undefined
-          : input.error_message,
       clip_id:
         input.clip_id === undefined || input.clip_id === null ? undefined : input.clip_id,
-      room_id:
-        input.room_id === undefined || input.room_id === null ? undefined : input.room_id,
-      stream_url:
-        input.stream_url === undefined || input.stream_url === null
-          ? undefined
-          : input.stream_url,
-      viewer_count:
-        input.viewer_count === undefined || input.viewer_count === null
-          ? undefined
-          : input.viewer_count,
     },
   });
 }

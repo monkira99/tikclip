@@ -7,7 +7,7 @@ use crate::recording_runtime::worker;
 use crate::time_hcm::SQL_NOW_HCM;
 use crate::AppState;
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
 #[derive(Debug, Deserialize, Clone)]
@@ -15,6 +15,19 @@ use tauri::State;
 pub struct SyncRecordingFromSidecarInput {
     pub sidecar_recording_id: String,
     pub account_id: i64,
+    pub status: String,
+    pub duration_seconds: i64,
+    pub file_size_bytes: i64,
+    pub file_path: Option<String>,
+    pub error_message: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub struct ActiveRustRecordingStatus {
+    pub recording_id: String,
+    pub account_id: i64,
+    pub username: String,
     pub status: String,
     pub duration_seconds: i64,
     pub file_size_bytes: i64,
@@ -263,6 +276,25 @@ pub fn finalize_rust_recording_runtime(
     } else {
         Ok(())
     }
+}
+
+#[tauri::command]
+pub fn list_active_rust_recordings(
+    state: State<'_, AppState>,
+    runtime_manager: State<'_, LiveRuntimeManager>,
+) -> Result<Vec<ActiveRustRecordingStatus>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    runtime_manager.list_active_rust_recordings(&conn)
+}
+
+#[tauri::command]
+pub fn stop_rust_recording(
+    state: State<'_, AppState>,
+    runtime_manager: State<'_, LiveRuntimeManager>,
+    recording_id: String,
+) -> Result<(), String> {
+    let mut conn = state.db.lock().map_err(|e| e.to_string())?;
+    runtime_manager.stop_rust_recording_by_key(&mut conn, recording_id.as_str())
 }
 
 /// Shared upsert used by the Tauri command and `insert_clip_from_sidecar`.

@@ -123,7 +123,7 @@ pub struct LiveFlagRow {
     pub is_live: bool,
 }
 
-/// Applies sidecar live flags in one SQLite transaction (avoids list_accounts interleaving between rows).
+/// Applies runtime live flags in one SQLite transaction (avoids list_accounts interleaving between rows).
 #[tauri::command]
 pub fn sync_accounts_live_status(
     state: State<'_, AppState>,

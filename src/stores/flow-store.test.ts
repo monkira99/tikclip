@@ -2,7 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import type { FlowEditorPayload, FlowRuntimeLogEntry, FlowRuntimeSnapshot, FlowSummary } from "@/types";
-
 import { flowStoreApi, useFlowStore } from "./flow-store.ts";
 
 const FRONTEND_RUNTIME_LOG_CAP = 500;
@@ -94,6 +93,63 @@ function flowEditorPayload(flowId: number): FlowEditorPayload {
     clips_count: 0,
   };
 }
+
+test("saveNodeDraft skips unchanged draft JSON without marking dirty", async (t) => {
+  resetFlowStore();
+
+  const draft = JSON.stringify({ max_duration_minutes: 5 });
+  const activeFlow = flowEditorPayload(7);
+  activeFlow.nodes = [
+    {
+      id: 1,
+      flow_id: 7,
+      node_key: "record",
+      position: 1,
+      draft_config_json: draft,
+      published_config_json: draft,
+      draft_updated_at: "2026-04-19T09:41:12.381+07:00",
+      published_at: "2026-04-19T09:41:12.381+07:00",
+    },
+  ];
+  useFlowStore.setState({ activeFlowId: 7, activeFlow, draftDirty: false });
+  const saveDraft = t.mock.method(flowStoreApi, "saveFlowNodeDraft", async () => {});
+
+  await useFlowStore.getState().saveNodeDraft({
+    flow_id: 7,
+    node_key: "record",
+    draft_config_json: draft,
+  });
+
+  assert.equal(saveDraft.mock.callCount(), 0);
+  assert.equal(useFlowStore.getState().draftDirty, false);
+});
+
+test("upsertRuntimeSnapshot overlays active detail immediately from runtime events", () => {
+  resetFlowStore();
+
+  useFlowStore.setState({
+    flows: [flowSummary({ id: 7, status: "idle", current_node: null })],
+    activeFlowId: 7,
+    activeFlow: flowEditorPayload(7),
+  });
+
+  useFlowStore.getState().upsertRuntimeSnapshot({
+    flow_id: 7,
+    status: "watching",
+    current_node: "start",
+    account_id: 10,
+    username: "demo-account",
+    last_live_at: null,
+    last_error: null,
+    active_flow_run_id: null,
+  });
+
+  assert.equal(useFlowStore.getState().runtimeSnapshots[7]?.status, "watching");
+  assert.equal(useFlowStore.getState().flows[0]?.status, "watching");
+  assert.equal(useFlowStore.getState().flows[0]?.current_node, "start");
+  assert.equal(useFlowStore.getState().activeFlow?.flow.status, "watching");
+  assert.equal(useFlowStore.getState().activeFlow?.flow.current_node, "start");
+});
 
 test("applyRuntimeLogs hydrates logs by flow id", () => {
   resetFlowStore();
@@ -449,7 +505,6 @@ test("deleteFlow removes list/runtime state and resets active detail when deleti
   });
 
   const deleteMock = t.mock.method(flowStoreApi, "deleteFlow", async () => {});
-
   await useFlowStore.getState().deleteFlow(deletedFlowId);
 
   const state = useFlowStore.getState();

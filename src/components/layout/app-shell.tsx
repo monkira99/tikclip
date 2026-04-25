@@ -14,23 +14,19 @@ import { ProductsPage } from "@/pages/products";
 import { SettingsPage } from "@/pages/settings";
 import {
   insertClipFromSidecarWsPayload,
-  syncRecordingFromSidecarWsPayload,
   insertSpeechSegmentFromWsPayload,
   syncClipCaptionFromWsPayload,
 } from "@/lib/sidecar-db-sync";
-import { syncRecordingListFromSidecar } from "@/lib/recording-sidecar-sync";
+import { deriveAccountLiveFlagsFromRuntime } from "@/lib/account-live-from-runtime";
 import { hydrateNotificationsFromDb } from "@/lib/notifications-sync";
 import { dispatchSidecarNotification } from "@/lib/sidecar-notifications";
+import { cn } from "@/lib/utils";
 import { useAccountStore } from "@/stores/account-store";
 import { useAppStore } from "@/stores/app-store";
 import { useClipStore } from "@/stores/clip-store";
 import { useFlowStore } from "@/stores/flow-store";
-import {
-  applyRecordingWsPayload,
-  countActiveRecordings,
-  useRecordingStore,
-} from "@/stores/recording-store";
-import type { FlowRuntimeLogEntry } from "@/types";
+import { countActiveRecordings, useRecordingStore } from "@/stores/recording-store";
+import type { FlowRuntimeLogEntry, FlowRuntimeSnapshot } from "@/types";
 import { Sidebar } from "./sidebar";
 import { TopBar } from "./top-bar";
 
@@ -54,9 +50,6 @@ const pageComponents: Record<PageId, ComponentType> = {
   settings: SettingsPage,
 };
 
-const FINISHED_CLEANUP_MS = 8000;
-/** HTTP backup for live flags; sidecar poll is ~30s, sync often enough for UI without hammering. */
-const LIVE_HTTP_SYNC_MS = 5000;
 const CAPTION_RETRY_BASE_MS = 250;
 const CAPTION_GENERATE_MAX_ATTEMPTS = 3;
 const CAPTION_SYNC_NOT_FOUND_MAX_ATTEMPTS = 4;
@@ -209,23 +202,6 @@ async function maybeGenerateCaptionAfterInsert(
   }
 }
 
-async function syncLiveFromSidecarHttp(): Promise<void> {
-  try {
-    const rows = await api.getLiveOverview();
-    await api.syncAccountsLiveStatus(
-      rows.map((r) => ({ account_id: r.account_id, is_live: r.is_live })),
-    );
-    useAccountStore.getState().applyLiveFlagsFromSidecar(
-      rows.map((r) => ({ id: r.account_id, isLive: r.is_live })),
-    );
-    void useFlowStore.getState().refreshRuntime();
-  } catch (e) {
-    if (import.meta.env.DEV) {
-      console.warn("[TikClip] syncLiveFromSidecarHttp failed", e);
-    }
-  }
-}
-
 function parseAccountId(raw: unknown): number | null {
   const id = typeof raw === "number" ? raw : Number(raw);
   if (!Number.isFinite(id)) {
@@ -242,13 +218,71 @@ function parseClipId(raw: unknown): number | null {
   return Math.trunc(id);
 }
 
-export function shouldTriggerRustLiveIngressFromSidecar(): boolean {
-  return false;
+function syncAccountLiveFlagsFromRuntimeState(): void {
+  const flowById = new Map(
+    useFlowStore.getState().flows.map((flow) => [Number(flow.id), flow] as const),
+  );
+  const flowAccountIds = new Set<number>();
+  for (const flow of useFlowStore.getState().flows) {
+    const accountId = Number(flow.account_id);
+    if (Number.isFinite(accountId)) {
+      flowAccountIds.add(accountId);
+    }
+  }
+
+  const liveMap = new Map<number, boolean>();
+  for (const accountId of flowAccountIds) {
+    liveMap.set(accountId, false);
+  }
+
+  for (const row of deriveAccountLiveFlagsFromRuntime(
+    Object.values(useFlowStore.getState().runtimeSnapshots).filter((snapshot) => {
+      const flow = flowById.get(Number(snapshot.flow_id));
+      return flow?.enabled === true;
+    }),
+  )) {
+    liveMap.set(row.id, row.isLive);
+  }
+
+  const rows = Array.from(liveMap.entries())
+    .sort(([left], [right]) => left - right)
+    .map(([id, isLive]) => ({ id, isLive }));
+
+  if (rows.length === 0) {
+    return;
+  }
+
+  useAccountStore.getState().applyLiveFlagsFromRuntime(rows);
+  void api
+    .syncAccountsLiveStatus(rows.map((row) => ({ account_id: row.id, is_live: row.isLive })))
+    .catch((error) => {
+      if (import.meta.env.DEV) {
+        console.warn("[TikClip] syncAccountsLiveStatus from runtime failed", error);
+      }
+    });
 }
 
-export function maybeTriggerRustRuntimeIngressRefresh(refreshRuntime: () => void): void {
-  if (shouldTriggerRustLiveIngressFromSidecar()) {
-    refreshRuntime();
+async function refreshRuntimeAndSyncAccountLiveFlags(): Promise<void> {
+  const [activeRecordings] = await Promise.all([
+    api.listActiveRustRecordings(),
+    useFlowStore.getState().refreshRuntime(),
+  ]);
+  useRecordingStore.getState().hydrateFromRuntime(activeRecordings);
+  if (useAccountStore.getState().accounts.length === 0) {
+    await useAccountStore.getState().fetchAccounts();
+  }
+  syncAccountLiveFlagsFromRuntimeState();
+}
+
+async function refreshDashboardRuntimeData(): Promise<void> {
+  try {
+    const activeRecordings = await api.listActiveRustRecordings();
+    useRecordingStore.getState().hydrateFromRuntime(activeRecordings);
+    useAppStore.getState().bumpDashboardRevision();
+  } catch (error) {
+    if (import.meta.env.DEV) {
+      console.warn("[TikClip] refresh dashboard runtime data failed", error);
+    }
   }
 }
 
@@ -262,6 +296,9 @@ export function AppShell() {
   const setActiveRecordings = useAppStore((s) => s.setActiveRecordings);
   const activeRecordingCount = useRecordingStore((s) => countActiveRecordings(s.recordings));
   const notifyWarmupDone = useRef(false);
+  const refreshRuntimeState = () => {
+    void refreshRuntimeAndSyncAccountLiveFlags();
+  };
 
   useEffect(() => {
     setActiveRecordings(activeRecordingCount);
@@ -314,7 +351,7 @@ export function AppShell() {
   }, [sidecarConnected]);
 
   useEffect(() => {
-    void useFlowStore.getState().refreshRuntime();
+    refreshRuntimeState();
   }, []);
 
   useEffect(() => {
@@ -323,11 +360,13 @@ export function AppShell() {
     }
     let cancelled = false;
     let unlisten: (() => void) | null = null;
-    void listen("flow-runtime-updated", () => {
+    void listen<FlowRuntimeSnapshot>("flow-runtime-updated", (event) => {
       if (cancelled) {
         return;
       }
-      void useFlowStore.getState().refreshRuntime();
+      useFlowStore.getState().upsertRuntimeSnapshot(event.payload);
+      syncAccountLiveFlagsFromRuntimeState();
+      void refreshDashboardRuntimeData();
     }).then((fn) => {
       if (cancelled) {
         fn();
@@ -368,90 +407,9 @@ export function AppShell() {
   useEffect(() => {
     if (sidecarPort == null) {
       wsClient.disconnect();
-      useRecordingStore.getState().hydrateFromSidecar([]);
       return;
     }
 
-    const onRecordingEvent = (data: Record<string, unknown>) => {
-      void (async () => {
-        try {
-          await syncRecordingFromSidecarWsPayload(data);
-        } catch (err) {
-          logSidecarDbSyncError("recording event → SQLite sync failed", err);
-        } finally {
-          applyRecordingWsPayload(data);
-          void useFlowStore.getState().refreshRuntime();
-        }
-      })();
-    };
-
-    const onFinished = (data: Record<string, unknown>) => {
-      void (async () => {
-        try {
-          await syncRecordingFromSidecarWsPayload(data);
-        } catch (err) {
-          logSidecarDbSyncError("recording_finished → SQLite sync failed", err);
-        } finally {
-          applyRecordingWsPayload(data);
-          dispatchSidecarNotification("recording_finished", data);
-          useAppStore.getState().bumpDashboardRevision();
-          const id = data.recording_id;
-          if (typeof id === "string") {
-            window.setTimeout(() => {
-              useRecordingStore.getState().removeRecording(id);
-            }, FINISHED_CLEANUP_MS);
-          }
-          void useFlowStore.getState().refreshRuntime();
-        }
-      })();
-    };
-
-    const unsubStart = wsClient.on("recording_started", onRecordingEvent);
-    const unsubProgress = wsClient.on("recording_progress", onRecordingEvent);
-    const unsubFinished = wsClient.on("recording_finished", onFinished);
-    const persistLive = (id: number, isLive: boolean, source: string) => {
-      void (async () => {
-        try {
-          await api.updateAccountLiveStatus(id, isLive);
-          const ok = useAccountStore.getState().patchAccountLive(id, isLive);
-          if (!ok) {
-            void useAccountStore.getState().fetchAccounts();
-          }
-        } catch (err) {
-          console.warn(`[TikClip] ${source} → SQLite failed, refetching`, err);
-          void useAccountStore.getState().fetchAccounts();
-        }
-      })();
-    };
-
-    const unsubLive = wsClient.on("account_live", (data) => {
-      dispatchSidecarNotification("account_live", data);
-      useAppStore.getState().bumpDashboardRevision();
-      const id = parseAccountId(data.account_id);
-      if (id != null) {
-        persistLive(id, true, "account_live");
-      }
-      maybeTriggerRustRuntimeIngressRefresh(() => {
-        void useFlowStore.getState().refreshRuntime();
-      });
-    });
-    const unsubAccountStatus = wsClient.on("account_status", (data) => {
-      const rawId = data.account_id;
-      const rawLive = data.is_live;
-      const id = parseAccountId(rawId);
-      const isLive =
-        typeof rawLive === "boolean"
-          ? rawLive
-          : rawLive === 1 || rawLive === "1" || rawLive === "true";
-      if (id == null) {
-        return;
-      }
-      persistLive(id, isLive, "account_status");
-      useAppStore.getState().bumpDashboardRevision();
-      maybeTriggerRustRuntimeIngressRefresh(() => {
-        void useFlowStore.getState().refreshRuntime();
-      });
-    });
     const unsubClip = wsClient.on("clip_ready", (data) => {
       dispatchSidecarNotification("clip_ready", data);
       useAppStore.getState().bumpDashboardRevision();
@@ -474,7 +432,7 @@ export function AppShell() {
         } catch (err) {
           logSidecarDbSyncError("clip_ready → SQLite insert failed", err);
         } finally {
-          void useFlowStore.getState().refreshRuntime();
+          refreshRuntimeState();
         }
       })();
     });
@@ -513,7 +471,7 @@ export function AppShell() {
           } catch {
             /* No matching flow is normal. */
           }
-          void useFlowStore.getState().refreshRuntime();
+          refreshRuntimeState();
         }
       })();
     });
@@ -525,7 +483,7 @@ export function AppShell() {
         } catch (err) {
           logSidecarDbSyncError("speech_segment_ready → SQLite insert failed", err);
         } finally {
-          void useFlowStore.getState().refreshRuntime();
+          refreshRuntimeState();
         }
       })();
     });
@@ -542,11 +500,6 @@ export function AppShell() {
     wsClient.connect(sidecarPort);
 
     return () => {
-      unsubStart();
-      unsubProgress();
-      unsubFinished();
-      unsubLive();
-      unsubAccountStatus();
       unsubClip();
       unsubCaptionReady();
       unsubSpeechSeg();
@@ -556,86 +509,6 @@ export function AppShell() {
     };
   }, [sidecarPort]);
 
-  useEffect(() => {
-    if (sidecarPort == null || !sidecarConnected) {
-      return;
-    }
-    let cancelled = false;
-    void api.getRecordingStatus()
-      .then((list) => {
-        if (cancelled) {
-          return;
-        }
-        void (async () => {
-          try {
-            await syncRecordingListFromSidecar(list, syncRecordingFromSidecarWsPayload);
-          } catch (err) {
-            logSidecarDbSyncError("recording status poll → SQLite sync failed", err);
-          } finally {
-            if (!cancelled) {
-              useRecordingStore.getState().hydrateFromSidecar(list);
-              void useFlowStore.getState().refreshRuntime();
-            }
-          }
-        })();
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [sidecarPort, sidecarConnected]);
-
-  useEffect(() => {
-    if (sidecarPort == null || !sidecarConnected) {
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      await useAccountStore.getState().fetchAccounts();
-      if (cancelled) {
-        return;
-      }
-      const accounts = useAccountStore.getState().accounts;
-      await api.syncWatcherForAccounts(
-        accounts.map((a) => ({
-          id: a.id,
-          username: a.username,
-          auto_record: a.auto_record,
-          cookies_json: a.cookies_json,
-          proxy_url: a.proxy_url,
-        })),
-      );
-      if (!cancelled) {
-        try {
-          const fresh = await api.pollNow();
-          await api.syncAccountsLiveStatus(
-            fresh.map((r) => ({ account_id: r.account_id, is_live: r.is_live })),
-          );
-          useAccountStore.getState().applyLiveFlagsFromSidecar(
-            fresh.map((r) => ({ id: r.account_id, isLive: r.is_live })),
-          );
-        } catch {
-          await syncLiveFromSidecarHttp();
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [sidecarPort, sidecarConnected]);
-
-  useEffect(() => {
-    if (sidecarPort == null || !sidecarConnected) {
-      return;
-    }
-    void syncLiveFromSidecarHttp();
-    const timer = window.setInterval(() => {
-      void syncLiveFromSidecarHttp();
-    }, LIVE_HTTP_SYNC_MS);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [sidecarPort, sidecarConnected]);
 
   const meta = pageMeta[currentPage];
   const PageComponent = pageComponents[currentPage];
@@ -657,9 +530,13 @@ export function AppShell() {
         <TopBar
           title={meta.title}
           subtitle={meta.subtitle}
-          sidecarConnected={sidecarConnected}
         />
-        <main className="flex-1 overflow-y-auto px-6 pb-8 pt-6 sm:px-8">
+        <main
+          className={cn(
+            "flex-1 overflow-y-auto px-6 pt-6 sm:px-8",
+            currentPage === "flows" ? "pb-3" : "pb-8",
+          )}
+        >
           <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-8">
             <PageComponent />
           </div>

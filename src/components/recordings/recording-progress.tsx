@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import type { SidecarRecordingStatus } from "@/types";
+import type { ActiveRecordingStatus } from "@/types";
 
 function formatDuration(totalSeconds: number): string {
   const m = Math.floor(totalSeconds / 60);
@@ -19,7 +19,7 @@ function formatBytes(n: number): string {
 }
 
 interface RecordingProgressProps {
-  recording: SidecarRecordingStatus;
+  recording: ActiveRecordingStatus;
 }
 
 export function RecordingProgress({ recording }: RecordingProgressProps) {

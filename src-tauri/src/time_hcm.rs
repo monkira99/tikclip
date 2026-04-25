@@ -13,3 +13,12 @@ pub fn now_timestamp_hcm() -> String {
         .format("%Y-%m-%d %H:%M:%S")
         .to_string()
 }
+
+/// Bound parameter `YYYY-MM-DD HH:MM:SS` in GMT+7 after `seconds`.
+pub fn timestamp_after_seconds_hcm(seconds: i64) -> String {
+    let offset = FixedOffset::east_opt(7 * 3600).expect("GMT+7 offset");
+    (Utc::now() + chrono::Duration::seconds(seconds.max(0)))
+        .with_timezone(&offset)
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string()
+}

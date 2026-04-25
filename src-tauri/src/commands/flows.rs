@@ -383,15 +383,10 @@ fn apply_flow_runtime_patch_for_account(
 #[serde(rename_all = "snake_case")]
 pub struct ApplySidecarFlowRuntimeHintInput {
     pub account_id: i64,
-    /// `account_live`, `account_offline`, `recording_started`, `recording_finished`, `clip_ready`, `caption_ready`
+    /// `clip_ready`, `caption_ready`
     pub hint: String,
-    pub worker_status: Option<String>,
-    pub error_message: Option<String>,
     /// Desktop DB clip row; used to append `clip`/`caption` `flow_node_runs` and to resolve `account_id` for `caption_ready`.
     pub clip_id: Option<i64>,
-    pub room_id: Option<String>,
-    pub stream_url: Option<String>,
-    pub viewer_count: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -761,20 +756,18 @@ pub fn update_flow_runtime_by_account(
     apply_flow_runtime_patch_for_account(&conn, account_id, &input)
 }
 
-/// Maps high-level sidecar events to `flows` / Start-node telemetry (desktop engine boundary).
+/// Maps sidecar processing events to `flows` pipeline telemetry (desktop engine boundary).
 #[tauri::command]
 pub fn apply_sidecar_flow_runtime_hint(
     state: State<'_, AppState>,
-    runtime_manager: State<'_, LiveRuntimeManager>,
     input: ApplySidecarFlowRuntimeHintInput,
 ) -> Result<(), String> {
     let mut conn = state.db.lock().map_err(|e| e.to_string())?;
-    apply_sidecar_flow_runtime_hint_with_conn(&mut conn, &runtime_manager, input)
+    apply_sidecar_flow_runtime_hint_with_conn(&mut conn, input)
 }
 
 fn apply_sidecar_flow_runtime_hint_with_conn(
     conn: &mut Connection,
-    runtime_manager: &LiveRuntimeManager,
     input: ApplySidecarFlowRuntimeHintInput,
 ) -> Result<(), String> {
     let hint = input.hint.trim();
@@ -784,46 +777,6 @@ fn apply_sidecar_flow_runtime_hint_with_conn(
 
     let tag = ws_clock_tag();
     let patch = match hint {
-        "account_live" => UpdateFlowRuntimeByAccountInput {
-            status: Some("watching".into()),
-            current_node: Some("start".into()),
-            last_live_at: Some(tag),
-            last_run_at: None,
-            last_error: Some(String::new()),
-        },
-        "account_offline" => UpdateFlowRuntimeByAccountInput {
-            status: Some("idle".into()),
-            current_node: Some(String::new()),
-            last_live_at: None,
-            last_run_at: None,
-            last_error: None,
-        },
-        "recording_started" => return Ok(()),
-        "recording_finished" => {
-            let worker = input
-                .worker_status
-                .as_deref()
-                .unwrap_or("")
-                .trim()
-                .to_lowercase();
-            if worker == "error" || worker == "failed" {
-                let msg = input
-                    .error_message
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or("Recording failed");
-                UpdateFlowRuntimeByAccountInput {
-                    status: Some("error".into()),
-                    current_node: Some("record".into()),
-                    last_live_at: None,
-                    last_run_at: Some(tag),
-                    last_error: Some(msg.to_string()),
-                }
-            } else {
-                return Ok(());
-            }
-        }
         "clip_ready" => UpdateFlowRuntimeByAccountInput {
             status: Some("processing".into()),
             current_node: Some("clip".into()),
@@ -842,9 +795,6 @@ fn apply_sidecar_flow_runtime_hint_with_conn(
     };
 
     let mut account_id = input.account_id;
-    let hint_room_id = input.room_id.clone();
-    let hint_stream_url = input.stream_url.clone();
-    let hint_viewer_count = input.viewer_count;
     if hint == "caption_ready" {
         if let Some(cid) = input.clip_id {
             if cid > 0 {
@@ -866,26 +816,9 @@ fn apply_sidecar_flow_runtime_hint_with_conn(
 
     apply_flow_runtime_patch_for_account(conn, account_id, &patch)?;
 
-    if hint == "account_live" {
-        let flow_id = find_flow_id_for_account(conn, account_id)?;
-        if let Some(flow_id) = flow_id {
-            runtime_manager.handle_live_detected(
-                conn,
-                flow_id,
-                &crate::tiktok::types::LiveStatus {
-                    room_id: hint_room_id.clone().unwrap_or_default(),
-                    stream_url: hint_stream_url,
-                    viewer_count: hint_viewer_count,
-                },
-            )?;
-        }
-    }
-
-    if matches!(hint, "clip_ready" | "caption_ready") {
-        if let Some(cid) = input.clip_id {
-            if cid > 0 {
-                append_pipeline_hint_node_run(conn, hint, cid)?;
-            }
+    if let Some(cid) = input.clip_id {
+        if cid > 0 {
+            append_pipeline_hint_node_run(conn, hint, cid)?;
         }
     }
 
@@ -1157,9 +1090,8 @@ pub fn list_clips_by_flow(state: State<'_, AppState>, flow_id: i64) -> Result<Ve
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_sidecar_flow_runtime_hint_with_conn, delete_flow_with_conn, map_flow_node_config_row,
-        normalize_flow_node_config_json, set_flow_enabled_with_conn,
-        ApplySidecarFlowRuntimeHintInput,
+        delete_flow_with_conn, map_flow_node_config_row, normalize_flow_node_config_json,
+        set_flow_enabled_with_conn,
     };
     use crate::db::init::initialize_database;
     use crate::live_runtime::manager::LiveRuntimeManager;
@@ -1309,319 +1241,6 @@ mod tests {
             start_config.get("retry_limit").and_then(|v| v.as_i64()),
             Some(3)
         );
-    }
-
-    #[test]
-    fn sidecar_runtime_hint_does_not_create_or_finalize_flow_runs_for_task_four() {
-        let (mut conn, path) = open_temp_db();
-        let runtime_manager = LiveRuntimeManager::new();
-        conn.execute(
-            "INSERT INTO accounts (id, username, display_name, type, created_at, updated_at) \
-             VALUES (1, 'shop_abc', 'A', 'monitored', datetime('now','+7 hours'), datetime('now','+7 hours'))",
-            [],
-        )
-        .expect("insert account");
-        conn.execute(
-            "INSERT INTO flows (id, name, enabled, status, published_version, draft_version, created_at, updated_at) \
-             VALUES (11, 'Flow', 1, 'idle', 1, 1, datetime('now','+7 hours'), datetime('now','+7 hours'))",
-            [],
-        )
-        .expect("insert flow");
-        conn.execute(
-            "INSERT INTO flow_nodes (flow_id, node_key, position, draft_config_json, published_config_json, draft_updated_at, published_at) \
-             VALUES (11, 'start', 1, '{\"username\":\"shop_abc\"}', '{\"username\":\"shop_abc\"}', datetime('now','+7 hours'), datetime('now','+7 hours'))",
-            [],
-        )
-        .expect("insert start node");
-
-        apply_sidecar_flow_runtime_hint_with_conn(
-            &mut conn,
-            &runtime_manager,
-            ApplySidecarFlowRuntimeHintInput {
-                account_id: 1,
-                hint: "recording_started".to_string(),
-                worker_status: None,
-                error_message: None,
-                clip_id: None,
-                room_id: None,
-                stream_url: None,
-                viewer_count: None,
-            },
-        )
-        .expect("apply hint");
-
-        let flow_run_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM flow_runs", [], |row| row.get(0))
-            .expect("count flow runs");
-        let node_run_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM flow_node_runs", [], |row| row.get(0))
-            .expect("count node runs");
-        assert_eq!(flow_run_count, 0);
-        assert_eq!(node_run_count, 0);
-
-        drop(conn);
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn sidecar_runtime_hint_account_live_triggers_manager_backed_run_creation() {
-        let (mut conn, path) = open_temp_db();
-        conn.execute(
-            "INSERT INTO accounts (id, username, display_name, type, created_at, updated_at) \
-             VALUES (1, 'shop_abc', 'A', 'monitored', datetime('now','+7 hours'), datetime('now','+7 hours'))",
-            [],
-        )
-        .expect("insert account");
-        conn.execute(
-            "INSERT INTO flows (id, name, enabled, status, published_version, draft_version, created_at, updated_at) \
-             VALUES (11, 'Flow', 1, 'idle', 1, 1, datetime('now','+7 hours'), datetime('now','+7 hours'))",
-            [],
-        )
-        .expect("insert flow");
-        conn.execute(
-            "INSERT INTO flow_nodes (flow_id, node_key, position, draft_config_json, published_config_json, draft_updated_at, published_at) \
-             VALUES (11, 'start', 1, '{\"username\":\"shop_abc\"}', '{\"username\":\"shop_abc\"}', datetime('now','+7 hours'), datetime('now','+7 hours'))",
-            [],
-        )
-        .expect("insert start node");
-        conn.execute(
-            "INSERT INTO flow_nodes (flow_id, node_key, position, draft_config_json, published_config_json, draft_updated_at, published_at) \
-             VALUES (11, 'record', 2, '{\"max_duration_minutes\":5}', '{\"max_duration_minutes\":5}', datetime('now','+7 hours'), datetime('now','+7 hours'))",
-            [],
-        )
-        .expect("insert record node");
-        let runtime_manager = LiveRuntimeManager::new();
-        runtime_manager
-            .start_flow_session(&conn, 11)
-            .expect("start session");
-
-        apply_sidecar_flow_runtime_hint_with_conn(
-            &mut conn,
-            &runtime_manager,
-            ApplySidecarFlowRuntimeHintInput {
-                account_id: 1,
-                hint: "account_live".to_string(),
-                worker_status: None,
-                error_message: None,
-                clip_id: None,
-                room_id: Some("7312345".to_string()),
-                stream_url: Some("https://example.com/live.flv".to_string()),
-                viewer_count: Some(77),
-            },
-        )
-        .expect("apply account_live hint");
-
-        let flow_run_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM flow_runs WHERE flow_id = 11",
-                [],
-                |row| row.get(0),
-            )
-            .expect("count flow runs");
-        assert_eq!(flow_run_count, 1);
-        let node_output: String = conn
-            .query_row(
-                "SELECT output_json FROM flow_node_runs WHERE flow_id = 11 AND node_key = 'start' ORDER BY id DESC LIMIT 1",
-                [],
-                |row| row.get(0),
-            )
-            .expect("read start node output");
-        assert!(node_output.contains("7312345"));
-
-        drop(conn);
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn sidecar_runtime_hint_account_live_does_not_create_run_without_stream_url() {
-        let (mut conn, path) = open_temp_db();
-        conn.execute(
-            "INSERT INTO accounts (id, username, display_name, type, created_at, updated_at) \
-             VALUES (1, 'shop_abc', 'A', 'monitored', datetime('now','+7 hours'), datetime('now','+7 hours'))",
-            [],
-        )
-        .expect("insert account");
-        conn.execute(
-            "INSERT INTO flows (id, name, enabled, status, published_version, draft_version, created_at, updated_at) \
-             VALUES (11, 'Flow', 1, 'idle', 1, 1, datetime('now','+7 hours'), datetime('now','+7 hours'))",
-            [],
-        )
-        .expect("insert flow");
-        conn.execute(
-            "INSERT INTO flow_nodes (flow_id, node_key, position, draft_config_json, published_config_json, draft_updated_at, published_at) \
-             VALUES (11, 'start', 1, '{\"username\":\"shop_abc\"}', '{\"username\":\"shop_abc\"}', datetime('now','+7 hours'), datetime('now','+7 hours'))",
-            [],
-        )
-        .expect("insert start node");
-        let runtime_manager = LiveRuntimeManager::new();
-        runtime_manager
-            .start_flow_session(&conn, 11)
-            .expect("start session");
-
-        apply_sidecar_flow_runtime_hint_with_conn(
-            &mut conn,
-            &runtime_manager,
-            ApplySidecarFlowRuntimeHintInput {
-                account_id: 1,
-                hint: "account_live".to_string(),
-                worker_status: None,
-                error_message: None,
-                clip_id: None,
-                room_id: Some("7312345".to_string()),
-                stream_url: None,
-                viewer_count: Some(77),
-            },
-        )
-        .expect("apply account_live hint");
-
-        let flow_run_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM flow_runs WHERE flow_id = 11",
-                [],
-                |row| row.get(0),
-            )
-            .expect("count flow runs");
-        assert_eq!(flow_run_count, 0);
-
-        drop(conn);
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn sidecar_runtime_hint_account_live_does_not_create_run_with_empty_room_id() {
-        let (mut conn, path) = open_temp_db();
-        conn.execute(
-            "INSERT INTO accounts (id, username, display_name, type, created_at, updated_at) \
-             VALUES (1, 'shop_abc', 'A', 'monitored', datetime('now','+7 hours'), datetime('now','+7 hours'))",
-            [],
-        )
-        .expect("insert account");
-        conn.execute(
-            "INSERT INTO flows (id, name, enabled, status, published_version, draft_version, created_at, updated_at) \
-             VALUES (11, 'Flow', 1, 'idle', 1, 1, datetime('now','+7 hours'), datetime('now','+7 hours'))",
-            [],
-        )
-        .expect("insert flow");
-        conn.execute(
-            "INSERT INTO flow_nodes (flow_id, node_key, position, draft_config_json, published_config_json, draft_updated_at, published_at) \
-             VALUES (11, 'start', 1, '{\"username\":\"shop_abc\"}', '{\"username\":\"shop_abc\"}', datetime('now','+7 hours'), datetime('now','+7 hours'))",
-            [],
-        )
-        .expect("insert start node");
-        let runtime_manager = LiveRuntimeManager::new();
-        runtime_manager
-            .start_flow_session(&conn, 11)
-            .expect("start session");
-
-        apply_sidecar_flow_runtime_hint_with_conn(
-            &mut conn,
-            &runtime_manager,
-            ApplySidecarFlowRuntimeHintInput {
-                account_id: 1,
-                hint: "account_live".to_string(),
-                worker_status: None,
-                error_message: None,
-                clip_id: None,
-                room_id: Some("   ".to_string()),
-                stream_url: Some("https://example.com/live.flv".to_string()),
-                viewer_count: Some(77),
-            },
-        )
-        .expect("apply account_live hint");
-
-        let flow_run_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM flow_runs WHERE flow_id = 11",
-                [],
-                |row| row.get(0),
-            )
-            .expect("count flow runs");
-        assert_eq!(flow_run_count, 0);
-
-        drop(conn);
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn sidecar_recording_finished_hint_no_longer_finalizes_record_lifecycle() {
-        let (mut conn, path) = open_temp_db();
-        conn.execute(
-            "INSERT INTO accounts (id, username, display_name, type, created_at, updated_at) \
-             VALUES (1, 'shop_abc', 'A', 'monitored', datetime('now','+7 hours'), datetime('now','+7 hours'))",
-            [],
-        )
-        .expect("insert account");
-        conn.execute(
-            "INSERT INTO flows (id, name, enabled, status, published_version, draft_version, created_at, updated_at) \
-             VALUES (11, 'Flow', 1, 'idle', 1, 1, datetime('now','+7 hours'), datetime('now','+7 hours'))",
-            [],
-        )
-        .expect("insert flow");
-        conn.execute(
-            "INSERT INTO flow_nodes (flow_id, node_key, position, draft_config_json, published_config_json, draft_updated_at, published_at) \
-             VALUES (11, 'start', 1, '{\"username\":\"shop_abc\"}', '{\"username\":\"shop_abc\"}', datetime('now','+7 hours'), datetime('now','+7 hours'))",
-            [],
-        )
-        .expect("insert start node");
-        conn.execute(
-            "INSERT INTO flow_nodes (flow_id, node_key, position, draft_config_json, published_config_json, draft_updated_at, published_at) \
-             VALUES (11, 'record', 2, '{\"max_duration_minutes\":5}', '{\"max_duration_minutes\":5}', datetime('now','+7 hours'), datetime('now','+7 hours'))",
-            [],
-        )
-        .expect("insert record node");
-        let runtime_manager = LiveRuntimeManager::new();
-        runtime_manager
-            .start_flow_session(&conn, 11)
-            .expect("start session");
-        runtime_manager
-            .handle_live_detected(
-                &conn,
-                11,
-                &crate::tiktok::types::LiveStatus {
-                    room_id: "7312345".to_string(),
-                    stream_url: Some("https://example.com/live.flv".to_string()),
-                    viewer_count: Some(77),
-                },
-            )
-            .expect("handle live")
-            .expect("created flow run");
-
-        apply_sidecar_flow_runtime_hint_with_conn(
-            &mut conn,
-            &runtime_manager,
-            ApplySidecarFlowRuntimeHintInput {
-                account_id: 1,
-                hint: "recording_finished".to_string(),
-                worker_status: Some("completed".to_string()),
-                error_message: None,
-                clip_id: None,
-                room_id: Some("7312345".to_string()),
-                stream_url: None,
-                viewer_count: None,
-            },
-        )
-        .expect("apply recording_finished hint");
-
-        let run_status: String = conn
-            .query_row(
-                "SELECT status FROM flow_runs WHERE flow_id = 11 ORDER BY id DESC LIMIT 1",
-                [],
-                |row| row.get(0),
-            )
-            .expect("read flow run status");
-        let recording_status: String = conn
-            .query_row(
-                "SELECT status FROM recordings WHERE flow_id = 11 ORDER BY id DESC LIMIT 1",
-                [],
-                |row| row.get(0),
-            )
-            .expect("read recording status");
-
-        assert_eq!(run_status, "running");
-        assert_eq!(recording_status, "recording");
-
-        drop(conn);
-        let _ = std::fs::remove_file(path);
     }
 
     #[test]

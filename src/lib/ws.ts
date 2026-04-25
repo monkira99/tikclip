@@ -111,10 +111,7 @@ export class WebSocketClient {
     }
   }
 
-  /**
-   * Subscribe to an event `type` from the sidecar (e.g. `recording_progress`).
-   * Returns an unsubscribe function.
-   */
+  /** Subscribe to a sidecar event and return an unsubscribe function. */
   on(eventType: string, handler: WsHandler): () => void {
     let set = this.handlers.get(eventType);
     if (!set) {

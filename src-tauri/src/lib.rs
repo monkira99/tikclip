@@ -93,6 +93,8 @@ pub fn run() {
             commands::live_runtime::mark_start_run_completed,
             commands::live_runtime::mark_source_offline,
             commands::recordings::finalize_rust_recording_runtime,
+            commands::recordings::list_active_rust_recordings,
+            commands::recordings::stop_rust_recording,
             commands::notifications::insert_notification,
             commands::notifications::list_notifications,
             commands::notifications::mark_notification_read,

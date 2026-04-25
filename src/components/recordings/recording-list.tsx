@@ -1,12 +1,10 @@
 import { RecordingControls } from "@/components/recordings/recording-controls";
 import { RecordingProgress } from "@/components/recordings/recording-progress";
-import { useAppStore } from "@/stores/app-store";
 import { useRecordingStore } from "@/stores/recording-store";
-import type { SidecarRecordingStatus } from "@/types";
+import type { ActiveRecordingStatus } from "@/types";
 
 type RecordingListProps = {
-  recordings?: SidecarRecordingStatus[];
-  sidecarConnected?: boolean;
+  recordings?: ActiveRecordingStatus[];
   mode?: "active" | "all";
   emptyMessage?: string;
   showControls?: boolean;
@@ -14,15 +12,12 @@ type RecordingListProps = {
 
 export function RecordingList({
   recordings,
-  sidecarConnected: sidecarConnectedProp,
   mode = "active",
   emptyMessage,
   showControls = true,
 }: RecordingListProps = {}) {
-  const sidecarConnectedFromStore = useAppStore((s) => s.sidecarConnected);
   const storeRecordings = useRecordingStore((s) => s.recordings);
 
-  const resolvedSidecarConnected = sidecarConnectedProp ?? sidecarConnectedFromStore;
   const source = recordings ?? Object.values(storeRecordings);
 
   const active = source.filter(
@@ -32,16 +27,8 @@ export function RecordingList({
   const resolvedEmptyMessage =
     emptyMessage ??
     (mode === "active"
-      ? "No active recordings. Start one from the sidecar API or account watcher."
+      ? "No active recordings. Rust runtime will show live flow recordings here."
       : "No recordings for this flow yet.");
-
-  if (!recordings && !resolvedSidecarConnected) {
-    return (
-      <p className="text-sm text-[var(--color-text-muted)]">
-        Connect to the sidecar to see live recordings. Ensure the Python sidecar is running and reachable.
-      </p>
-    );
-  }
 
   if (visible.length === 0) {
     return (

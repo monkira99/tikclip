@@ -11,7 +11,9 @@ import {
   restartFlowRun,
   saveFlowNodeDraft,
   setFlowEnabled,
+  syncAccountsLiveStatus,
 } from "@/lib/api";
+import { useAccountStore } from "@/stores/account-store";
 import type {
   CreateFlowInput,
   FlowEditorPayload,
@@ -61,6 +63,7 @@ type FlowStore = {
   }) => Promise<void>;
   publishFlow: (flowId: number, options: { restartCurrentRun: boolean }) => Promise<PublishFlowResult>;
   applyRuntimeSnapshots: (rows: FlowRuntimeSnapshot[]) => void;
+  upsertRuntimeSnapshot: (row: FlowRuntimeSnapshot) => void;
   applyRuntimeLogs: (rows: FlowRuntimeLogEntry[], options?: { flowIds?: number[] }) => void;
   appendRuntimeLog: (row: FlowRuntimeLogEntry) => void;
   fetchRuntimeLogs: (flowId: number, limit?: number) => Promise<void>;
@@ -81,6 +84,7 @@ export const flowStoreApi = {
   setFlowEnabled,
   createFlow,
   deleteFlow,
+  syncAccountsLiveStatus,
 };
 
 const FLOW_RUNTIME_LOG_CAP = 500;
@@ -122,6 +126,16 @@ function appendRuntimeLogEntry(
     return next;
   }
   return next.slice(next.length - FLOW_RUNTIME_LOG_CAP);
+}
+
+function draftJsonChanged(left: string, right: string): boolean {
+  return (left ?? "").trim() !== (right ?? "").trim();
+}
+
+function editorPayloadHasDraftChanges(payload: FlowEditorPayload): boolean {
+  return payload.nodes.some((node) =>
+    draftJsonChanged(node.draft_config_json, node.published_config_json),
+  );
 }
 
 function normalizeFlowStatus(status: FlowStatus, enabled: boolean): FlowStatus {
@@ -303,20 +317,30 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
   closeNodeModal: () => set({ editorModalNode: null }),
 
   saveNodeDraft: async (input) => {
-    await flowStoreApi.saveFlowNodeDraft(input);
     const current = get().activeFlow;
-    if (current && current.flow.id === input.flow_id) {
+    const existingNode =
+      current && current.flow.id === input.flow_id
+        ? current.nodes.find((node) => node.node_key === input.node_key)
+        : null;
+    if (existingNode && !draftJsonChanged(existingNode.draft_config_json, input.draft_config_json)) {
+      return;
+    }
+
+    await flowStoreApi.saveFlowNodeDraft(input);
+    const latest = get().activeFlow;
+    if (latest && latest.flow.id === input.flow_id) {
       const now = new Date().toISOString();
-      const nextNodes = current.nodes.some((n) => n.node_key === input.node_key)
-        ? current.nodes.map((n) =>
+      const nextNodes = latest.nodes.some((n) => n.node_key === input.node_key)
+        ? latest.nodes.map((n) =>
             n.node_key === input.node_key
               ? { ...n, draft_config_json: input.draft_config_json, draft_updated_at: now }
               : n,
           )
-        : current.nodes;
+        : latest.nodes;
+      const nextActiveFlow = { ...latest, nodes: nextNodes };
       set({
-        activeFlow: { ...current, nodes: nextNodes },
-        draftDirty: true,
+        activeFlow: nextActiveFlow,
+        draftDirty: editorPayloadHasDraftChanges(nextActiveFlow),
       });
     }
   },
@@ -339,6 +363,23 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
   applyRuntimeSnapshots: (rows) => {
     set({
       runtimeSnapshots: Object.fromEntries(rows.map((row) => [row.flow_id, row])),
+    });
+  },
+
+  upsertRuntimeSnapshot: (row) => {
+    set((state) => {
+      const runtimeSnapshots = {
+        ...state.runtimeSnapshots,
+        [row.flow_id]: row,
+      };
+      return {
+        runtimeSnapshots,
+        flows: state.flows.map((flow) => normalizeFlowSummary(flow, runtimeSnapshots)),
+        activeFlow:
+          state.activeFlow && state.activeFlow.flow.id === row.flow_id
+            ? normalizeFlowEditorPayload(state.activeFlow, runtimeSnapshots)
+            : state.activeFlow,
+      };
     });
   },
 
@@ -457,6 +498,17 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
     const previousEditorModalNode = get().editorModalNode;
     const previousDraftDirty = get().draftDirty;
     const previousView = get().view;
+    const deletedAccountId = previousFlow?.account_id ?? null;
+    const shouldClearDeletedAccountLive =
+      deletedAccountId != null &&
+      !previousFlows.some(
+        (flow) => flow.id !== flowId && Number(flow.account_id) === Number(deletedAccountId),
+      );
+    const previousDeletedAccountLive = deletedAccountId == null
+      ? undefined
+      : useAccountStore.getState().accounts.find(
+          (account) => Number(account.id) === Number(deletedAccountId),
+        )?.is_live;
     const deletingActive =
       previousActiveFlowId === flowId || previousActiveFlow?.flow.id === flowId;
 
@@ -480,10 +532,20 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
         error: null,
       };
     });
+    if (shouldClearDeletedAccountLive && deletedAccountId != null) {
+      useAccountStore.getState().patchAccountLive(deletedAccountId, false);
+    }
 
     try {
       await flowStoreApi.deleteFlow(flowId);
     } catch (error) {
+      if (
+        shouldClearDeletedAccountLive &&
+        deletedAccountId != null &&
+        previousDeletedAccountLive !== undefined
+      ) {
+        useAccountStore.getState().patchAccountLive(deletedAccountId, previousDeletedAccountLive);
+      }
       set((state) => {
         const next: Partial<FlowStore> = {
           error: getErrorMessage(error, "Failed to delete flow"),
@@ -536,6 +598,17 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
         return next;
       });
       throw error;
+    }
+    if (shouldClearDeletedAccountLive && deletedAccountId != null) {
+      try {
+        await flowStoreApi.syncAccountsLiveStatus([
+          { account_id: deletedAccountId, is_live: false },
+        ]);
+      } catch (error) {
+        set({
+          error: getErrorMessage(error, "Flow deleted but failed to clear account live state"),
+        });
+      }
     }
   },
 }));

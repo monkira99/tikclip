@@ -93,6 +93,10 @@ pub struct LiveRuntimeSession {
     active_flow_run_id: Option<i64>,
     last_completed_room_id: Option<String>,
     downstream_status: Option<String>,
+    last_checked_at: Option<String>,
+    last_check_live: Option<bool>,
+    next_poll_at: Option<String>,
+    poll_interval_seconds: Option<i64>,
 }
 
 impl LiveRuntimeSession {
@@ -116,6 +120,10 @@ impl LiveRuntimeSession {
             active_flow_run_id: None,
             last_completed_room_id,
             downstream_status: None,
+            last_checked_at: None,
+            last_check_live: None,
+            next_poll_at: None,
+            poll_interval_seconds: None,
         }
     }
 
@@ -182,6 +190,19 @@ impl LiveRuntimeSession {
         self.downstream_status = None;
     }
 
+    pub fn mark_poll_checked(
+        &mut self,
+        checked_at: String,
+        live: bool,
+        next_poll_at: String,
+        poll_interval_seconds: i64,
+    ) {
+        self.last_checked_at = Some(checked_at);
+        self.last_check_live = Some(live);
+        self.next_poll_at = Some(next_poll_at);
+        self.poll_interval_seconds = Some(poll_interval_seconds);
+    }
+
     #[allow(dead_code)]
     pub fn cancel(&mut self) {
         self.stopped = true;
@@ -230,6 +251,10 @@ impl LiveRuntimeSession {
                 }
             },
             last_error: self.last_error.clone(),
+            last_checked_at: self.last_checked_at.clone(),
+            last_check_live: self.last_check_live,
+            next_poll_at: self.next_poll_at.clone(),
+            poll_interval_seconds: self.poll_interval_seconds,
         }
     }
 }

@@ -28,7 +28,6 @@ import {
   type AppDataPaths,
   type StorageStats,
 } from "@/lib/api";
-import { resyncSidecarWatchers } from "@/lib/resync-sidecar-watchers";
 import { cn } from "@/lib/utils";
 
 const fieldSurface =
@@ -479,7 +478,6 @@ export function SettingsPage() {
       await setSetting("recording_max_minutes", rmin);
       await setSetting("recording_max_hours", "");
       await restartSidecar();
-      await resyncSidecarWatchers();
       const fresh = await getAppDataPaths();
       setPaths(fresh);
       setMessage("Recording settings saved. Sidecar restarted to apply.");
@@ -499,8 +497,7 @@ export function SettingsPage() {
       try {
         await setSetting(AUTO_PROCESS_AFTER_RECORD_KEY, checked ? "1" : "0");
         await restartSidecar();
-        await resyncSidecarWatchers();
-        setMessage(
+          setMessage(
           checked
             ? "Đã bật tự xử lý clip sau khi ghi. Sidecar đã khởi động lại."
             : "Đã tắt tự xử lý clip sau khi ghi. Sidecar đã khởi động lại.",
@@ -583,7 +580,6 @@ export function SettingsPage() {
         suggestImageEmbedFocusPrompt.trim(),
       );
       await restartSidecar();
-      await resyncSidecarWatchers();
       const fresh = await getAppDataPaths();
       setPaths(fresh);
       setMessage(
@@ -660,7 +656,6 @@ export function SettingsPage() {
       await setSetting(KEY_STT_NUM_THREADS, thStr || DEFAULTS.sttNumThreads);
       await setSetting(KEY_STT_QUANTIZE, sttQuantize);
       await restartSidecar();
-      await resyncSidecarWatchers();
       const fresh = await getAppDataPaths();
       setPaths(fresh);
       setMessage(
@@ -722,7 +717,6 @@ export function SettingsPage() {
       await setSetting(KEY_STORAGE_WARN, w || "80");
       await setSetting(KEY_STORAGE_CLEANUP, c || "95");
       await restartSidecar();
-      await resyncSidecarWatchers();
       const fresh = await getAppDataPaths();
       setPaths(fresh);
       setMessage(

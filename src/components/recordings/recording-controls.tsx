@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { stopRecording } from "@/lib/api";
+import { stopRustRecording } from "@/lib/api";
 
 interface RecordingControlsProps {
   recordingId: string;
@@ -15,7 +15,7 @@ export function RecordingControls({ recordingId, disabled }: RecordingControlsPr
     setError(null);
     setLoading(true);
     try {
-      await stopRecording(recordingId);
+      await stopRustRecording(recordingId);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
