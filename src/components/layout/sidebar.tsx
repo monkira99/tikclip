@@ -212,11 +212,6 @@ export function Sidebar({
                       {sidecarConnected ? "Connected" : "Disconnected"}
                     </Badge>
                   </div>
-                  {activeRecordings > 0 ? (
-                    <p className="mt-2 whitespace-nowrap text-[var(--color-text-muted)]">
-                      {activeRecordings} active recordings
-                    </p>
-                  ) : null}
                 </div>
               </div>
             </div>
