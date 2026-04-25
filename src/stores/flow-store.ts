@@ -11,9 +11,7 @@ import {
   restartFlowRun,
   saveFlowNodeDraft,
   setFlowEnabled,
-  syncAccountsLiveStatus,
 } from "@/lib/api";
-import { useAccountStore } from "@/stores/account-store";
 import type {
   CreateFlowInput,
   FlowEditorPayload,
@@ -84,7 +82,6 @@ export const flowStoreApi = {
   setFlowEnabled,
   createFlow,
   deleteFlow,
-  syncAccountsLiveStatus,
 };
 
 const FLOW_RUNTIME_LOG_CAP = 500;
@@ -499,17 +496,6 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
     const previousEditorModalNode = get().editorModalNode;
     const previousDraftDirty = get().draftDirty;
     const previousView = get().view;
-    const deletedAccountId = previousFlow?.account_id ?? null;
-    const shouldClearDeletedAccountLive =
-      deletedAccountId != null &&
-      !previousFlows.some(
-        (flow) => flow.id !== flowId && Number(flow.account_id) === Number(deletedAccountId),
-      );
-    const previousDeletedAccountLive = deletedAccountId == null
-      ? undefined
-      : useAccountStore.getState().accounts.find(
-          (account) => Number(account.id) === Number(deletedAccountId),
-        )?.is_live;
     const deletingActive =
       previousActiveFlowId === flowId || previousActiveFlow?.flow.id === flowId;
 
@@ -533,20 +519,9 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
         error: null,
       };
     });
-    if (shouldClearDeletedAccountLive && deletedAccountId != null) {
-      useAccountStore.getState().patchAccountLive(deletedAccountId, false);
-    }
-
     try {
       await flowStoreApi.deleteFlow(flowId);
     } catch (error) {
-      if (
-        shouldClearDeletedAccountLive &&
-        deletedAccountId != null &&
-        previousDeletedAccountLive !== undefined
-      ) {
-        useAccountStore.getState().patchAccountLive(deletedAccountId, previousDeletedAccountLive);
-      }
       set((state) => {
         const next: Partial<FlowStore> = {
           error: getErrorMessage(error, "Failed to delete flow"),
@@ -599,17 +574,6 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
         return next;
       });
       throw error;
-    }
-    if (shouldClearDeletedAccountLive && deletedAccountId != null) {
-      try {
-        await flowStoreApi.syncAccountsLiveStatus([
-          { account_id: deletedAccountId, is_live: false },
-        ]);
-      } catch (error) {
-        set({
-          error: getErrorMessage(error, "Flow deleted but failed to clear account live state"),
-        });
-      }
     }
   },
 }));

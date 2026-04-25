@@ -26,9 +26,10 @@ test("AppShell no longer contains the sidecar account-live polling path", () => 
   assert.equal(appShellSource.includes("LIVE_HTTP_SYNC_MS"), false);
 });
 
-test("AppShell drives account live flags from runtime-owned batch updates", () => {
-  assert.equal(appShellRuntimeSource.includes("applyLiveFlagsFromRuntime"), true);
-  assert.equal(appShellRuntimeSource.includes("deriveAccountLiveFlagsFromRuntime"), true);
+test("AppShell keeps live state on flow runtime instead of syncing account flags", () => {
+  assert.equal(appShellRuntimeSource.includes("applyLiveFlagsFromRuntime"), false);
+  assert.equal(appShellRuntimeSource.includes("deriveAccountLiveFlagsFromRuntime"), false);
+  assert.equal(appShellRuntimeSource.includes("syncAccountsLiveStatus"), false);
   assert.equal(appShellRuntimeSource.includes("patchAccountLive("), false);
   assert.equal(appShellRuntimeSource.includes('wsClient.on("account_live"'), false);
   assert.equal(appShellRuntimeSource.includes('wsClient.on("account_status"'), false);

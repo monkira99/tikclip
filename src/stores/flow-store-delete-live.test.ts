@@ -1,9 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import type { Account, FlowEditorPayload, FlowRuntimeLogEntry, FlowRuntimeSnapshot, FlowSummary } from "@/types";
+import type { FlowEditorPayload, FlowRuntimeLogEntry, FlowRuntimeSnapshot, FlowSummary } from "@/types";
 
-import { useAccountStore } from "@/stores/account-store";
 import { flowStoreApi, useFlowStore } from "./flow-store.ts";
 
 function resetFlowStore(): void {
@@ -25,14 +24,6 @@ function resetFlowStore(): void {
       search: "",
       status: "all",
     },
-  });
-}
-
-function resetAccountStore(): void {
-  useAccountStore.setState({
-    accounts: [],
-    loading: false,
-    error: null,
   });
 }
 
@@ -102,31 +93,8 @@ function flowEditorPayload(flowId: number, accountId = 10): FlowEditorPayload {
   };
 }
 
-function account(overrides: Partial<Account> & Pick<Account, "id" | "username">): Account {
-  return {
-    id: overrides.id,
-    username: overrides.username,
-    display_name: overrides.display_name ?? overrides.username,
-    avatar_url: overrides.avatar_url ?? null,
-    type: overrides.type ?? "monitored",
-    tiktok_uid: overrides.tiktok_uid ?? null,
-    cookies_json: overrides.cookies_json ?? null,
-    auto_record: overrides.auto_record ?? false,
-    auto_record_schedule: overrides.auto_record_schedule ?? null,
-    priority: overrides.priority ?? 0,
-    is_live: overrides.is_live ?? false,
-    last_live_at: overrides.last_live_at ?? null,
-    last_checked_at: overrides.last_checked_at ?? null,
-    proxy_url: overrides.proxy_url ?? null,
-    notes: overrides.notes ?? null,
-    created_at: overrides.created_at ?? "2026-04-19T09:41:12.381+07:00",
-    updated_at: overrides.updated_at ?? "2026-04-19T09:41:12.381+07:00",
-  };
-}
-
-test("deleteFlow clears live state for the account that lost its last flow", async (t) => {
+test("deleteFlow removes runtime state for the deleted flow only", async (t) => {
   resetFlowStore();
-  resetAccountStore();
 
   useFlowStore.setState({
     flows: [flowSummary({ id: 7, account_id: 10 }), flowSummary({ id: 8, account_id: 11 })],
@@ -164,31 +132,25 @@ test("deleteFlow clears live state for the account that lost its last flow", asy
     view: "detail",
     error: null,
   });
-  useAccountStore.setState({
-    accounts: [
-      account({ id: 10, username: "demo-account", is_live: true }),
-      account({ id: 11, username: "other-account", is_live: true }),
-    ],
-  });
 
   const previousDeleteFlow = flowStoreApi.deleteFlow;
-  const previousSyncAccountsLiveStatus = flowStoreApi.syncAccountsLiveStatus;
   flowStoreApi.deleteFlow = async () => {};
-  flowStoreApi.syncAccountsLiveStatus = async () => {};
   t.after(() => {
     flowStoreApi.deleteFlow = previousDeleteFlow;
-    flowStoreApi.syncAccountsLiveStatus = previousSyncAccountsLiveStatus;
   });
 
   await useFlowStore.getState().deleteFlow(7);
 
-  assert.equal(useAccountStore.getState().accounts.find((row) => row.id === 10)?.is_live, false);
-  assert.equal(useAccountStore.getState().accounts.find((row) => row.id === 11)?.is_live, true);
+  assert.equal(useFlowStore.getState().flows.some((flow) => flow.id === 7), false);
+  assert.equal(useFlowStore.getState().flows.some((flow) => flow.id === 8), true);
+  assert.equal(useFlowStore.getState().runtimeSnapshots[7], undefined);
+  assert.ok(useFlowStore.getState().runtimeSnapshots[8]);
+  assert.equal(useFlowStore.getState().runtimeLogs[7], undefined);
+  assert.ok(useFlowStore.getState().runtimeLogs[8]);
 });
 
-test("deleteFlow restores account live state when delete fails", async (t) => {
+test("deleteFlow restores flow state when delete fails", async (t) => {
   resetFlowStore();
-  resetAccountStore();
 
   useFlowStore.setState({
     flows: [flowSummary({ id: 7, account_id: 20 }), flowSummary({ id: 8, account_id: 21 })],
@@ -202,27 +164,20 @@ test("deleteFlow restores account live state when delete fails", async (t) => {
     view: "detail",
     error: null,
   });
-  useAccountStore.setState({
-    accounts: [
-      account({ id: 20, username: "demo-account", is_live: true }),
-      account({ id: 21, username: "other-account", is_live: false }),
-    ],
-  });
 
   const previousDeleteFlow = flowStoreApi.deleteFlow;
-  const previousSyncAccountsLiveStatus = flowStoreApi.syncAccountsLiveStatus;
   flowStoreApi.deleteFlow = async () => {
     throw new Error("delete failed");
   };
-  flowStoreApi.syncAccountsLiveStatus = async () => {};
   t.after(() => {
     flowStoreApi.deleteFlow = previousDeleteFlow;
-    flowStoreApi.syncAccountsLiveStatus = previousSyncAccountsLiveStatus;
   });
 
   await assert.rejects(async () => {
     await useFlowStore.getState().deleteFlow(7);
   }, /delete failed/);
 
-  assert.equal(useAccountStore.getState().accounts.find((row) => row.id === 20)?.is_live, true);
+  assert.equal(useFlowStore.getState().flows.some((flow) => flow.id === 7), true);
+  assert.equal(useFlowStore.getState().activeFlowId, 7);
+  assert.equal(useFlowStore.getState().selectedNode, "record");
 });

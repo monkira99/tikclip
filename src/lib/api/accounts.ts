@@ -8,19 +8,6 @@ type AccountInvokeRow = Omit<Account, "auto_record_schedule" | "type"> & {
   auto_record_schedule: string | AutoRecordSchedule | null;
 };
 
-/** Batch persist live flags into SQLite. */
-export async function syncAccountsLiveStatus(
-  rows: { account_id: number; is_live: boolean }[],
-): Promise<void> {
-  if (rows.length === 0) {
-    return;
-  }
-  if (import.meta.env.DEV) {
-    console.debug("[TikClip] invoke sync_accounts_live_status", { count: rows.length, rows });
-  }
-  await invoke("sync_accounts_live_status", { rows });
-}
-
 function normalizeAccount(row: AccountInvokeRow): Account {
   const raw = row.auto_record_schedule;
   let auto_record_schedule: AutoRecordSchedule | null = null;

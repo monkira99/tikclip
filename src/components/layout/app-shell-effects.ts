@@ -6,7 +6,6 @@ import {
   requestPermission,
 } from "@tauri-apps/plugin-notification";
 
-import { deriveAccountLiveFlagsFromRuntime } from "@/lib/account-live-from-runtime";
 import * as api from "@/lib/api";
 import { hydrateNotificationsFromDb } from "@/lib/notifications-sync";
 import {
@@ -20,7 +19,6 @@ import {
 } from "@/lib/sidecar-notifications";
 import { parseBooleanSetting } from "@/lib/settings-value";
 import { wsClient } from "@/lib/ws";
-import { useAccountStore } from "@/stores/account-store";
 import { useAppStore } from "@/stores/app-store";
 import { useClipStore } from "@/stores/clip-store";
 import { useFlowStore } from "@/stores/flow-store";
@@ -188,60 +186,12 @@ function parseClipId(raw: unknown): number | null {
   return Math.trunc(id);
 }
 
-function syncAccountLiveFlagsFromRuntimeState(): void {
-  const flowById = new Map(
-    useFlowStore.getState().flows.map((flow) => [Number(flow.id), flow] as const),
-  );
-  const flowAccountIds = new Set<number>();
-  for (const flow of useFlowStore.getState().flows) {
-    const accountId = Number(flow.account_id);
-    if (Number.isFinite(accountId)) {
-      flowAccountIds.add(accountId);
-    }
-  }
-
-  const liveMap = new Map<number, boolean>();
-  for (const accountId of flowAccountIds) {
-    liveMap.set(accountId, false);
-  }
-
-  for (const row of deriveAccountLiveFlagsFromRuntime(
-    Object.values(useFlowStore.getState().runtimeSnapshots).filter((snapshot) => {
-      const flow = flowById.get(Number(snapshot.flow_id));
-      return flow?.enabled === true;
-    }),
-  )) {
-    liveMap.set(row.id, row.isLive);
-  }
-
-  const rows = Array.from(liveMap.entries())
-    .sort(([left], [right]) => left - right)
-    .map(([id, isLive]) => ({ id, isLive }));
-
-  if (rows.length === 0) {
-    return;
-  }
-
-  useAccountStore.getState().applyLiveFlagsFromRuntime(rows);
-  void api
-    .syncAccountsLiveStatus(rows.map((row) => ({ account_id: row.id, is_live: row.isLive })))
-    .catch((error) => {
-      if (import.meta.env.DEV) {
-        console.warn("[TikClip] syncAccountsLiveStatus from runtime failed", error);
-      }
-    });
-}
-
-async function refreshRuntimeAndSyncAccountLiveFlags(): Promise<void> {
+async function refreshRuntimeState(): Promise<void> {
   const [activeRecordings] = await Promise.all([
     api.listActiveRustRecordings(),
     useFlowStore.getState().refreshRuntime(),
   ]);
   useRecordingStore.getState().hydrateFromRuntime(activeRecordings);
-  if (useAccountStore.getState().accounts.length === 0) {
-    await useAccountStore.getState().fetchAccounts();
-  }
-  syncAccountLiveFlagsFromRuntimeState();
 }
 
 async function refreshDashboardRuntimeData(): Promise<void> {
@@ -317,7 +267,7 @@ export function useNotificationBootstrap(sidecarConnected: boolean): void {
 
 export function useTauriRuntimeEvents(): void {
   useEffect(() => {
-    void refreshRuntimeAndSyncAccountLiveFlags();
+    void refreshRuntimeState();
   }, []);
 
   useEffect(() => {
@@ -331,7 +281,6 @@ export function useTauriRuntimeEvents(): void {
         return;
       }
       useFlowStore.getState().upsertRuntimeSnapshot(event.payload);
-      syncAccountLiveFlagsFromRuntimeState();
       void refreshDashboardRuntimeData();
     }).then((fn) => {
       if (cancelled) {
@@ -389,7 +338,7 @@ export function useTauriRuntimeEvents(): void {
         void maybeGenerateCaptionAfterInsert(clipId, data);
         void maybeAutoTagClipAfterInsert(clipId, data);
       }
-      void refreshRuntimeAndSyncAccountLiveFlags();
+      void refreshRuntimeState();
     }).then((fn) => {
       if (cancelled) {
         fn();
@@ -459,8 +408,8 @@ export function useSidecarWsSync(sidecarPort: number | null): void {
       return;
     }
 
-    const refreshRuntimeState = () => {
-      void refreshRuntimeAndSyncAccountLiveFlags();
+    const scheduleRuntimeRefresh = () => {
+      void refreshRuntimeState();
     };
 
     const unsubClip = wsClient.on("clip_ready", (data) => {
@@ -485,7 +434,7 @@ export function useSidecarWsSync(sidecarPort: number | null): void {
         } catch (err) {
           logSidecarDbSyncError("clip_ready → SQLite insert failed", err);
         } finally {
-          refreshRuntimeState();
+          scheduleRuntimeRefresh();
         }
       })();
     });
@@ -524,7 +473,7 @@ export function useSidecarWsSync(sidecarPort: number | null): void {
           } catch {
             /* No matching flow is normal. */
           }
-          refreshRuntimeState();
+          scheduleRuntimeRefresh();
         }
       })();
     });
@@ -536,7 +485,7 @@ export function useSidecarWsSync(sidecarPort: number | null): void {
         } catch (err) {
           logSidecarDbSyncError("speech_segment_ready → SQLite insert failed", err);
         } finally {
-          refreshRuntimeState();
+          scheduleRuntimeRefresh();
         }
       })();
     });
