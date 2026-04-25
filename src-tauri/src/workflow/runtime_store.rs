@@ -548,6 +548,27 @@ pub fn load_last_room_id_from_latest_start_node_run(
     .map_err(|e| e.to_string())
 }
 
+fn load_last_room_id_from_latest_completed_start_node_run(
+    conn: &Connection,
+    flow_id: i64,
+) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT json_extract(fnr.output_json, '$.room_id') FROM flow_node_runs fnr \
+         JOIN flow_runs fr ON fr.id = fnr.flow_run_id \
+         WHERE fnr.flow_id = ?1 \
+           AND fr.status = 'completed' \
+           AND fnr.node_key = 'start' \
+           AND fnr.status = 'completed' \
+           AND fnr.output_json IS NOT NULL \
+           AND json_extract(fnr.output_json, '$.room_id') IS NOT NULL \
+         ORDER BY fr.id DESC, fnr.id DESC LIMIT 1",
+        [flow_id],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn load_last_completed_room_id_for_flow(
     conn: &Connection,
@@ -560,7 +581,7 @@ pub fn load_last_completed_room_id_for_flow(
              WHERE r.flow_id = ?1 \
                AND r.room_id IS NOT NULL \
                AND trim(r.room_id) <> '' \
-               AND fr.status IN ('completed', 'cancelled') \
+               AND fr.status = 'completed' \
              ORDER BY fr.id DESC, r.id DESC LIMIT 1",
             [flow_id],
             |row| row.get(0),
@@ -572,7 +593,7 @@ pub fn load_last_completed_room_id_for_flow(
         return Ok(recording_room_id);
     }
 
-    load_last_room_id_from_latest_start_node_run(conn, flow_id)
+    load_last_room_id_from_latest_completed_start_node_run(conn, flow_id)
 }
 
 #[cfg(test)]
@@ -809,6 +830,40 @@ mod tests {
     }
 
     #[test]
+    fn load_last_completed_room_id_for_flow_ignores_cancelled_recording_runs() {
+        let conn = Connection::open_in_memory().unwrap();
+        in_memory_schema(&conn);
+        conn.execute(
+            "INSERT INTO accounts (id, username, display_name, type) VALUES (1, 'shop_abc', 'Shop ABC', 'monitored')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO flows (id, name, enabled, status, published_version, draft_version) \
+             VALUES (1, 'Flow', 1, 'idle', 1, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO flow_runs (id, flow_id, definition_version, status, started_at, ended_at, trigger_reason, error) \
+             VALUES (11, 1, 1, 'cancelled', datetime('now', '+7 hours'), datetime('now', '+7 hours'), 'test', 'Interrupted by app restart')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO recordings (account_id, room_id, status, duration_seconds, file_size_bytes, flow_id, flow_run_id, created_at, started_at) \
+             VALUES (1, '7312345', 'cancelled', 0, 0, 1, 11, datetime('now', '+7 hours'), datetime('now', '+7 hours'))",
+            [],
+        )
+        .unwrap();
+
+        assert_eq!(
+            load_last_completed_room_id_for_flow(&conn, 1).unwrap(),
+            None
+        );
+    }
+
+    #[test]
     fn create_run_with_completed_start_node_creates_running_flow_run_and_completed_node_output() {
         let conn = Connection::open_in_memory().unwrap();
         in_memory_schema(&conn);
@@ -877,6 +932,35 @@ mod tests {
                 .unwrap()
                 .as_deref(),
             Some("7312345")
+        );
+    }
+
+    #[test]
+    fn load_last_completed_room_id_for_flow_ignores_running_start_output() {
+        let conn = Connection::open_in_memory().unwrap();
+        in_memory_schema(&conn);
+        conn.execute(
+            "INSERT INTO flows (id, name, enabled, status, published_version, draft_version) \
+             VALUES (1, 'Flow', 1, 'recording', 1, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO flow_runs (id, flow_id, definition_version, status, started_at, trigger_reason) \
+             VALUES (11, 1, 1, 'running', datetime('now', '+7 hours'), 'start_live_detected')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO flow_node_runs (flow_run_id, flow_id, node_key, status, started_at, ended_at, output_json) \
+             VALUES (11, 1, 'start', 'completed', datetime('now', '+7 hours'), datetime('now', '+7 hours'), ?1)",
+            [r#"{"account_id":9,"username":"shop_abc","room_id":"7312345","stream_url":"https://example.com/live.flv","viewer_count":77,"detected_at":"2026-04-18 09:30:00"}"#],
+        )
+        .unwrap();
+
+        assert_eq!(
+            load_last_completed_room_id_for_flow(&conn, 1).unwrap(),
+            None
         );
     }
 
