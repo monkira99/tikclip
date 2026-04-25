@@ -31,6 +31,7 @@ impl LiveRuntimeManager {
             username: config.username.as_str(),
             cookies_json: config.cookies_json.as_str(),
             proxy_url: config.proxy_url.as_deref(),
+            waf_bypass_enabled: config.waf_bypass_enabled,
         })
     }
 

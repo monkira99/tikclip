@@ -1,17 +1,20 @@
 use serde_json::Value;
+use std::time::Duration;
 
 use super::types::{LiveCheckConfig, LiveStatus, MergedLiveStatus};
 
 const STREAM_QUALITY_ORDER: &[&str] = &["FULL_HD1", "HD1", "SD1", "SD2"];
+const SDK_QUALITY_ORDER: &[&str] = &["origin", "hd", "sd", "ld"];
 
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn resolve_live_status(config: &LiveCheckConfig<'_>) -> Result<Option<LiveStatus>, String> {
     let cookie_header = super::http_transport::normalize_cookie_header(config.cookies_json)?;
     let proxy_url = super::http_transport::proxy_url_for_reqwest(config.proxy_url)?;
+    let timeout = Duration::from_secs(10);
     let client = super::http_transport::build_tiktok_reqwest_client(
         cookie_header.as_str(),
         proxy_url.as_deref(),
-        std::time::Duration::from_secs(10),
+        timeout,
     )?;
 
     let username = config.username.trim_start_matches('@');
@@ -21,90 +24,348 @@ pub fn resolve_live_status(config: &LiveCheckConfig<'_>) -> Result<Option<LiveSt
 
     let runtime = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
     let live_status = runtime.block_on(async {
-        let response = match client
-            .get(format!("https://www.tiktok.com/@{username}/live"))
-            .send()
+        if config.waf_bypass_enabled {
+            let bypass_client = build_tiktok_waf_bypass_client(
+                cookie_header.as_str(),
+                proxy_url.as_deref(),
+                timeout,
+            )?;
+            match fetch_live_status_from_user_room_api_waf(
+                &bypass_client,
+                username,
+                cookie_header.as_str(),
+            )
             .await
-        {
-            Ok(response) => response,
-            Err(_) => return Ok::<Option<LiveStatus>, String>(None),
-        };
-        let status = response.status().as_u16();
-        let url = response.url().to_string();
-        let text = match response.text().await {
-            Ok(text) => text,
-            Err(_) => return Ok(None),
-        };
-        if super::http_transport::ensure_success_status(status, &url, &text).is_err() {
-            return Ok(None);
-        }
-        let Some(room_id) = extract_room_id_from_live_html(text.as_str()) else {
-            return Ok::<Option<LiveStatus>, String>(None);
-        };
-
-        let room_info_response = match client
-            .get("https://webcast.tiktok.com/webcast/room/info/")
-            .query(&[("aid", "1988"), ("room_id", room_id.as_str())])
-            .send()
-            .await
-        {
-            Ok(response) => response,
-            Err(_) => return Ok(None),
-        };
-        let status = room_info_response.status().as_u16();
-        let text = room_info_response.text().await.unwrap_or_default();
-        let room_payload = if (200..300).contains(&status) {
-            room_payload_from_room_info_text(text.as_str(), room_id.as_str())
-        } else {
-            Value::Null
-        };
-
-        let region = webcast_region_hint(Some(cookie_header.as_str()));
-        let check_alive_live = match client
-            .get("https://webcast.tiktok.com/webcast/room/check_alive/")
-            .query(&[
-                ("aid", "1988"),
-                ("region", region),
-                ("room_ids", room_id.as_str()),
-                ("user_is_login", "true"),
-            ])
-            .send()
-            .await
-        {
-            Ok(check_alive_response) if check_alive_response.status().is_success() => {
-                let alive_text = check_alive_response.text().await.unwrap_or_default();
-                let parsed: Value =
-                    serde_json::from_str(alive_text.as_str()).unwrap_or(Value::Null);
-                parsed
-                    .get("data")
-                    .and_then(Value::as_array)
-                    .and_then(|rows| rows.first())
-                    .and_then(|row| row.get("alive"))
-                    .and_then(value_as_i64)
-                    .is_some_and(|flag| flag == 1)
+            {
+                Ok(status) => return Ok::<Option<LiveStatus>, String>(status),
+                Err(api_err) => {
+                    match fetch_live_status_from_signed_user_room_api_waf(
+                        &bypass_client,
+                        username,
+                        cookie_header.as_str(),
+                    )
+                    .await
+                    {
+                        Ok(status) => return Ok(status),
+                        Err(signed_err) => {
+                            let combined_err = format!("{api_err}; signed fallback: {signed_err}");
+                            let html_status = fetch_live_status_from_live_html(
+                                &client,
+                                username,
+                                cookie_header.as_str(),
+                                Some(combined_err.as_str()),
+                            )
+                            .await?;
+                            return Ok(html_status);
+                        }
+                    }
+                }
             }
-            _ => false,
-        };
-
-        let room_payload = if room_payload.is_null() {
-            fallback_room_payload(room_id.as_str(), check_alive_live)
-        } else {
-            room_payload
-        };
-
-        let merged = merge_live_status_from_room_payload(&room_payload);
-        if !(merged.is_live || check_alive_live) {
-            return Ok(None);
         }
 
-        Ok(Some(LiveStatus {
-            room_id: merged.room_id.unwrap_or(room_id),
-            stream_url: merged.stream_url,
-            viewer_count: merged.viewer_count,
-        }))
+        let api_status_result = fetch_live_status_from_user_room_api(&client, username).await;
+        match api_status_result {
+            Ok(status) => Ok::<Option<LiveStatus>, String>(status),
+            Err(api_err) => {
+                let html_status = fetch_live_status_from_live_html(
+                    &client,
+                    username,
+                    cookie_header.as_str(),
+                    Some(api_err.as_str()),
+                )
+                .await?;
+                Ok(html_status)
+            }
+        }
     })?;
 
     Ok(live_status)
+}
+
+fn build_tiktok_waf_bypass_client(
+    _cookie_header: &str,
+    proxy_url: Option<&str>,
+    timeout: Duration,
+) -> Result<wreq::Client, String> {
+    let mut builder = wreq::Client::builder()
+        .emulation(wreq_util::Emulation::Chrome136)
+        .timeout(timeout)
+        .redirect(wreq::redirect::Policy::limited(10));
+    if let Some(proxy) = proxy_url {
+        builder = builder.proxy(wreq::Proxy::all(proxy).map_err(|e| e.to_string())?);
+    }
+    builder.build().map_err(|e| e.to_string())
+}
+
+fn add_waf_headers(request: wreq::RequestBuilder, cookie_header: &str) -> wreq::RequestBuilder {
+    let request = request
+        .header(wreq::header::ORIGIN, "https://www.tiktok.com")
+        .header(wreq::header::REFERER, "https://www.tiktok.com/");
+    if cookie_header.trim().is_empty() {
+        request
+    } else {
+        request.header(wreq::header::COOKIE, cookie_header)
+    }
+}
+
+async fn fetch_live_status_from_user_room_api_waf(
+    client: &wreq::Client,
+    username: &str,
+    cookie_header: &str,
+) -> Result<Option<LiveStatus>, String> {
+    let response = add_waf_headers(
+        client
+            .get("https://www.tiktok.com/api-live/user/room/")
+            .query(&[
+                ("aid", "1988"),
+                ("uniqueId", username),
+                ("sourceType", "54"),
+            ]),
+        cookie_header,
+    )
+    .send()
+    .await
+    .map_err(|e| format!("waf api-live user room request failed: {e}"))?;
+    let status = response.status().as_u16();
+    let url = response.uri().to_string();
+    let text = response
+        .text()
+        .await
+        .map_err(|e| format!("waf api-live user room body read failed: {e}"))?;
+    super::http_transport::ensure_success_status(status, &url, &text)
+        .map_err(|e| format!("waf api-live user room returned {e}"))?;
+    live_status_from_user_room_api_text(text.as_str())
+}
+
+async fn fetch_live_status_from_signed_user_room_api_waf(
+    client: &wreq::Client,
+    username: &str,
+    cookie_header: &str,
+) -> Result<Option<LiveStatus>, String> {
+    let sign_response = add_waf_headers(
+        client
+            .get("https://tikrec.com/tiktok/room/api/sign")
+            .query(&[("unique_id", username)]),
+        cookie_header,
+    )
+    .send()
+    .await
+    .map_err(|e| format!("signed API URL request failed: {e}"))?;
+    let sign_status = sign_response.status().as_u16();
+    let sign_url = sign_response.uri().to_string();
+    let sign_text = sign_response
+        .text()
+        .await
+        .map_err(|e| format!("signed API URL body read failed: {e}"))?;
+    super::http_transport::ensure_success_status(sign_status, &sign_url, &sign_text)
+        .map_err(|e| format!("signed API URL returned {e}"))?;
+    let signed_path = signed_path_from_tikrec_response(sign_text.as_str())?;
+    let signed_url = if signed_path.starts_with("http://") || signed_path.starts_with("https://") {
+        signed_path
+    } else {
+        format!("https://www.tiktok.com{signed_path}")
+    };
+
+    let response = add_waf_headers(client.get(signed_url.as_str()), cookie_header)
+        .send()
+        .await
+        .map_err(|e| format!("signed api-live user room request failed: {e}"))?;
+    let status = response.status().as_u16();
+    let url = response.uri().to_string();
+    let text = response
+        .text()
+        .await
+        .map_err(|e| format!("signed api-live user room body read failed: {e}"))?;
+    super::http_transport::ensure_success_status(status, &url, &text)
+        .map_err(|e| format!("signed api-live user room returned {e}"))?;
+    live_status_from_user_room_api_text(text.as_str())
+}
+
+fn signed_path_from_tikrec_response(text: &str) -> Result<String, String> {
+    let value: Value =
+        serde_json::from_str(text).map_err(|e| format!("signed API JSON parse failed: {e}"))?;
+    value
+        .get("signed_path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .ok_or_else(|| "signed API response missing signed_path".to_string())
+}
+
+async fn fetch_live_status_from_user_room_api(
+    client: &reqwest::Client,
+    username: &str,
+) -> Result<Option<LiveStatus>, String> {
+    let response = client
+        .get("https://www.tiktok.com/api-live/user/room/")
+        .query(&[
+            ("aid", "1988"),
+            ("uniqueId", username),
+            ("sourceType", "54"),
+        ])
+        .send()
+        .await
+        .map_err(|e| format!("api-live user room request failed: {e}"))?;
+    let status = response.status().as_u16();
+    let url = response.url().to_string();
+    let text = response
+        .text()
+        .await
+        .map_err(|e| format!("api-live user room body read failed: {e}"))?;
+    super::http_transport::ensure_success_status(status, &url, &text)
+        .map_err(|e| format!("api-live user room returned {e}"))?;
+    live_status_from_user_room_api_text(text.as_str())
+}
+
+async fn fetch_live_status_from_live_html(
+    client: &reqwest::Client,
+    username: &str,
+    cookie_header: &str,
+    api_error: Option<&str>,
+) -> Result<Option<LiveStatus>, String> {
+    let response = match client
+        .get(format!("https://www.tiktok.com/@{username}/live"))
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(err) => return Err(format!("live HTML request failed: {err}")),
+    };
+    let status = response.status().as_u16();
+    let url = response.url().to_string();
+    let text = response
+        .text()
+        .await
+        .map_err(|e| format!("live HTML body read failed: {e}"))?;
+    super::http_transport::ensure_success_status(status, &url, &text)
+        .map_err(|e| format!("live HTML returned {e}"))?;
+    let Some(room_id) = extract_room_id_from_live_html(text.as_str()) else {
+        return Err(api_error.map_or_else(
+            || "could not resolve TikTok room id from live HTML".to_string(),
+            |api_error| {
+                format!(
+                    "could not resolve TikTok room id from api-live or live HTML; api-live error: {api_error}"
+                )
+            },
+        ));
+    };
+
+    let room_info_response = match client
+        .get("https://webcast.tiktok.com/webcast/room/info/")
+        .query(&[("aid", "1988"), ("room_id", room_id.as_str())])
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(err) => return Err(format!("room/info request failed: {err}")),
+    };
+    let status = room_info_response.status().as_u16();
+    let text = room_info_response.text().await.unwrap_or_default();
+    let room_payload = if (200..300).contains(&status) {
+        room_payload_from_room_info_text(text.as_str(), room_id.as_str())
+    } else {
+        Value::Null
+    };
+
+    let region = webcast_region_hint(Some(cookie_header));
+    let check_alive_live = match client
+        .get("https://webcast.tiktok.com/webcast/room/check_alive/")
+        .query(&[
+            ("aid", "1988"),
+            ("region", region),
+            ("room_ids", room_id.as_str()),
+            ("user_is_login", "true"),
+        ])
+        .send()
+        .await
+    {
+        Ok(check_alive_response) if check_alive_response.status().is_success() => {
+            let alive_text = check_alive_response.text().await.unwrap_or_default();
+            let parsed: Value = serde_json::from_str(alive_text.as_str()).unwrap_or(Value::Null);
+            parsed
+                .get("data")
+                .and_then(Value::as_array)
+                .and_then(|rows| rows.first())
+                .and_then(|row| row.get("alive"))
+                .and_then(value_as_i64)
+                .is_some_and(|flag| flag == 1)
+        }
+        _ => false,
+    };
+
+    let room_payload = if room_payload.is_null() {
+        fallback_room_payload(room_id.as_str(), check_alive_live)
+    } else {
+        room_payload
+    };
+
+    let merged = merge_live_status_from_room_payload(&room_payload);
+    if !(merged.is_live || check_alive_live) {
+        return Ok(None);
+    }
+
+    Ok(Some(LiveStatus {
+        room_id: merged.room_id.unwrap_or(room_id),
+        stream_url: merged.stream_url,
+        viewer_count: merged.viewer_count,
+    }))
+}
+
+fn live_status_from_user_room_api_text(text: &str) -> Result<Option<LiveStatus>, String> {
+    let value: Value = serde_json::from_str(text)
+        .map_err(|e| format!("api-live user room JSON parse failed: {e}"))?;
+    if value
+        .get("message")
+        .and_then(Value::as_str)
+        .is_some_and(|message| message == "user_not_found")
+    {
+        return Ok(None);
+    }
+
+    let data = value
+        .get("data")
+        .ok_or_else(|| "api-live user room response missing data".to_string())?;
+    let user = data.get("user").unwrap_or(&Value::Null);
+    let live_room = data.get("liveRoom").unwrap_or(&Value::Null);
+    let status = live_room
+        .get("status")
+        .and_then(value_as_i64)
+        .or_else(|| user.get("status").and_then(value_as_i64));
+
+    let Some(status) = status else {
+        return Err("api-live user room response did not contain a live status".to_string());
+    };
+    if status != 2 {
+        return Ok(None);
+    }
+
+    let room_id = user
+        .get("roomId")
+        .and_then(Value::as_str)
+        .or_else(|| user.get("room_id").and_then(Value::as_str))
+        .or_else(|| live_room.get("roomId").and_then(Value::as_str))
+        .or_else(|| live_room.get("room_id").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| {
+            live_room
+                .get("id")
+                .and_then(value_as_i64)
+                .map(|value| value.to_string())
+        })
+        .ok_or_else(|| "api-live user room response missing roomId".to_string())?;
+
+    Ok(Some(LiveStatus {
+        room_id,
+        stream_url: pick_stream_url_from_user_room_payload(data),
+        viewer_count: live_room
+            .get("liveRoomStats")
+            .and_then(|value| value.get("userCount"))
+            .and_then(value_as_i64)
+            .or_else(|| viewer_count_from_sdk_pull_data(live_room.get("streamData"))),
+    }))
 }
 
 fn fallback_room_payload(room_id: &str, is_live: bool) -> Value {
@@ -240,6 +501,13 @@ pub fn webcast_region_hint(cookie_header: Option<&str>) -> &'static str {
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn pick_stream_url_from_room_payload(room: &Value) -> Option<String> {
     let stream_url = room.get("stream_url")?;
+    if let Some(url) = stream_url
+        .get("live_core_sdk_data")
+        .and_then(|value| value.get("pull_data"))
+        .and_then(pick_stream_url_from_sdk_pull_data)
+    {
+        return Some(url);
+    }
     if let Some(raw) = stream_url.as_str().filter(|value| !value.is_empty()) {
         return Some(raw.to_string());
     }
@@ -268,6 +536,87 @@ pub fn pick_stream_url_from_room_payload(room: &Value) -> Option<String> {
     raw_hls
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
+}
+
+fn pick_stream_url_from_user_room_payload(data: &Value) -> Option<String> {
+    let live_room = data.get("liveRoom")?;
+    live_room
+        .get("streamData")
+        .and_then(pick_stream_url_from_sdk_pull_data)
+        .or_else(|| {
+            live_room
+                .get("hevcStreamData")
+                .and_then(pick_stream_url_from_sdk_pull_data)
+        })
+        .or_else(|| pick_stream_url_from_room_payload(live_room))
+}
+
+fn pick_stream_url_from_sdk_pull_data(pull_data_parent: &Value) -> Option<String> {
+    let pull_data = pull_data_parent
+        .get("pull_data")
+        .unwrap_or(pull_data_parent);
+    let stream_data = pull_data.get("stream_data").and_then(Value::as_str)?;
+    let parsed: Value = serde_json::from_str(stream_data).ok()?;
+    let streams = parsed.get("data")?.as_object()?;
+
+    let quality_levels = pull_data
+        .get("options")
+        .and_then(|value| value.get("qualities"))
+        .and_then(Value::as_array)
+        .map(|qualities| {
+            qualities
+                .iter()
+                .filter_map(|quality| {
+                    let key = quality.get("sdk_key")?.as_str()?.to_string();
+                    let level = quality.get("level").and_then(value_as_i64).unwrap_or(-1);
+                    Some((key, level))
+                })
+                .collect::<std::collections::HashMap<_, _>>()
+        })
+        .unwrap_or_default();
+
+    let mut best: Option<(i64, String)> = None;
+    for (sdk_key, entry) in streams {
+        let level = quality_levels
+            .get(sdk_key)
+            .copied()
+            .or_else(|| {
+                SDK_QUALITY_ORDER
+                    .iter()
+                    .rev()
+                    .position(|candidate| *candidate == sdk_key)
+                    .and_then(|index| i64::try_from(index).ok())
+            })
+            .unwrap_or(-1);
+        let Some(url) = entry
+            .get("main")
+            .and_then(|main| main.get("flv").or_else(|| main.get("hls")))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|url| !url.is_empty())
+        else {
+            continue;
+        };
+        if best
+            .as_ref()
+            .is_none_or(|(best_level, _)| level > *best_level)
+        {
+            best = Some((level, url.to_string()));
+        }
+    }
+
+    best.map(|(_, url)| url)
+}
+
+fn viewer_count_from_sdk_pull_data(stream_data: Option<&Value>) -> Option<i64> {
+    let stream_data = stream_data?;
+    let pull_data = stream_data.get("pull_data").unwrap_or(stream_data);
+    let raw = pull_data.get("stream_data").and_then(Value::as_str)?;
+    let parsed: Value = serde_json::from_str(raw).ok()?;
+    parsed
+        .get("common")
+        .and_then(|value| value.get("user_count"))
+        .and_then(value_as_i64)
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -381,8 +730,9 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        extract_room_id_from_live_html, merge_live_status_from_room_payload,
-        pick_stream_url_from_room_payload, webcast_region_hint,
+        extract_room_id_from_live_html, live_status_from_user_room_api_text,
+        merge_live_status_from_room_payload, pick_stream_url_from_room_payload,
+        signed_path_from_tikrec_response, webcast_region_hint,
     };
 
     #[test]
@@ -488,6 +838,100 @@ mod tests {
         assert_eq!(
             pick_stream_url_from_room_payload(&room).as_deref(),
             Some("https://example.com/custom.flv")
+        );
+    }
+
+    #[test]
+    fn live_status_from_user_room_api_text_reads_room_status_and_sdk_stream_data() {
+        let stream_data = serde_json::json!({
+            "common": {
+                "user_count": 98
+            },
+            "data": {
+                "origin": {
+                    "main": {
+                        "flv": "https://example.com/origin.flv"
+                    }
+                },
+                "hd": {
+                    "main": {
+                        "flv": "https://example.com/hd.flv"
+                    }
+                }
+            }
+        })
+        .to_string();
+        let body = json!({
+            "data": {
+                "user": {
+                    "roomId": "7632683733313325845",
+                    "status": 2
+                },
+                "liveRoom": {
+                    "status": 2,
+                    "liveRoomStats": {
+                        "userCount": 174
+                    },
+                    "streamData": {
+                        "pull_data": {
+                            "options": {
+                                "qualities": [
+                                    { "sdk_key": "origin", "level": 10 },
+                                    { "sdk_key": "hd", "level": 3 }
+                                ]
+                            },
+                            "stream_data": stream_data
+                        }
+                    }
+                }
+            },
+            "message": "",
+            "statusCode": 0
+        });
+
+        let live = live_status_from_user_room_api_text(&body.to_string())
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(live.room_id, "7632683733313325845");
+        assert_eq!(
+            live.stream_url.as_deref(),
+            Some("https://example.com/origin.flv")
+        );
+        assert_eq!(live.viewer_count, Some(174));
+    }
+
+    #[test]
+    fn live_status_from_user_room_api_text_returns_none_for_explicit_offline_status() {
+        let body = json!({
+            "data": {
+                "user": {
+                    "roomId": "7632683733313325845",
+                    "status": 4
+                },
+                "liveRoom": {
+                    "status": 4
+                }
+            },
+            "message": "",
+            "statusCode": 0
+        });
+
+        let live = live_status_from_user_room_api_text(&body.to_string()).unwrap();
+
+        assert_eq!(live, None);
+    }
+
+    #[test]
+    fn signed_path_from_tikrec_response_reads_signed_path() {
+        let signed_path = signed_path_from_tikrec_response(
+            r#"{"signed_path":"/api-live/user/room/?uniqueId=shop_abc&X-Bogus=abc"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            signed_path,
+            "/api-live/user/room/?uniqueId=shop_abc&X-Bogus=abc"
         );
     }
 

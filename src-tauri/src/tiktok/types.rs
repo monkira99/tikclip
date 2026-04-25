@@ -12,6 +12,7 @@ pub struct LiveCheckConfig<'a> {
     pub username: &'a str,
     pub cookies_json: &'a str,
     pub proxy_url: Option<&'a str>,
+    pub waf_bypass_enabled: bool,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]

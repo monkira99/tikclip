@@ -26,6 +26,8 @@ log = "0.4"
 env_logger = "0.11"
 open = "5"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+wreq = { version = "6.0.0-rc.28", features = ["brotli", "deflate", "gzip", "query", "zstd"] }
+wreq-util = "3.0.0-rc.10"
 tokio = { version = "1", features = ["process", "rt-multi-thread", "macros", "time"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 thiserror = "1"

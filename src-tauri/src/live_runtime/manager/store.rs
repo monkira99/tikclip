@@ -16,7 +16,35 @@ pub(super) struct FlowRuntimeConfig {
     pub(super) lookup_key: String,
     pub(super) cookies_json: String,
     pub(super) proxy_url: Option<String>,
+    pub(super) waf_bypass_enabled: bool,
     pub(super) poll_interval_seconds: i64,
+}
+
+fn load_bool_setting_or_default(
+    conn: &Connection,
+    key: &str,
+    default_value: bool,
+) -> Result<bool, String> {
+    let raw_result: Result<Option<String>, rusqlite::Error> = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            [key],
+            |row| row.get(0),
+        )
+        .optional();
+    let raw = match raw_result {
+        Ok(raw) => raw,
+        Err(err) if err.to_string().contains("no such table: app_settings") => None,
+        Err(err) => return Err(err.to_string()),
+    };
+    let Some(raw) = raw else {
+        return Ok(default_value);
+    };
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        _ => Ok(default_value),
+    }
 }
 
 pub(super) fn load_sidecar_base_url(conn: &Connection) -> Result<Option<String>, String> {
@@ -74,6 +102,7 @@ pub(super) fn load_flow_runtime_config(
         lookup_key: config.username.lookup_key,
         cookies_json: config.cookies_json,
         proxy_url: config.proxy_url,
+        waf_bypass_enabled: load_bool_setting_or_default(conn, "tiktok_waf_bypass_enabled", true)?,
         poll_interval_seconds: config.poll_interval_seconds,
     })
 }

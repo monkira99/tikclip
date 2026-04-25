@@ -18,8 +18,10 @@ export const DEFAULTS = {
   speechMergeGapSec: "0.5",
   speechCutToleranceSec: "1.5",
   sttNumThreads: "4",
+  tiktokWafBypassEnabled: "1",
 } as const;
 
+export const KEY_TIKTOK_WAF_BYPASS = "tiktok_waf_bypass_enabled";
 export const KEY_SPEECH_MERGE_GAP = "speech_merge_gap_sec";
 export const KEY_SPEECH_CUT_TOLERANCE = "speech_cut_tolerance_sec";
 export const KEY_STT_NUM_THREADS = "stt_num_threads";
