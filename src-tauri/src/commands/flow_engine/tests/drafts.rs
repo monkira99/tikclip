@@ -48,7 +48,7 @@ fn apply_flow_node_draft_allows_blank_start_username() {
         .expect("read draft config");
     assert_eq!(
         draft_config,
-        r#"{"cookies_json":"{}","poll_interval_seconds":20,"proxy_url":"http://127.0.0.1:9000","retry_limit":4,"username":""}"#
+        r#"{"cookies_json":"{}","poll_interval_seconds":20,"proxy_url":"http://127.0.0.1:9000","retry_limit":4,"username":"","waf_bypass_enabled":true}"#
     );
 
     drop(conn);

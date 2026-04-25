@@ -455,6 +455,7 @@ pub fn create_flow(state: State<'_, AppState>, input: CreateFlowInput) -> Result
         "username": "",
         "cookies_json": "",
         "proxy_url": "",
+        "waf_bypass_enabled": true,
         "poll_interval_seconds": 60,
         "retry_limit": 3,
     })
@@ -729,6 +730,7 @@ mod tests {
             "username": "",
             "cookies_json": "",
             "proxy_url": "",
+            "waf_bypass_enabled": true,
             "poll_interval_seconds": 60,
             "retry_limit": 3,
         });

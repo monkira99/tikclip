@@ -9,6 +9,7 @@ test("parseStartNodeDraft accepts legacy camelCase start config", () => {
       username: " @shop_abc ",
       cookiesJson: "{}",
       proxyUrl: "http://127.0.0.1:9000",
+      wafBypassEnabled: false,
       pollIntervalSeconds: 25,
       retryLimit: 4,
     }),
@@ -18,6 +19,7 @@ test("parseStartNodeDraft accepts legacy camelCase start config", () => {
     username: "shop_abc",
     cookies_json: "{}",
     proxy_url: "http://127.0.0.1:9000",
+    waf_bypass_enabled: false,
     poll_interval_seconds: 25,
     retry_limit: 4,
   });

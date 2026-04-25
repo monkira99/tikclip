@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   parseStartNodeDraft,
@@ -102,7 +103,7 @@ export function StartNodeModal({
           <DialogHeader>
             <DialogTitle>Start node</DialogTitle>
             <DialogDescription className="sr-only">
-              Account, cookies, proxy, poll interval, and retry settings for this flow Start node.
+              Account, cookies, proxy, live-check, poll interval, and retry settings for this flow Start node.
             </DialogDescription>
           </DialogHeader>
 
@@ -138,6 +139,20 @@ export function StartNodeModal({
                 value={form.proxy_url}
                 onChange={(e) => patch({ proxy_url: e.target.value })}
                 placeholder="Optional"
+              />
+            </div>
+            <div className="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
+              <div>
+                <Label htmlFor={`start-waf-bypass-${flowId}`}>TikTok WAF bypass</Label>
+                <p className="mt-1 text-xs font-medium tracking-[0.02em] text-[var(--color-text-muted)]">
+                  Chrome TLS impersonation and signed API URL for live checks.
+                </p>
+              </div>
+              <Switch
+                id={`start-waf-bypass-${flowId}`}
+                checked={form.waf_bypass_enabled}
+                onCheckedChange={(checked) => patch({ waf_bypass_enabled: checked })}
+                aria-label="Enable TikTok WAF bypass for this Start node"
               />
             </div>
             <div className="grid gap-4 sm:grid-cols-2">

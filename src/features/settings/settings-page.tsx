@@ -35,7 +35,6 @@ import {
   KEY_SUGGEST_MIN_FUSED_SCORE,
   KEY_SUGGEST_WEIGHT_IMAGE,
   KEY_SUGGEST_WEIGHT_TEXT,
-  KEY_TIKTOK_WAF_BYPASS,
 } from "@/features/settings/settings-config";
 import {
   applyStorageRoot,
@@ -67,17 +66,12 @@ function parseAutoTagClipProductEnabled(raw: string | null): boolean {
   return parseProductVectorEnabled(raw);
 }
 
-function parseTikTokWafBypassEnabled(raw: string | null): boolean {
-  return parseBooleanSetting(raw, true);
-}
-
 export function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [paths, setPaths] = useState<AppDataPaths | null>(null);
   const [maxConcurrent, setMaxConcurrent] = useState("");
   const [pollInterval, setPollInterval] = useState("");
   const [recordingMaxMinutes, setRecordingMaxMinutes] = useState("");
-  const [tiktokWafBypassEnabled, setTikTokWafBypassEnabled] = useState(true);
   const [clipMinDuration, setClipMinDuration] = useState("");
   const [clipMaxDuration, setClipMaxDuration] = useState("");
   const [maxStorageGb, setMaxStorageGb] = useState("");
@@ -113,7 +107,6 @@ export function SettingsPage() {
   const [speechCutToleranceSec, setSpeechCutToleranceSec] = useState("");
   const [sttNumThreads, setSttNumThreads] = useState("");
   const [sttQuantize, setSttQuantize] = useState<"auto" | "fp32" | "int8">("auto");
-  const tiktokWafBypassSwitchId = useId();
 
   useEffect(() => {
     let cancelled = false;
@@ -129,7 +122,6 @@ export function SettingsPage() {
           cmin,
           cmax,
           sg,
-          wafBypass,
           rawR,
           archR,
           sw,
@@ -160,7 +152,6 @@ export function SettingsPage() {
           getSetting("clip_min_duration"),
           getSetting("clip_max_duration"),
           getSetting("max_storage_gb"),
-          getSetting(KEY_TIKTOK_WAF_BYPASS),
           getSetting(KEY_RAW_RETENTION),
           getSetting(KEY_ARCHIVE_RETENTION),
           getSetting(KEY_STORAGE_WARN),
@@ -198,7 +189,6 @@ export function SettingsPage() {
         setClipMinDuration(valueFromDb(cmin, DEFAULTS.clipMin));
         setClipMaxDuration(valueFromDb(cmax, DEFAULTS.clipMax));
         setMaxStorageGb(sg === null ? "" : sg);
-        setTikTokWafBypassEnabled(parseTikTokWafBypassEnabled(wafBypass));
         setRawRetentionDays(valueFromDb(rawR, "7"));
         setArchiveRetentionDays(valueFromDb(archR, "0"));
         setStorageWarnPercent(valueFromDb(sw, "80"));
@@ -369,17 +359,16 @@ export function SettingsPage() {
       await setSetting("poll_interval", pi);
       await setSetting("recording_max_minutes", rmin);
       await setSetting("recording_max_hours", "");
-      await setSetting(KEY_TIKTOK_WAF_BYPASS, tiktokWafBypassEnabled ? "1" : "0");
       await restartSidecar();
       const fresh = await getAppDataPaths();
       setPaths(fresh);
-      setMessage("Recording settings saved. Runtime will use the updated TikTok live-check mode.");
+      setMessage("Recording settings saved. Sidecar restarted to apply.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
     } finally {
       setSaving(null);
     }
-  }, [clearFeedback, maxConcurrent, pollInterval, recordingMaxMinutes, tiktokWafBypassEnabled]);
+  }, [clearFeedback, maxConcurrent, pollInterval, recordingMaxMinutes]);
 
   const saveProductVector = useCallback(async () => {
     clearFeedback();
@@ -729,26 +718,6 @@ export function SettingsPage() {
               value={recordingMaxMinutes}
               onChange={(e) => setRecordingMaxMinutes(e.target.value)}
               placeholder={DEFAULTS.recordingMaxMinutes}
-            />
-          </div>
-          <div className="flex items-center justify-between gap-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3 sm:col-span-2">
-            <div>
-              <Label
-                htmlFor={tiktokWafBypassSwitchId}
-                className="text-sm font-medium text-[var(--color-text)]"
-              >
-                TikTok WAF bypass
-              </Label>
-              <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                Dùng Chrome TLS impersonation và signed API URL khi kiểm tra live.
-              </p>
-            </div>
-            <Switch
-              id={tiktokWafBypassSwitchId}
-              checked={tiktokWafBypassEnabled}
-              onCheckedChange={setTikTokWafBypassEnabled}
-              disabled={loading}
-              aria-label="Bật TikTok WAF bypass cho live check"
             />
           </div>
         </CardContent>

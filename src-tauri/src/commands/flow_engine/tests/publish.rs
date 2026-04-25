@@ -104,7 +104,7 @@ fn publish_flow_definition_canonicalizes_start_legacy_keys_to_snake_case() {
         .expect("read published start config");
     assert_eq!(
         published_config,
-        r#"{"cookies_json":"{}","poll_interval_seconds":20,"proxy_url":"http://127.0.0.1:9000","retry_limit":4,"username":"shop_abc"}"#
+        r#"{"cookies_json":"{}","poll_interval_seconds":20,"proxy_url":"http://127.0.0.1:9000","retry_limit":4,"username":"shop_abc","waf_bypass_enabled":true}"#
     );
 
     drop(conn);

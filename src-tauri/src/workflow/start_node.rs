@@ -12,6 +12,8 @@ struct RawStartConfig {
     cookies_json: String,
     #[serde(default, alias = "proxyUrl")]
     proxy_url: String,
+    #[serde(default = "default_waf_bypass_enabled", alias = "wafBypassEnabled")]
+    waf_bypass_enabled: bool,
     #[serde(
         default = "default_poll_interval_seconds",
         alias = "pollIntervalSeconds"
@@ -27,6 +29,7 @@ pub struct StartConfig {
     pub username: CanonicalUsername,
     pub cookies_json: String,
     pub proxy_url: Option<String>,
+    pub waf_bypass_enabled: bool,
     pub poll_interval_seconds: i64,
     pub retry_limit: i64,
 }
@@ -52,6 +55,7 @@ pub fn parse_start_config(raw: &str) -> Result<StartConfig, String> {
         username,
         cookies_json: cfg.cookies_json,
         proxy_url: (!proxy_url.is_empty()).then(|| proxy_url.to_string()),
+        waf_bypass_enabled: cfg.waf_bypass_enabled,
         poll_interval_seconds: cfg.poll_interval_seconds.max(5),
         retry_limit: cfg.retry_limit.max(0),
     })
@@ -89,6 +93,11 @@ fn canonicalize_start_config_json_with_mode(
         .and_then(Value::as_i64)
         .unwrap_or(default_poll_interval_seconds())
         .max(5);
+    let waf_bypass_enabled = object
+        .get("waf_bypass_enabled")
+        .or_else(|| object.get("wafBypassEnabled"))
+        .and_then(value_as_bool)
+        .unwrap_or_else(default_waf_bypass_enabled);
     let retry_limit = object
         .get("retry_limit")
         .or_else(|| object.get("retryLimit"))
@@ -100,6 +109,10 @@ fn canonicalize_start_config_json_with_mode(
     object.insert("cookies_json".to_string(), Value::String(cookies_json));
     object.insert("proxy_url".to_string(), Value::String(proxy_url));
     object.insert(
+        "waf_bypass_enabled".to_string(),
+        Value::Bool(waf_bypass_enabled),
+    );
+    object.insert(
         "poll_interval_seconds".to_string(),
         Value::Number(poll_interval_seconds.into()),
     );
@@ -107,6 +120,7 @@ fn canonicalize_start_config_json_with_mode(
 
     object.remove("cookiesJson");
     object.remove("proxyUrl");
+    object.remove("wafBypassEnabled");
     object.remove("pollIntervalSeconds");
     object.remove("retryLimit");
 
@@ -123,6 +137,25 @@ pub fn canonicalize_start_draft_config_json(raw: &str) -> Result<String, String>
 
 fn default_poll_interval_seconds() -> i64 {
     60
+}
+
+fn default_waf_bypass_enabled() -> bool {
+    true
+}
+
+fn value_as_bool(value: &Value) -> Option<bool> {
+    if let Some(flag) = value.as_bool() {
+        return Some(flag);
+    }
+    if let Some(number) = value.as_i64() {
+        return Some(number != 0);
+    }
+    let raw = value.as_str()?.trim().to_ascii_lowercase();
+    match raw.as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
 }
 
 pub fn run(def: &FlowNodeDefinition, input_json: Option<&str>) -> Result<EngineNodeResult, String> {
@@ -148,6 +181,7 @@ mod tests {
                 "username":" @shop_abc ",
                 "cookies_json":"{}",
                 "proxy_url":"http://127.0.0.1:9000",
+                "waf_bypass_enabled":false,
                 "poll_interval_seconds":20,
                 "retry_limit":3
             }"#,
@@ -157,6 +191,7 @@ mod tests {
         assert_eq!(cfg.username.canonical, "shop_abc");
         assert_eq!(cfg.cookies_json, "{}");
         assert_eq!(cfg.proxy_url.as_deref(), Some("http://127.0.0.1:9000"));
+        assert!(!cfg.waf_bypass_enabled);
         assert_eq!(cfg.poll_interval_seconds, 20);
         assert_eq!(cfg.retry_limit, 3);
     }
@@ -168,6 +203,7 @@ mod tests {
                 "username":" @shop_abc ",
                 "cookiesJson":"{}",
                 "proxyUrl":"http://127.0.0.1:9000",
+                "wafBypassEnabled":false,
                 "pollIntervalSeconds":20,
                 "retryLimit":3
             }"#,
@@ -177,6 +213,7 @@ mod tests {
         assert_eq!(cfg.username.canonical, "shop_abc");
         assert_eq!(cfg.cookies_json, "{}");
         assert_eq!(cfg.proxy_url.as_deref(), Some("http://127.0.0.1:9000"));
+        assert!(!cfg.waf_bypass_enabled);
         assert_eq!(cfg.poll_interval_seconds, 20);
         assert_eq!(cfg.retry_limit, 3);
     }
@@ -202,6 +239,10 @@ mod tests {
         assert_eq!(value.get("last_error").and_then(Value::as_str), Some("x"));
         assert_eq!(value.get("custom").and_then(Value::as_str), Some("keep-me"));
         assert_eq!(value.get("cookies_json").and_then(Value::as_str), Some(""));
+        assert_eq!(
+            value.get("waf_bypass_enabled").and_then(Value::as_bool),
+            Some(true)
+        );
     }
 
     #[test]

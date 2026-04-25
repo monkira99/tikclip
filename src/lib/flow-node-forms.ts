@@ -29,6 +29,25 @@ function firstDefined(...values: unknown[]): unknown {
   return undefined;
 }
 
+function boolValue(value: unknown, fallback: boolean): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["1", "true", "yes", "on"].includes(normalized)) {
+      return true;
+    }
+    if (["0", "false", "no", "off"].includes(normalized)) {
+      return false;
+    }
+  }
+  return fallback;
+}
+
 function secondsToRoundedUpMinutes(value: unknown, fallbackSeconds: number): number {
   const seconds = Math.max(1, Math.floor(num(value, fallbackSeconds)));
   return Math.max(1, Math.ceil(seconds / 60));
@@ -38,6 +57,7 @@ export type StartNodeForm = {
   username: string;
   cookies_json: string;
   proxy_url: string;
+  waf_bypass_enabled: boolean;
   poll_interval_seconds: number;
   retry_limit: number;
 };
@@ -53,6 +73,10 @@ export function parseStartNodeDraft(raw: string): StartNodeForm {
     username: normalizeUsername(value.username),
     cookies_json: stringValue(value.cookies_json, value.cookiesJson),
     proxy_url: stringValue(value.proxy_url, value.proxyUrl),
+    waf_bypass_enabled: boolValue(
+      firstDefined(value.waf_bypass_enabled, value.wafBypassEnabled),
+      true,
+    ),
     poll_interval_seconds: Math.max(
       5,
       Math.floor(num(firstDefined(value.poll_interval_seconds, value.pollIntervalSeconds), 60)),
@@ -66,6 +90,7 @@ export function serializeStartNodeDraft(form: StartNodeForm): string {
     username: normalizeUsername(form.username),
     cookies_json: form.cookies_json,
     proxy_url: form.proxy_url,
+    waf_bypass_enabled: form.waf_bypass_enabled,
     poll_interval_seconds: form.poll_interval_seconds,
     retry_limit: form.retry_limit,
   });
