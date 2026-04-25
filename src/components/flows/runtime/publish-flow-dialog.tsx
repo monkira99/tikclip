@@ -48,7 +48,7 @@ export function PublishFlowDialog({
 
         <Separator className="bg-[var(--color-border)]" />
 
-        <DialogFooter className="flex-col gap-3 border-0 bg-transparent px-4 py-4 sm:flex-col">
+        <DialogFooter className="mx-0 mb-0 flex-col gap-3 border-0 bg-transparent px-4 py-4 sm:flex-col">
           {hasActiveRun ? (
             <div className="flex w-full flex-col gap-2 sm:flex-row sm:justify-end">
               <Button

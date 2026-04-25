@@ -3,7 +3,7 @@ import { RecordingList } from "@/components/recordings/recording-list";
 import { Badge } from "@/components/ui/badge";
 import { listRecordingsByFlow, type FlowRecording } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import type { FlowNodeKey, SidecarRecordingStatus } from "@/types";
+import type { ActiveRecordingStatus, FlowNodeKey } from "@/types";
 
 type FlowRecordingsPanelProps = {
   flowId: number;
@@ -11,7 +11,7 @@ type FlowRecordingsPanelProps = {
   recordingsCountHint?: number;
 };
 
-function mapFlowRecordingToLiveRow(row: FlowRecording): SidecarRecordingStatus {
+function mapFlowRecordingToLiveRow(row: FlowRecording): ActiveRecordingStatus {
   return {
     recording_id: row.sidecar_recording_id ?? `flow-${row.id}`,
     account_id: row.account_id,

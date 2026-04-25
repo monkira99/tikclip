@@ -5,7 +5,6 @@ import { ClipNodeModal } from "@/components/flows/modals/clip-node-modal";
 import { RecordNodeModal } from "@/components/flows/modals/record-node-modal";
 import { StartNodeModal } from "@/components/flows/modals/start-node-modal";
 import { UploadNodeModal } from "@/components/flows/modals/upload-node-modal";
-import { FlowRuntimeDiagnosticsDialog } from "@/components/flows/runtime/flow-runtime-diagnostics-dialog";
 import { FlowRuntimeStrip } from "@/components/flows/runtime/flow-runtime-strip";
 import { PublishFlowDialog } from "@/components/flows/runtime/publish-flow-dialog";
 import { Badge } from "@/components/ui/badge";
@@ -47,7 +46,7 @@ export function buildRuntimeLogsPanelFlow(
     return flow;
   }
 
-   if (!flow.enabled) {
+  if (!flow.enabled) {
     return {
       ...flow,
       status: "disabled",
@@ -83,14 +82,14 @@ export function buildRuntimeMonitorMetadata(
   };
 }
 
-export function shouldFetchDiagnosticsLogs({
-  diagnosticsOpen,
+export function shouldFetchRuntimeLogs({
+  runtimeOpen,
   hasFetchedInOpenCycle,
 }: {
-  diagnosticsOpen: boolean;
+  runtimeOpen: boolean;
   hasFetchedInOpenCycle: boolean;
 }): boolean {
-  if (!diagnosticsOpen) {
+  if (!runtimeOpen) {
     return false;
   }
 
@@ -120,29 +119,29 @@ export function FlowDetail({ flowId, onBack }: FlowDetailProps) {
 
   const [publishError, setPublishError] = useState<string | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
-  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
-  const diagnosticsFetchedInOpenCycleRef = useRef(false);
+  const [runtimeTerminalExpanded, setRuntimeTerminalExpanded] = useState(false);
+  const runtimeLogsFetchedInOpenCycleRef = useRef(false);
 
   useEffect(() => {
     void fetchFlowDetail(flowId);
   }, [flowId, fetchFlowDetail]);
 
   useEffect(() => {
-    if (!diagnosticsOpen) {
-      diagnosticsFetchedInOpenCycleRef.current = false;
+    if (!runtimeTerminalExpanded) {
+      runtimeLogsFetchedInOpenCycleRef.current = false;
       return;
     }
 
-    if (!shouldFetchDiagnosticsLogs({
-      diagnosticsOpen,
-      hasFetchedInOpenCycle: diagnosticsFetchedInOpenCycleRef.current,
+    if (!shouldFetchRuntimeLogs({
+      runtimeOpen: runtimeTerminalExpanded,
+      hasFetchedInOpenCycle: runtimeLogsFetchedInOpenCycleRef.current,
     })) {
       return;
     }
 
-    diagnosticsFetchedInOpenCycleRef.current = true;
+    runtimeLogsFetchedInOpenCycleRef.current = true;
     void fetchRuntimeLogs(flowId);
-  }, [diagnosticsOpen, fetchRuntimeLogs, flowId, runtimeLogs]);
+  }, [fetchRuntimeLogs, flowId, runtimeTerminalExpanded]);
 
   const flow = activeFlow && activeFlow.flow.id === flowId ? activeFlow : null;
   const flowLogs = runtimeLogs[flowId] ?? [];
@@ -198,7 +197,7 @@ export function FlowDetail({ flowId, onBack }: FlowDetailProps) {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="flex min-h-[calc(100vh-6.5rem)] flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0 space-y-2">
           <h2 className="text-lg font-semibold text-[var(--color-text)]">
@@ -254,33 +253,30 @@ export function FlowDetail({ flowId, onBack }: FlowDetailProps) {
         </div>
       ) : null}
 
-      <FlowCanvas
-        flow={flow}
-        selectedNode={selectedNode}
-        runtimeSnapshot={runtimeSnapshot}
-        onSelectNode={handleCanvasSelect}
-      />
+      <div className="relative min-h-[520px] flex-1">
+        <div className="absolute inset-0">
+          <FlowCanvas
+            flow={flow}
+            selectedNode={selectedNode}
+            runtimeSnapshot={runtimeSnapshot}
+            onSelectNode={handleCanvasSelect}
+          />
+        </div>
 
-      {flow ? (
-        <FlowRuntimeStrip
-          flow={runtimePanelFlow ?? flow.flow}
-          username={runtimeMonitorMetadata?.username ?? null}
-          activeFlowRunId={runtimeMonitorMetadata?.activeFlowRunId ?? null}
-          runtimeLogsCount={flowLogs.length}
-          onOpenDiagnostics={() => setDiagnosticsOpen(true)}
-        />
-      ) : null}
-
-      {flow && runtimePanelFlow ? (
-        <FlowRuntimeDiagnosticsDialog
-          open={diagnosticsOpen}
-          onOpenChange={setDiagnosticsOpen}
-          flow={runtimePanelFlow}
-          logs={flowLogs}
-          username={runtimeMonitorMetadata?.username ?? null}
-          activeFlowRunId={runtimeMonitorMetadata?.activeFlowRunId ?? null}
-        />
-      ) : null}
+        {flow ? (
+          <div className="pointer-events-none absolute inset-x-3 bottom-3 z-10">
+            <div className="pointer-events-auto">
+              <FlowRuntimeStrip
+                flow={runtimePanelFlow ?? flow.flow}
+                activeFlowRunId={runtimeMonitorMetadata?.activeFlowRunId ?? null}
+                runtimeLogs={flowLogs}
+                expanded={runtimeTerminalExpanded}
+                onExpandedChange={setRuntimeTerminalExpanded}
+              />
+            </div>
+          </div>
+        ) : null}
+      </div>
 
       <PublishFlowDialog
         open={publishOpen}

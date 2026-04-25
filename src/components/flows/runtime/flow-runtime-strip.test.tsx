@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import type { FlowContext } from "@/types";
+import type { FlowContext, FlowRuntimeLogEntry } from "@/types";
 
 import { FlowRuntimeStrip } from "./flow-runtime-strip";
 
@@ -24,90 +24,118 @@ function createFlow(overrides: Partial<FlowContext> = {}): FlowContext {
   };
 }
 
-test("FlowRuntimeStrip renders live runtime summary and diagnostics affordance", () => {
-  const markup = renderToStaticMarkup(
+function createLog(overrides: Partial<FlowRuntimeLogEntry> = {}): FlowRuntimeLogEntry {
+  return {
+    id: overrides.id ?? "log-1",
+    timestamp: overrides.timestamp ?? "2026-04-19T10:01:02.345+07:00",
+    level: overrides.level ?? "info",
+    flow_id: overrides.flow_id ?? 7,
+    flow_run_id: "flow_run_id" in overrides ? overrides.flow_run_id ?? null : 42,
+    external_recording_id:
+      "external_recording_id" in overrides ? overrides.external_recording_id ?? null : null,
+    stage: overrides.stage ?? "clip",
+    event: overrides.event ?? "clip.created",
+    code: "code" in overrides ? overrides.code ?? null : null,
+    message: overrides.message ?? "Clip generated",
+    context: overrides.context ?? { clip_id: 99 },
+  };
+}
+
+function renderStrip(options: {
+  flow?: FlowContext;
+  runtimeLogs?: FlowRuntimeLogEntry[];
+  expanded?: boolean;
+  activeFlowRunId?: number | null;
+} = {}): string {
+  return renderToStaticMarkup(
     <FlowRuntimeStrip
-      flow={createFlow({
-        status: "processing",
-        current_node: "clip",
-        last_live_at: "2026-04-19T10:01:02.345+07:00",
-      })}
-      username="shop_abc"
-      activeFlowRunId={42}
-      runtimeLogsCount={3}
-      onOpenDiagnostics={() => {}}
+      flow={options.flow ?? createFlow()}
+      activeFlowRunId={"activeFlowRunId" in options ? options.activeFlowRunId ?? null : 42}
+      runtimeLogs={options.runtimeLogs ?? []}
+      expanded={options.expanded ?? false}
+      onExpandedChange={() => {}}
     />,
   );
+}
 
-  assert.match(markup, /Runtime Monitor/);
+test("FlowRuntimeStrip renders collapsed terminal summary by default", () => {
+  const markup = renderStrip({
+    flow: createFlow({
+      status: "processing",
+      current_node: "clip",
+      last_live_at: "2026-04-19T10:01:02.345+07:00",
+    }),
+    runtimeLogs: [createLog()],
+    expanded: false,
+  });
+
+  assert.match(markup, /Event Terminal/);
+  assert.match(markup, /processing/);
+  assert.match(markup, /1 logs/);
   assert.match(markup, /Creating clips/);
-  assert.match(markup, /shop_abc/);
-  assert.match(markup, /Run #42/);
-  assert.match(markup, /3 logs/);
-  assert.match(markup, /Open diagnostics/);
+  assert.doesNotMatch(markup, /Open diagnostics/);
+  assert.doesNotMatch(markup, /event=clip.created/);
+  assert.doesNotMatch(markup, /Clip generated/);
 });
 
-test("FlowRuntimeStrip surfaces last error and empty log state when runtime is degraded", () => {
-  const markup = renderToStaticMarkup(
-    <FlowRuntimeStrip
-      flow={createFlow({
-        status: "error",
-        current_node: "caption",
-        last_live_at: null,
-        last_error: "Caption worker crashed",
-      })}
-      username="shop_abc"
-      activeFlowRunId={null}
-      runtimeLogsCount={0}
-      onOpenDiagnostics={() => {}}
-    />,
-  );
+test("FlowRuntimeStrip renders expanded terminal logs and runtime metadata", () => {
+  const markup = renderStrip({
+    flow: createFlow({
+      status: "processing",
+      current_node: "clip",
+      last_live_at: "2026-04-19T10:01:02.345+07:00",
+    }),
+    runtimeLogs: [createLog()],
+    expanded: true,
+  });
+
+  assert.doesNotMatch(markup, /Open diagnostics/);
+  assert.match(markup, /Creating clips/);
+  assert.match(markup, /Clip created/);
+  assert.match(markup, /Clip #99 is ready for review/);
+  assert.match(markup, /Run #42/);
+  assert.doesNotMatch(markup, /Current step/);
+  assert.doesNotMatch(markup, /Last live/);
+  assert.doesNotMatch(markup, /account=shop_abc/);
+  assert.doesNotMatch(markup, /event=clip.created/);
+});
+
+test("FlowRuntimeStrip surfaces last error in expanded runtime metadata", () => {
+  const markup = renderStrip({
+    flow: createFlow({
+      status: "error",
+      current_node: "caption",
+      last_live_at: null,
+      last_error: "Caption worker crashed",
+    }),
+    activeFlowRunId: null,
+    expanded: true,
+  });
 
   assert.match(markup, /Caption failed/);
   assert.match(markup, /Caption worker crashed/);
-  assert.match(markup, /No logs loaded/);
-  assert.match(markup, /line-clamp-1/);
+  assert.match(markup, /No logs/);
+  assert.match(markup, /Waiting for readable activity/);
 });
 
-test("FlowRuntimeStrip falls back to non-running copy without a runtime snapshot", () => {
-  const markup = renderToStaticMarkup(
-    <FlowRuntimeStrip
-      flow={createFlow({
-        status: "idle",
-        current_node: null,
-        last_live_at: null,
-        last_error: null,
-      })}
-      username={null}
-      activeFlowRunId={null}
-      runtimeLogsCount={0}
-      onOpenDiagnostics={() => {}}
-    />,
-  );
+test("FlowRuntimeStrip respects canonical overlaid null runtime fields", () => {
+  const markup = renderStrip({
+    flow: createFlow({
+      status: "idle",
+      current_node: null,
+      last_live_at: null,
+      last_error: null,
+    }),
+    activeFlowRunId: null,
+    expanded: true,
+  });
 
   assert.match(markup, /Not running/);
-  assert.match(markup, /No recent live signal/);
-});
-
-test("FlowRuntimeStrip respects canonical overlaid null runtime fields without falling back to persisted values", () => {
-  const markup = renderToStaticMarkup(
-    <FlowRuntimeStrip
-      flow={createFlow({
-        status: "idle",
-        current_node: null,
-        last_live_at: null,
-        last_error: null,
-      })}
-      username={null}
-      activeFlowRunId={null}
-      runtimeLogsCount={0}
-      onOpenDiagnostics={() => {}}
-    />,
-  );
-
-  assert.match(markup, /Not running/);
-  assert.match(markup, /Waiting/);
-  assert.match(markup, /No recent live signal/);
+  assert.doesNotMatch(markup, /Current step/);
+  assert.doesNotMatch(markup, /Account/);
+  assert.doesNotMatch(markup, /Last live/);
+  assert.doesNotMatch(markup, /node=Waiting/);
+  assert.doesNotMatch(markup, /account=unknown/);
   assert.doesNotMatch(markup, />Clip</);
   assert.doesNotMatch(markup, /2026-04-19T10:01:02.345\+07:00/);
 });

@@ -7,7 +7,7 @@ import { deriveCanvasNodeStateMap } from "./canvas/flow-canvas-runtime-state";
 import {
   buildRuntimeLogsPanelFlow,
   buildRuntimeMonitorMetadata,
-  shouldFetchDiagnosticsLogs,
+  shouldFetchRuntimeLogs,
 } from "./flow-detail";
 
 function createFlow(overrides: Partial<FlowContext> = {}): FlowContext {
@@ -165,60 +165,60 @@ test("runtime snapshot overlay keeps canvas helper focused on node-level state o
   assert.equal(nodeStateMap.clip.runtimeLabel, "Creating clips");
 });
 
-test("shouldFetchDiagnosticsLogs is false when diagnostics is closed", () => {
+test("shouldFetchRuntimeLogs is false when runtime panel is closed", () => {
   assert.equal(
-    shouldFetchDiagnosticsLogs({
-      diagnosticsOpen: false,
+    shouldFetchRuntimeLogs({
+      runtimeOpen: false,
       hasFetchedInOpenCycle: false,
     }),
     false,
   );
 });
 
-test("shouldFetchDiagnosticsLogs is true on first open in a cycle when the bucket is missing", () => {
+test("shouldFetchRuntimeLogs is true on first open in a cycle when the bucket is missing", () => {
   assert.equal(
-    shouldFetchDiagnosticsLogs({
-      diagnosticsOpen: true,
+    shouldFetchRuntimeLogs({
+      runtimeOpen: true,
       hasFetchedInOpenCycle: false,
     }),
     true,
   );
 });
 
-test("shouldFetchDiagnosticsLogs is true on first open in a cycle when the bucket is empty", () => {
+test("shouldFetchRuntimeLogs is true on first open in a cycle when the bucket is empty", () => {
   assert.equal(
-    shouldFetchDiagnosticsLogs({
-      diagnosticsOpen: true,
+    shouldFetchRuntimeLogs({
+      runtimeOpen: true,
       hasFetchedInOpenCycle: false,
     }),
     true,
   );
 });
 
-test("shouldFetchDiagnosticsLogs is true on first open in a cycle when the bucket already has logs", () => {
+test("shouldFetchRuntimeLogs is true on first open in a cycle when the bucket already has logs", () => {
   assert.equal(
-    shouldFetchDiagnosticsLogs({
-      diagnosticsOpen: true,
+    shouldFetchRuntimeLogs({
+      runtimeOpen: true,
       hasFetchedInOpenCycle: false,
     }),
     true,
   );
 });
 
-test("shouldFetchDiagnosticsLogs is false once diagnostics already fetched in the same open cycle", () => {
+test("shouldFetchRuntimeLogs is false once logs were fetched in the same open cycle", () => {
   assert.equal(
-    shouldFetchDiagnosticsLogs({
-      diagnosticsOpen: true,
+    shouldFetchRuntimeLogs({
+      runtimeOpen: true,
       hasFetchedInOpenCycle: true,
     }),
     false,
   );
 });
 
-test("shouldFetchDiagnosticsLogs allows close and reopen to fetch again", () => {
+test("shouldFetchRuntimeLogs allows close and reopen to fetch again", () => {
   assert.equal(
-    shouldFetchDiagnosticsLogs({
-      diagnosticsOpen: true,
+    shouldFetchRuntimeLogs({
+      runtimeOpen: true,
       hasFetchedInOpenCycle: false,
     }),
     true,

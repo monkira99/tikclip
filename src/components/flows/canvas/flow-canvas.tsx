@@ -1,11 +1,11 @@
-import { useId, useMemo } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { FlowCanvasEdge } from "@/components/flows/canvas/flow-canvas-edge";
 import {
   FLOW_CANVAS_NODE_H,
   FLOW_CANVAS_NODE_W,
   FLOW_CANVAS_PAD,
 } from "@/components/flows/canvas/flow-canvas-layout";
-import { FlowCanvasNode } from "@/components/flows/canvas/flow-canvas-node";
+import { FlowCanvasNode, type FlowCanvasNodeDetail } from "@/components/flows/canvas/flow-canvas-node";
 import { deriveCanvasNodeStateMap } from "@/components/flows/canvas/flow-canvas-runtime-state";
 import type { FlowEditorPayload, FlowNodeKey, FlowRuntimeSnapshot } from "@/types";
 
@@ -14,10 +14,10 @@ const ROW_Y = 120;
 
 const NODE_SCENE: Array<{ key: FlowNodeKey; x: number; y: number }> = [
   { key: "start", x: 80, y: ROW_Y },
-  { key: "record", x: 360, y: ROW_Y },
-  { key: "clip", x: 660, y: ROW_Y },
-  { key: "caption", x: 940, y: ROW_Y },
-  { key: "upload", x: 1240, y: ROW_Y },
+  { key: "record", x: 400, y: ROW_Y },
+  { key: "clip", x: 720, y: ROW_Y },
+  { key: "caption", x: 1040, y: ROW_Y },
+  { key: "upload", x: 1360, y: ROW_Y },
 ];
 
 function toSvgSpace(x: number, y: number): { x: number; y: number } {
@@ -57,6 +57,68 @@ function summarizeDraft(nodeKey: FlowNodeKey, draft: string): string {
   }
 }
 
+function parseRuntimeTime(value: string | null | undefined): number | null {
+  if (!value) {
+    return null;
+  }
+  const normalized = value.includes("T") ? value : `${value.replace(" ", "T")}+07:00`;
+  const timestamp = Date.parse(normalized);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function formatRuntimeClock(value: string | null | undefined): string {
+  const timestamp = parseRuntimeTime(value);
+  if (timestamp == null) {
+    return "-";
+  }
+  return new Intl.DateTimeFormat("vi-VN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(new Date(timestamp));
+}
+
+function formatCountdown(target: string | null | undefined, nowMs: number): string {
+  const timestamp = parseRuntimeTime(target);
+  if (timestamp == null) {
+    return "-";
+  }
+  const remaining = Math.max(0, Math.ceil((timestamp - nowMs) / 1000));
+  const minutes = Math.floor(remaining / 60);
+  const seconds = remaining % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function buildStartNodeDetailLines(
+  runtimeSnapshot: FlowRuntimeSnapshot | null,
+  nowMs: number,
+): FlowCanvasNodeDetail[] {
+  if (!runtimeSnapshot || runtimeSnapshot.current_node !== "start") {
+    return [];
+  }
+
+  const checkState =
+    runtimeSnapshot.last_check_live == null
+      ? "Waiting"
+      : runtimeSnapshot.last_check_live
+        ? "Live detected"
+        : "Offline";
+  const stateTone: FlowCanvasNodeDetail["tone"] =
+    runtimeSnapshot.last_check_live == null
+      ? "muted"
+      : runtimeSnapshot.last_check_live
+        ? "success"
+        : "default";
+
+  return [
+    { label: "Status", value: checkState, tone: stateTone },
+    { label: "Next poll", value: formatCountdown(runtimeSnapshot.next_poll_at, nowMs), tone: "accent" },
+    { label: "Last check", value: formatRuntimeClock(runtimeSnapshot.last_checked_at), tone: "muted" },
+    { label: "Last live", value: formatRuntimeClock(runtimeSnapshot.last_live_at), tone: runtimeSnapshot.last_live_at ? "success" : "muted" },
+  ];
+}
+
 export type FlowCanvasProps = {
   flow: FlowEditorPayload | null;
   selectedNode: FlowNodeKey | null;
@@ -67,6 +129,19 @@ export type FlowCanvasProps = {
 export function FlowCanvas({ flow, selectedNode, runtimeSnapshot = null, onSelectNode }: FlowCanvasProps) {
   const arrowMarkerId = useId().replace(/:/g, "");
   const markerEndUrl = `url(#${arrowMarkerId})`;
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (runtimeSnapshot?.current_node !== "start" || !runtimeSnapshot.next_poll_at) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [runtimeSnapshot?.current_node, runtimeSnapshot?.next_poll_at]);
 
   const nodeMap = useMemo(() => {
     const map = new Map<FlowNodeKey, FlowEditorPayload["nodes"][number]>();
@@ -113,7 +188,7 @@ export function FlowCanvas({ flow, selectedNode, runtimeSnapshot = null, onSelec
   });
 
   return (
-    <div className="app-panel-subtle flex min-h-[360px] items-center overflow-x-auto rounded-2xl">
+    <div className="app-panel-subtle flex h-full min-h-[360px] items-center overflow-x-auto rounded-2xl">
       <div
         className="relative shrink-0 p-6"
         style={{ width: sceneWidth, minWidth: "100%", height: shellHeight }}
@@ -146,6 +221,7 @@ export function FlowCanvas({ flow, selectedNode, runtimeSnapshot = null, onSelec
           const hasDraft = def ? nodeHasDraftChanges(draft, published) : false;
           const summary = summarizeDraft(key, draft);
           const runtimeState = runtimeStateByNode[key];
+          const details = key === "start" ? buildStartNodeDetailLines(runtimeSnapshot, nowMs) : [];
           return (
             <FlowCanvasNode
               key={key}
@@ -157,6 +233,7 @@ export function FlowCanvas({ flow, selectedNode, runtimeSnapshot = null, onSelec
               visualState={runtimeState.visualState}
               badgeLabel={runtimeState.badgeLabel}
               inlineDetail={runtimeState.inlineDetail}
+              details={details}
               activeMarker={runtimeState.activeMarker}
               onClick={() => onSelectNode(key)}
               style={{

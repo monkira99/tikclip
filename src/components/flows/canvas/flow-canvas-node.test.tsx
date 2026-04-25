@@ -50,7 +50,7 @@ test("FlowCanvasNode renders error detail without changing node content structur
   assert.match(markup, /data-runtime-state="error"/);
 });
 
-test("FlowCanvasNode keeps summary constrained to a two-line clamp", () => {
+test("FlowCanvasNode keeps summary constrained to a five-line clamp", () => {
   const markup = renderToStaticMarkup(
     <FlowCanvasNode
       nodeKey="caption"
@@ -66,6 +66,6 @@ test("FlowCanvasNode keeps summary constrained to a two-line clamp", () => {
     />,
   );
 
-  assert.match(markup, /line-clamp-2/);
+  assert.match(markup, /line-clamp-5/);
   assert.match(markup, /Done/);
 });
