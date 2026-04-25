@@ -34,20 +34,36 @@ export function RecordNodeModal({
   const [form, setForm] = useState<RecordNodeForm>(() => parseRecordNodeDraft(rawDraft));
   const [saving, setSaving] = useState(false);
   const wasOpen = useRef(false);
+  const dirtyRef = useRef(false);
+  const savedDraftRef = useRef(serializeRecordNodeDraft(parseRecordNodeDraft(rawDraft)));
 
   useEffect(() => {
     if (!open) {
       wasOpen.current = false;
+      dirtyRef.current = false;
       return;
     }
     if (!wasOpen.current) {
-      setForm(parseRecordNodeDraft(rawDraft));
+      const nextForm = parseRecordNodeDraft(rawDraft);
+      setForm(nextForm);
+      savedDraftRef.current = serializeRecordNodeDraft(nextForm);
+      dirtyRef.current = false;
       wasOpen.current = true;
     }
   }, [open, rawDraft]);
 
   const flush = useCallback(async () => {
-    await onAutoSave(serializeRecordNodeDraft(form));
+    if (!dirtyRef.current) {
+      return;
+    }
+    const nextDraft = serializeRecordNodeDraft(form);
+    if (nextDraft === savedDraftRef.current) {
+      dirtyRef.current = false;
+      return;
+    }
+    await onAutoSave(nextDraft);
+    savedDraftRef.current = nextDraft;
+    dirtyRef.current = false;
   }, [form, onAutoSave]);
 
   useEffect(() => {
@@ -61,6 +77,7 @@ export function RecordNodeModal({
   }, [flush, open, form]);
 
   const patch = (partial: Partial<RecordNodeForm>) => {
+    dirtyRef.current = true;
     setForm((f) => ({ ...f, ...partial }));
   };
 

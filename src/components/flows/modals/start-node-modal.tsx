@@ -35,20 +35,36 @@ export function StartNodeModal({
   const [form, setForm] = useState<StartNodeForm>(() => parseStartNodeDraft(rawDraft));
   const [saving, setSaving] = useState(false);
   const wasOpen = useRef(false);
+  const dirtyRef = useRef(false);
+  const savedDraftRef = useRef(serializeStartNodeDraft(parseStartNodeDraft(rawDraft)));
 
   useEffect(() => {
     if (!open) {
       wasOpen.current = false;
+      dirtyRef.current = false;
       return;
     }
     if (!wasOpen.current) {
-      setForm(parseStartNodeDraft(rawDraft));
+      const nextForm = parseStartNodeDraft(rawDraft);
+      setForm(nextForm);
+      savedDraftRef.current = serializeStartNodeDraft(nextForm);
+      dirtyRef.current = false;
       wasOpen.current = true;
     }
   }, [open, rawDraft]);
 
   const flush = useCallback(async () => {
-    await onAutoSave(serializeStartNodeDraft(form));
+    if (!dirtyRef.current) {
+      return;
+    }
+    const nextDraft = serializeStartNodeDraft(form);
+    if (nextDraft === savedDraftRef.current) {
+      dirtyRef.current = false;
+      return;
+    }
+    await onAutoSave(nextDraft);
+    savedDraftRef.current = nextDraft;
+    dirtyRef.current = false;
   }, [form, onAutoSave]);
 
   useEffect(() => {
@@ -62,6 +78,7 @@ export function StartNodeModal({
   }, [flush, open, form]);
 
   const patch = (partial: Partial<StartNodeForm>) => {
+    dirtyRef.current = true;
     setForm((f) => ({ ...f, ...partial }));
   };
 

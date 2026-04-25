@@ -35,20 +35,36 @@ export function CaptionNodeModal({
   const [form, setForm] = useState<CaptionNodeForm>(() => parseCaptionNodeDraft(rawDraft));
   const [saving, setSaving] = useState(false);
   const wasOpen = useRef(false);
+  const dirtyRef = useRef(false);
+  const savedDraftRef = useRef(serializeCaptionNodeDraft(parseCaptionNodeDraft(rawDraft)));
 
   useEffect(() => {
     if (!open) {
       wasOpen.current = false;
+      dirtyRef.current = false;
       return;
     }
     if (!wasOpen.current) {
-      setForm(parseCaptionNodeDraft(rawDraft));
+      const nextForm = parseCaptionNodeDraft(rawDraft);
+      setForm(nextForm);
+      savedDraftRef.current = serializeCaptionNodeDraft(nextForm);
+      dirtyRef.current = false;
       wasOpen.current = true;
     }
   }, [open, rawDraft]);
 
   const flush = useCallback(async () => {
-    await onAutoSave(serializeCaptionNodeDraft(form));
+    if (!dirtyRef.current) {
+      return;
+    }
+    const nextDraft = serializeCaptionNodeDraft(form);
+    if (nextDraft === savedDraftRef.current) {
+      dirtyRef.current = false;
+      return;
+    }
+    await onAutoSave(nextDraft);
+    savedDraftRef.current = nextDraft;
+    dirtyRef.current = false;
   }, [form, onAutoSave]);
 
   useEffect(() => {
@@ -62,6 +78,7 @@ export function CaptionNodeModal({
   }, [flush, open, form]);
 
   const patch = (partial: Partial<CaptionNodeForm>) => {
+    dirtyRef.current = true;
     setForm((f) => ({ ...f, ...partial }));
   };
 

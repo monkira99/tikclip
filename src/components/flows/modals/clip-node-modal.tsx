@@ -35,20 +35,36 @@ export function ClipNodeModal({
   const [form, setForm] = useState<ClipNodeForm>(() => parseClipNodeDraft(rawDraft));
   const [saving, setSaving] = useState(false);
   const wasOpen = useRef(false);
+  const dirtyRef = useRef(false);
+  const savedDraftRef = useRef(serializeClipNodeDraft(parseClipNodeDraft(rawDraft)));
 
   useEffect(() => {
     if (!open) {
       wasOpen.current = false;
+      dirtyRef.current = false;
       return;
     }
     if (!wasOpen.current) {
-      setForm(parseClipNodeDraft(rawDraft));
+      const nextForm = parseClipNodeDraft(rawDraft);
+      setForm(nextForm);
+      savedDraftRef.current = serializeClipNodeDraft(nextForm);
+      dirtyRef.current = false;
       wasOpen.current = true;
     }
   }, [open, rawDraft]);
 
   const flush = useCallback(async () => {
-    await onAutoSave(serializeClipNodeDraft(form));
+    if (!dirtyRef.current) {
+      return;
+    }
+    const nextDraft = serializeClipNodeDraft(form);
+    if (nextDraft === savedDraftRef.current) {
+      dirtyRef.current = false;
+      return;
+    }
+    await onAutoSave(nextDraft);
+    savedDraftRef.current = nextDraft;
+    dirtyRef.current = false;
   }, [form, onAutoSave]);
 
   useEffect(() => {
@@ -62,6 +78,7 @@ export function ClipNodeModal({
   }, [flush, open, form]);
 
   const patch = (partial: Partial<ClipNodeForm>) => {
+    dirtyRef.current = true;
     setForm((f) => ({ ...f, ...partial }));
   };
 
