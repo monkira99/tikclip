@@ -6,9 +6,18 @@ import {
   FLOW_CANVAS_PAD,
 } from "@/components/flows/canvas/flow-canvas-layout";
 import { FlowCanvasNode, type FlowCanvasNodeDetail } from "@/components/flows/canvas/flow-canvas-node";
-import { deriveCanvasNodeStateMap } from "@/components/flows/canvas/flow-canvas-runtime-state";
+import {
+  deriveActiveRunId,
+  deriveCanvasNodeStateMap,
+} from "@/components/flows/canvas/flow-canvas-runtime-state";
 import { formatDuration } from "@/lib/format";
-import type { FlowEditorPayload, FlowNodeKey, FlowRuntimeSnapshot, FlowRunRow } from "@/types";
+import type {
+  FlowEditorPayload,
+  FlowNodeKey,
+  FlowNodeRunRow,
+  FlowRuntimeSnapshot,
+  FlowRunRow,
+} from "@/types";
 
 /** Vertical center of the node row inside `sceneHeight` (top margin + NODE_H + bottom margin). */
 const ROW_Y = 120;
@@ -98,6 +107,79 @@ function formatCount(value: number | null | undefined): string {
   return new Intl.NumberFormat("vi-VN").format(value);
 }
 
+function parseJsonObject(raw: string | null | undefined): Record<string, unknown> | null {
+  if (!raw) {
+    return null;
+  }
+  try {
+    const value = JSON.parse(raw) as unknown;
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function nodeRunTimeForSort(nodeRun: FlowNodeRunRow): string {
+  return nodeRun.ended_at ?? nodeRun.started_at ?? "";
+}
+
+function nodeRunDurationSeconds(nodeRun: FlowNodeRunRow): number | null {
+  const startedAt = parseRuntimeTime(nodeRun.started_at);
+  const endedAt = parseRuntimeTime(nodeRun.ended_at);
+  if (startedAt == null || endedAt == null || endedAt < startedAt) {
+    return null;
+  }
+  return Math.floor((endedAt - startedAt) / 1000);
+}
+
+function nodeRunStatusLabel(status: string): string {
+  if (status === "completed") {
+    return "Complete";
+  }
+  if (status === "failed") {
+    return "Failed";
+  }
+  if (status === "cancelled") {
+    return "Cancelled";
+  }
+  if (status === "running") {
+    return "Running";
+  }
+  return status || "-";
+}
+
+function nodeRunStatusTone(status: string): FlowCanvasNodeDetail["tone"] {
+  if (status === "completed") {
+    return "success";
+  }
+  if (status === "failed" || status === "cancelled") {
+    return "default";
+  }
+  if (status === "running") {
+    return "accent";
+  }
+  return "muted";
+}
+
+function latestNodeRun(
+  nodeRuns: FlowNodeRunRow[],
+  flowRunId: number | null,
+  nodeKey: FlowNodeKey,
+): FlowNodeRunRow | null {
+  if (flowRunId == null) {
+    return null;
+  }
+  return (
+    nodeRuns
+      .filter((nodeRun) => nodeRun.flow_run_id === flowRunId && nodeRun.node_key === nodeKey)
+      .slice()
+      .sort((a, b) => nodeRunTimeForSort(b).localeCompare(nodeRunTimeForSort(a)) || b.id - a.id)[0] ??
+    null
+  );
+}
+
 function findActiveRecordRun(
   runs: FlowRunRow[],
   runtimeSnapshot: FlowRuntimeSnapshot | null,
@@ -164,23 +246,75 @@ function buildStartNodeDetailLines(
 
 function buildRecordNodeDetailLines(
   runs: FlowRunRow[],
+  nodeRuns: FlowNodeRunRow[],
   runtimeSnapshot: FlowRuntimeSnapshot | null,
   nowMs: number,
 ): FlowCanvasNodeDetail[] {
   const activeRun = findActiveRecordRun(runs, runtimeSnapshot);
   const isRecording = runtimeSnapshot?.status === "recording" && runtimeSnapshot.current_node === "record";
-  if (!activeRun || !isRecording) {
+  if (activeRun && isRecording) {
+    const startedAtMs = parseRuntimeTime(activeRun.started_at);
+    const elapsedSeconds = startedAtMs == null ? 0 : Math.max(0, Math.floor((nowMs - startedAtMs) / 1000));
+
+    return [
+      { label: "Elapsed", value: startedAtMs == null ? "-" : formatDuration(elapsedSeconds), tone: "accent" },
+      { label: "Viewers", value: formatCount(runtimeSnapshot.active_viewer_count), tone: "success" },
+      { label: "Started", value: formatRuntimeClock(activeRun.started_at), tone: "muted" },
+      { label: "Run", value: `#${activeRun.id}`, tone: "muted" },
+    ];
+  }
+
+  const activeRunId = deriveActiveRunId(runs, runtimeSnapshot);
+  const latest = latestNodeRun(nodeRuns, activeRunId, "record");
+  if (!latest) {
     return [];
   }
 
-  const startedAtMs = parseRuntimeTime(activeRun.started_at);
-  const elapsedSeconds = startedAtMs == null ? 0 : Math.max(0, Math.floor((nowMs - startedAtMs) / 1000));
+  const durationSeconds = nodeRunDurationSeconds(latest);
 
   return [
-    { label: "Elapsed", value: startedAtMs == null ? "-" : formatDuration(elapsedSeconds), tone: "accent" },
-    { label: "Viewers", value: formatCount(runtimeSnapshot.active_viewer_count), tone: "success" },
-    { label: "Started", value: formatRuntimeClock(activeRun.started_at), tone: "muted" },
-    { label: "Run", value: `#${activeRun.id}`, tone: "muted" },
+    { label: "Status", value: nodeRunStatusLabel(latest.status), tone: nodeRunStatusTone(latest.status) },
+    { label: "Duration", value: durationSeconds == null ? "-" : formatDuration(durationSeconds), tone: "accent" },
+    { label: "Ended", value: formatRuntimeClock(latest.ended_at), tone: "muted" },
+    { label: "Run", value: `#${latest.flow_run_id}`, tone: "muted" },
+  ];
+}
+
+function buildClipNodeDetailLines(
+  runs: FlowRunRow[],
+  nodeRuns: FlowNodeRunRow[],
+  runtimeSnapshot: FlowRuntimeSnapshot | null,
+): FlowCanvasNodeDetail[] {
+  const activeRunId = deriveActiveRunId(runs, runtimeSnapshot);
+  const clipRuns = activeRunId == null
+    ? []
+    : nodeRuns.filter((nodeRun) => nodeRun.flow_run_id === activeRunId && nodeRun.node_key === "clip");
+  const latest = latestNodeRun(nodeRuns, activeRunId, "clip");
+  const isProcessingClip = runtimeSnapshot?.status === "processing" && runtimeSnapshot.current_node === "clip";
+
+  if (!latest && !isProcessingClip) {
+    return [];
+  }
+
+  const completedClipRuns = clipRuns.filter((nodeRun) => nodeRun.status === "completed").length;
+  const failedClipRuns = clipRuns.filter((nodeRun) => nodeRun.status === "failed").length;
+  const latestOutput = parseJsonObject(latest?.output_json);
+  const latestClipId = latestOutput?.clip_id;
+  const status = latest?.status ?? (isProcessingClip ? "running" : "");
+
+  return [
+    { label: "Status", value: nodeRunStatusLabel(status), tone: nodeRunStatusTone(status) },
+    { label: "Clips", value: formatCount(completedClipRuns), tone: completedClipRuns > 0 ? "success" : "muted" },
+    {
+      label: failedClipRuns > 0 ? "Failed" : "Last clip",
+      value: failedClipRuns > 0
+        ? formatCount(failedClipRuns)
+        : typeof latestClipId === "number"
+          ? `#${latestClipId}`
+          : "-",
+      tone: failedClipRuns > 0 ? "default" : "muted",
+    },
+    { label: "Updated", value: formatRuntimeClock(latest?.ended_at ?? latest?.started_at), tone: "muted" },
   ];
 }
 
@@ -292,8 +426,10 @@ export function FlowCanvas({ flow, selectedNode, runtimeSnapshot = null, onSelec
             key === "start"
               ? buildStartNodeDetailLines(runtimeSnapshot, nowMs)
               : key === "record"
-                ? buildRecordNodeDetailLines(flow?.runs ?? [], runtimeSnapshot, nowMs)
-                : [];
+                ? buildRecordNodeDetailLines(flow?.runs ?? [], flow?.nodeRuns ?? [], runtimeSnapshot, nowMs)
+                : key === "clip"
+                  ? buildClipNodeDetailLines(flow?.runs ?? [], flow?.nodeRuns ?? [], runtimeSnapshot)
+                  : [];
           return (
             <FlowCanvasNode
               key={key}
