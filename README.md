@@ -10,13 +10,13 @@
 | **Tauri / Rust** (`src-tauri/`) | SQLite, tray, khởi động sidecar, lệnh CRUD accounts/clips/settings |
 | **Sidecar** (`sidecar/`) | FastAPI, health/recording/accounts/clips API, watcher live, worker FFmpeg, processor scene-detect |
 
-Sidecar được spawn tự động khi mở app: **`sidecar/.venv/bin/python3`** nếu có (sau `uv sync`), nếu không thì **`python3` trên PATH**, cùng `PYTHONPATH=sidecar/src` và `-m main`. Cổng HTTP in ra stdout dạng `SIDECAR_PORT=<n>`; UI dùng cổng đó cho REST và WebSocket.
+Sidecar được spawn tự động khi mở app: ưu tiên Python trong **`sidecar/.venv`** (`.venv/bin/python3` trên macOS/Linux, `.venv\Scripts\python.exe` trên Windows), nếu không có thì dùng Python trên `PATH` (`python3`/`python` trên Unix, `python`/`py` trên Windows). Tauri truyền `PYTHONPATH=sidecar/src` và chạy `-m main`. Cổng HTTP in ra stdout dạng `SIDECAR_PORT=<n>`; UI dùng cổng đó cho REST và WebSocket.
 
 ## Yêu cầu hệ thống
 
 - **Node.js** 20+ (khuyến nghị LTS) và npm
 - **Rust** stable + **Cargo** (cài qua [rustup](https://rustup.rs/))
-- **Python** 3.11+ (dùng để tạo `sidecar/.venv`; fallback khi không có venv: **`python3` trên PATH**)
+- **Python** 3.11+ (dùng để tạo `sidecar/.venv`; fallback khi không có venv: Python trên `PATH`)
 - **[uv](https://docs.astral.sh/uv/)** (khuyến nghị) để cài dependency và chạy sidecar/tests
 - **FFmpeg** và **ffprobe** trên `PATH` (ghi stream, probe duration, cắt clip, thumbnail)
 - **OpenCV** (qua gói `scenedetect[opencv]`) cho PySceneDetect khi chạy xử lý cảnh
@@ -29,10 +29,31 @@ brew install node python@3.12 ffmpeg
 # uv: curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
+### Windows
+
+```powershell
+winget install OpenJS.NodeJS.LTS Python.Python.3.12 Rustlang.Rustup Gyan.FFmpeg Astral.UV
+```
+
+### Linux
+
+```bash
+# Debian/Ubuntu
+sudo apt update && sudo apt install -y nodejs npm python3 python3-venv ffmpeg curl build-essential
+# Rust: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+# uv: curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
 ### Kiểm tra nhanh
 
 ```bash
 node -v && npm -v && cargo -V && python3 --version && ffmpeg -version | head -1 && ffprobe -version | head -1
+```
+
+Windows PowerShell:
+
+```powershell
+node -v; npm -v; cargo -V; python --version; ffmpeg -version; ffprobe -version
 ```
 
 ## Cài đặt
@@ -52,7 +73,15 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 ```
 
-**Bắt buộc cho dev ổn định:** chạy `cd sidecar && uv sync` (hoặc `pip install -e ".[dev]"` trong `.venv`) để có thư mục **`sidecar/.venv`**. App Tauri sẽ ưu tiên interpreter này — không phụ thuộc shell đang bật venv. Nếu không có `.venv`, app dùng `python3` hệ thống (phải tự cài đủ dependency sidecar).
+Windows PowerShell:
+
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+```
+
+**Bắt buộc cho dev ổn định:** chạy `cd sidecar && uv sync` (hoặc `pip install -e ".[dev]"` trong `.venv`) để có thư mục **`sidecar/.venv`**. App Tauri sẽ ưu tiên interpreter này — không phụ thuộc shell đang bật venv. Nếu không có `.venv`, app dùng Python hệ thống (phải tự cài đủ dependency sidecar).
 
 ## Chạy ứng dụng (dev)
 
@@ -72,6 +101,14 @@ cd sidecar
 PYTHONPATH=src uv run --extra dev --env-file .env python -m main
 # Không có .env: PYTHONPATH=src uv run --extra dev python -m main
 # Hoặc: PYTHONPATH=src python3 -m main  (sau khi pip install -e ".[dev]")
+```
+
+Windows PowerShell:
+
+```powershell
+cd sidecar
+$env:PYTHONPATH = "src"
+uv run --extra dev --env-file .env python -m main
 ```
 
 Ứng dụng in một dòng `SIDECAR_PORT=...` rồi phục vụ HTTP trên cổng đó.
@@ -98,7 +135,7 @@ Prefix **`TIKCLIP_`** (xem `sidecar/src/config.py`). Một số biến thường
 |------|----------|---------|
 | `TIKCLIP_HOST` | `127.0.0.1` | Bind HTTP |
 | `TIKCLIP_PORT` | `18321` | Cổng ưu tiên (có dải fallback nếu bận) |
-| `TIKCLIP_STORAGE_PATH` | `~/TikTokApp` | Thư mục lưu raw/clips |
+| `TIKCLIP_STORAGE_PATH` | `~/.tikclip` | Thư mục lưu raw/clips |
 | `TIKCLIP_POLL_INTERVAL_SECONDS` | `30` | Chu kỳ watcher kiểm tra live |
 | `TIKCLIP_LOG_LEVEL` | `info` | Mức log cho logger `tikclip.*` (vd. `debug` để trace TikTok) |
 | `TIKCLIP_DEBUG_TIKTOK` | `false` | Nếu `true`: khi không parse được `room_id` từ trang live, log một đoạn HTML rút gọn (không log cookie) |

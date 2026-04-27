@@ -35,8 +35,8 @@ impl SidecarManager {
         }
     }
 
-    /// Starts the sidecar with `python -m main`, cwd = `sidecar/`, `PYTHONPATH=src`.
-    /// Uses `sidecar/.venv/bin/python3` when present (from `uv sync` / `python -m venv`), else `python3` on PATH.
+    /// Starts the sidecar with Python, cwd = `sidecar/`, `PYTHONPATH=src`.
+    /// Uses `sidecar/.venv` when present, else a platform-appropriate Python on PATH.
     /// Returns bound port from first stdout line `SIDECAR_PORT=<n>`.
     /// `tikclip_env` are `TIKCLIP_*` pairs from app DB (override `sidecar/.env`).
     pub fn start(&self, tikclip_env: &[(String, String)]) -> Result<u16, String> {
@@ -189,12 +189,17 @@ fn sidecar_looks_valid(path: &Path) -> bool {
     path.is_dir() && path.join("src").join("main.py").is_file()
 }
 
-/// Prefer `sidecar/.venv` so Tauri does not rely on a global `python3` having uvicorn/FastAPI.
+/// Prefer `sidecar/.venv` so Tauri does not rely on a global Python having uvicorn/FastAPI.
 fn resolve_python_executable(sidecar_dir: &Path) -> PathBuf {
     if let Some(p) = venv_python(sidecar_dir) {
         return p;
     }
-    PathBuf::from("python3")
+    for name in python_path_candidates() {
+        if let Some(p) = find_executable_on_path(name) {
+            return p;
+        }
+    }
+    PathBuf::from(default_python_command())
 }
 
 fn venv_python(sidecar_dir: &Path) -> Option<PathBuf> {
@@ -213,6 +218,57 @@ fn venv_python(sidecar_dir: &Path) -> Option<PathBuf> {
         }
         None
     }
+}
+
+#[cfg(windows)]
+fn python_path_candidates() -> &'static [&'static str] {
+    &["python", "py", "python3"]
+}
+
+#[cfg(not(windows))]
+fn python_path_candidates() -> &'static [&'static str] {
+    &["python3", "python"]
+}
+
+#[cfg(windows)]
+fn default_python_command() -> &'static str {
+    "python"
+}
+
+#[cfg(not(windows))]
+fn default_python_command() -> &'static str {
+    "python3"
+}
+
+fn find_executable_on_path(name: &str) -> Option<PathBuf> {
+    let paths = std::env::var_os("PATH")?;
+    std::env::split_paths(&paths).find_map(|dir| executable_in_dir(&dir, name))
+}
+
+#[cfg(windows)]
+fn executable_in_dir(dir: &Path, name: &str) -> Option<PathBuf> {
+    let name_path = Path::new(name);
+    if name_path.extension().is_some() {
+        let p = dir.join(name);
+        return p.is_file().then_some(p);
+    }
+
+    let pathext = std::env::var_os("PATHEXT")
+        .and_then(|v| v.into_string().ok())
+        .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_string());
+    for ext in pathext.split(';').filter(|ext| !ext.is_empty()) {
+        let p = dir.join(format!("{name}{ext}"));
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+#[cfg(not(windows))]
+fn executable_in_dir(dir: &Path, name: &str) -> Option<PathBuf> {
+    let p = dir.join(name);
+    p.is_file().then_some(p)
 }
 
 fn port_tcp_reachable(port: u16) -> bool {

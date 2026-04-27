@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -12,6 +13,32 @@ import httpx
 from config import settings
 
 logger = logging.getLogger("tikclip.tiktok")
+
+
+def _browser_platform() -> str:
+    if sys.platform == "win32":
+        return '"Windows"'
+    if sys.platform.startswith("linux"):
+        return '"Linux"'
+    return '"macOS"'
+
+
+def _browser_user_agent() -> str:
+    if sys.platform == "win32":
+        return (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        )
+    if sys.platform.startswith("linux"):
+        return (
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        )
+    return (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    )
+
 
 # Browser-like headers aligned with tiktok-live-recorder / real Chrome navigation.
 _TIKTOK_NAV_HEADERS: dict[str, str] = {
@@ -24,16 +51,13 @@ _TIKTOK_NAV_HEADERS: dict[str, str] = {
     "Referer": "https://www.tiktok.com/",
     "Sec-Ch-Ua": '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"',
     "Sec-Ch-Ua-Mobile": "?0",
-    "Sec-Ch-Ua-Platform": '"macOS"',
+    "Sec-Ch-Ua-Platform": _browser_platform(),
     "Sec-Fetch-Dest": "document",
     "Sec-Fetch-Mode": "navigate",
     "Sec-Fetch-Site": "same-origin",
     "Sec-Fetch-User": "?1",
     "Upgrade-Insecure-Requests": "1",
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-    ),
+    "User-Agent": _browser_user_agent(),
 }
 
 _TIKTOK_BINARY_HEADERS: dict[str, str] = {

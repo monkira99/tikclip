@@ -6,6 +6,18 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 use thiserror::Error;
 
+#[cfg(target_os = "windows")]
+const TIKTOK_BROWSER_USER_AGENT: &str =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+#[cfg(target_os = "linux")]
+const TIKTOK_BROWSER_USER_AGENT: &str =
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+const TIKTOK_BROWSER_USER_AGENT: &str =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn normalize_cookie_header(raw: &str) -> Result<String, String> {
     if raw.trim().is_empty() {
@@ -134,9 +146,7 @@ pub fn default_tiktok_headers() -> HeaderMap {
     headers.insert(REFERER, HeaderValue::from_static("https://www.tiktok.com/"));
     headers.insert(
         USER_AGENT,
-        HeaderValue::from_static(
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        ),
+        HeaderValue::from_static(TIKTOK_BROWSER_USER_AGENT),
     );
     headers
 }
@@ -172,6 +182,7 @@ mod tests {
     use super::{
         build_tiktok_reqwest_client, cookie_key_summary, default_tiktok_headers,
         ensure_success_status, normalize_cookie_header, proxy_url_for_reqwest,
+        TIKTOK_BROWSER_USER_AGENT,
     };
     use reqwest::header::{ACCEPT, ORIGIN, REFERER, USER_AGENT};
     use std::time::Duration;
@@ -254,9 +265,7 @@ mod tests {
         );
         assert_eq!(
             headers.get(USER_AGENT).and_then(|v| v.to_str().ok()),
-            Some(
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-            )
+            Some(TIKTOK_BROWSER_USER_AGENT)
         );
     }
 

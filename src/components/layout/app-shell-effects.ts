@@ -246,7 +246,7 @@ export function useNotificationBootstrap(sidecarConnected: boolean): void {
     void hydrateNotificationsFromDb();
   }, []);
 
-  /** macOS / Windows: prompt once when sidecar is up so OS alerts work before the first event. */
+  /** Desktop OSes: prompt once when sidecar is up so OS alerts work before the first event. */
   useEffect(() => {
     if (!sidecarConnected || notifyWarmupDone.current || !isTauri()) {
       return;
