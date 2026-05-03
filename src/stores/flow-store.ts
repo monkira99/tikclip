@@ -423,7 +423,7 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
       ];
       get().applyRuntimeLogs(mergedRows, { flowIds: [flowId] });
     } catch {
-      /* keep last known logs when runtime log hydration races startup or sidecar reconnect */
+      /* keep last known logs when runtime log hydration races startup */
     }
   },
 

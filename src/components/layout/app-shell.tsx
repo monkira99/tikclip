@@ -4,30 +4,24 @@ import {
   useActiveRecordingCountSync,
   useNavigationTargetSync,
   useNotificationBootstrap,
-  useSidecarWsSync,
   useStorageRuntimeEvents,
   useTauriRuntimeEvents,
 } from "@/components/layout/app-shell-effects";
 import { pageComponents, pageMeta, type PageId } from "@/components/layout/app-shell-pages";
-import { useSidecar } from "@/hooks/use-sidecar";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app-store";
 import { Sidebar } from "./sidebar";
 import { TopBar } from "./top-bar";
 
 export function AppShell() {
-  useSidecar();
   const [currentPage, setCurrentPage] = useState<PageId>("dashboard");
-  const sidecarPort = useAppStore((s) => s.sidecarPort);
-  const sidecarConnected = useAppStore((s) => s.sidecarConnected);
   const activeRecordings = useAppStore((s) => s.activeRecordings);
 
   useActiveRecordingCountSync();
   useNavigationTargetSync(setCurrentPage);
-  useNotificationBootstrap(sidecarConnected);
+  useNotificationBootstrap();
   useTauriRuntimeEvents();
   useStorageRuntimeEvents();
-  useSidecarWsSync(sidecarPort);
 
   const meta = pageMeta[currentPage];
   const PageComponent = pageComponents[currentPage];
@@ -42,7 +36,6 @@ export function AppShell() {
       <Sidebar
         currentPage={currentPage}
         onNavigate={setCurrentPage}
-        sidecarConnected={sidecarConnected}
         activeRecordings={activeRecordings}
       />
       <div className="relative flex flex-1 flex-col overflow-hidden">

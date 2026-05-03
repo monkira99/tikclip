@@ -1,4 +1,4 @@
-/** Mirrors `sidecar/src/config.py` defaults when SQLite has no row. */
+/** Runtime defaults used when SQLite has no row. */
 export const DEFAULTS = {
   geminiEmbeddingModel: "gemini-embedding-2-preview",
   geminiEmbeddingDim: "1536",

@@ -40,7 +40,6 @@ import {
   openPathInSystem,
   pickStorageRootFolder,
   resetStorageRootDefault,
-  restartSidecar,
   runStorageCleanupNow,
   setSetting,
   storageRootIsCustom,
@@ -214,7 +213,7 @@ export function SettingsPage() {
         if (aborted()) return;
         setStorageStats(s);
         if (announce) {
-          setMessage("Đã cập nhật số liệu lưu trữ từ sidecar.");
+          setMessage("Đã cập nhật số liệu lưu trữ từ Rust.");
         }
       } catch (e) {
         if (aborted()) return;
@@ -340,11 +339,10 @@ export function SettingsPage() {
         KEY_SUGGEST_IMAGE_EMBED_FOCUS_PROMPT,
         suggestImageEmbedFocusPrompt.trim(),
       );
-      await restartSidecar();
       const fresh = await getAppDataPaths();
       setPaths(fresh);
       setMessage(
-        "Đã lưu. Dịch vụ nền đã khởi động lại để áp dụng cài đặt nhận diện sản phẩm.",
+        "Đã lưu cài đặt nhận diện sản phẩm. Rust sẽ áp dụng cho lần index/auto-tag kế tiếp.",
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");

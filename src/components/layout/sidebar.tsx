@@ -21,7 +21,6 @@ export type SidebarPageId = (typeof navItems)[number]["id"] | "settings";
 interface SidebarProps {
   currentPage: SidebarPageId;
   onNavigate: (page: SidebarPageId) => void;
-  sidecarConnected: boolean;
   activeRecordings: number;
 }
 
@@ -52,7 +51,6 @@ const navButtonIdle =
 export function Sidebar({
   currentPage,
   onNavigate,
-  sidecarConnected,
   activeRecordings,
 }: SidebarProps) {
   return (
@@ -159,64 +157,6 @@ export function Sidebar({
           </div>
         </nav>
 
-        <div className="mt-auto w-full shrink-0 pt-3">
-          {/* Chip stays in a fixed slot (absolute); panel crossfades + height tweens so hover does not pop layout. */}
-          <div className="relative z-0 min-h-10 w-full">
-            <div
-              className={cn(
-                "absolute left-0 top-0 z-10 flex size-10 items-center justify-center rounded-xl border border-white/[0.08] bg-[rgb(16_17_17_/0.55)]",
-                "transition-opacity " + easeStandard,
-                "opacity-100 group-hover:pointer-events-none group-hover:opacity-0 group-focus-within:pointer-events-none group-focus-within:opacity-0",
-              )}
-              title={sidecarConnected ? "Sidecar connected" : "Sidecar disconnected"}
-            >
-              <div
-                className={cn(
-                  "size-2.5 rounded-full shadow-[0_0_8px_currentColor]",
-                  sidecarConnected
-                    ? "bg-[var(--color-success)] text-[var(--color-success)]"
-                    : "bg-[var(--color-primary)] text-[var(--color-primary)]",
-                )}
-              />
-            </div>
-
-            <div
-              className={cn(
-                "relative z-20 grid min-h-0 w-full transition-[grid-template-rows,opacity] " + easeStandard,
-                "pointer-events-none grid-rows-[0fr] opacity-0 group-hover:pointer-events-auto group-hover:grid-rows-[1fr] group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:grid-rows-[1fr] group-focus-within:opacity-100",
-              )}
-            >
-              <div className="min-h-0 overflow-hidden">
-                <div className="app-panel-subtle rounded-2xl p-4 text-xs">
-                  <div className="flex flex-nowrap items-center gap-2">
-                <div
-                  className={cn(
-                    "h-2.5 w-2.5 shrink-0 rounded-full shadow-[0_0_10px_currentColor]",
-                    sidecarConnected
-                      ? "bg-[var(--color-success)] text-[var(--color-success)]"
-                      : "bg-[var(--color-primary)] text-[var(--color-primary)]",
-                  )}
-                />
-                <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
-                  Sidecar
-                </span>
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "ml-auto shrink-0",
-                        sidecarConnected
-                          ? "border-[rgba(95,201,146,0.18)] bg-[rgba(95,201,146,0.12)] text-[var(--color-success)]"
-                          : "border-[rgba(255,99,99,0.18)] bg-[rgba(255,99,99,0.12)] text-[var(--color-primary)]",
-                      )}
-                    >
-                      {sidecarConnected ? "Connected" : "Disconnected"}
-                    </Badge>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
       </aside>
     </div>
   );

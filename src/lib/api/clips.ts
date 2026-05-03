@@ -1,4 +1,4 @@
-import { sidecarJson } from "@/lib/api/sidecar-client";
+import { invoke } from "@tauri-apps/api/core";
 
 export type ClipSuggestImageEvidenceHit = {
   product_id: number;
@@ -101,13 +101,12 @@ export async function suggestProductForClip(body: {
   thumbnail_path?: string | null;
   transcript_text?: string | null;
 }): Promise<ClipSuggestProductResult> {
-  return sidecarJson<ClipSuggestProductResult>("/api/clips/suggest-product", {
-    method: "POST",
-    body: JSON.stringify({
+  return invoke<ClipSuggestProductResult>("suggest_product_for_clip", {
+    input: {
       video_path: body.video_path,
       thumbnail_path: body.thumbnail_path ?? null,
       transcript_text: body.transcript_text ?? null,
-    }),
+    },
   });
 }
 
@@ -122,13 +121,12 @@ export async function generateCaptionForClip(body: {
   transcript_text?: string | null;
   clip_title?: string | null;
 }): Promise<GenerateCaptionResult> {
-  return sidecarJson<GenerateCaptionResult>("/api/captions/generate", {
-    method: "POST",
-    body: JSON.stringify({
+  return invoke<GenerateCaptionResult>("generate_clip_caption", {
+    input: {
       clip_id: body.clip_id,
       username: body.username,
       transcript_text: body.transcript_text ?? null,
       clip_title: body.clip_title ?? null,
-    }),
+    },
   });
 }

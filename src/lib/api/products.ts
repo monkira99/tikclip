@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import { formatInvokeError } from "@/lib/invoke-error";
-import { sidecarJson } from "@/lib/api/sidecar-client";
 import type { CreateProductInput, Product, UpdateProductInput } from "@/types";
 
 export async function listProducts(): Promise<Product[]> {
@@ -60,13 +59,12 @@ export async function fetchProductFromUrl(
   cookiesJson?: string | null,
   options?: { downloadMedia?: boolean },
 ): Promise<FetchProductFromUrlResult> {
-  return sidecarJson<FetchProductFromUrlResult>("/api/products/fetch-from-url", {
-    method: "POST",
-    body: JSON.stringify({
+  return invoke<FetchProductFromUrlResult>("fetch_product_from_url", {
+    input: {
       url,
       cookies_json: cookiesJson ?? null,
       download_media: options?.downloadMedia !== false,
-    }),
+    },
   });
 }
 
@@ -91,9 +89,8 @@ export async function indexProductEmbeddings(
     items: ProductEmbeddingMediaItem[];
   },
 ): Promise<IndexProductEmbeddingsResult> {
-  return sidecarJson<IndexProductEmbeddingsResult>("/api/products/embeddings/index", {
-    method: "POST",
-    body: JSON.stringify({
+  return invoke<IndexProductEmbeddingsResult>("index_product_embeddings", {
+    input: {
       product_id: productId,
       product_name: body.product_name,
       product_description: body.product_description ?? "",
@@ -102,13 +99,12 @@ export async function indexProductEmbeddings(
         path: x.path,
         source_url: x.source_url ?? "",
       })),
-    }),
+    },
   });
 }
 
 export async function deleteProductEmbeddings(productId: number): Promise<void> {
-  await sidecarJson<{ ok: boolean }>("/api/products/embeddings/delete", {
-    method: "POST",
-    body: JSON.stringify({ product_id: productId }),
+  await invoke<{ ok: boolean }>("delete_product_embeddings", {
+    input: { product_id: productId },
   });
 }

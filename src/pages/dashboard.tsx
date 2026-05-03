@@ -10,7 +10,6 @@ import { useFlowStore } from "@/stores/flow-store";
 import { countActiveRecordings, useRecordingStore } from "@/stores/recording-store";
 
 export function DashboardPage() {
-  const sidecarConnected = useAppStore((s) => s.sidecarConnected);
   const dashboardRevision = useAppStore((s) => s.dashboardRevision);
   const recordings = useRecordingStore((s) => s.recordings);
   const flows = useFlowStore((s) => s.flows);
@@ -20,7 +19,7 @@ export function DashboardPage() {
   const clipsRevision = useClipStore((s) => s.clipsRevision);
   const [dashStats, setDashStats] = useState<DashboardStats | null>(null);
   const [storageUsagePct, setStorageUsagePct] = useState<number | null>(null);
-  /** Rust filesystem scan; preferred for Storage card because it does not depend on sidecar. */
+  /** Rust filesystem scan; preferred for Storage card because it reflects local files directly. */
   const [storageTotalBytes, setStorageTotalBytes] = useState<number | null>(null);
 
   const loadDashboardStats = useCallback(async () => {
@@ -49,7 +48,7 @@ export function DashboardPage() {
     }
   }, []);
 
-  /** Refetch stats when sidecar updates recording progress / finish (not only clip_revision). */
+  /** Refetch stats when recording progress / finish changes (not only clip_revision). */
   const recordingsSnapshot = useMemo(
     () =>
       JSON.stringify(
@@ -81,7 +80,6 @@ export function DashboardPage() {
     loadStorageStats,
     clipsRevision,
     dashboardRevision,
-    sidecarConnected,
     recordingsSnapshot,
   ]);
 
@@ -141,11 +139,7 @@ export function DashboardPage() {
             <CardTitle>Active recordings</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {!sidecarConnected ? (
-              <p className="text-sm text-[var(--color-text-muted)]">
-                Sidecar disconnected — connect to see live recording status.
-              </p>
-            ) : activeList.length === 0 ? (
+            {activeList.length === 0 ? (
               <p className="text-sm text-[var(--color-text-muted)]">No active recordings.</p>
             ) : (
               <div className="flex flex-col gap-4">

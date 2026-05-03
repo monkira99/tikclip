@@ -7,5 +7,4 @@ export * from "@/lib/api/paths";
 export * from "@/lib/api/products";
 export * from "@/lib/api/recordings";
 export * from "@/lib/api/settings";
-export * from "@/lib/api/sidecar-client";
 export * from "@/lib/api/storage";

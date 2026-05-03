@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { deleteProduct, deleteProductEmbeddings, getSidecarBaseUrl } from "@/lib/api";
+import { deleteProduct, deleteProductEmbeddings } from "@/lib/api";
 import { formatInvokeError } from "@/lib/invoke-error";
 import { productImageSrc } from "@/lib/product-image";
 import { useProductStore } from "@/stores/product-store";
@@ -41,11 +41,9 @@ export function ProductCard({
     setDeleting(true);
     try {
       await deleteProduct(product.id);
-      if (getSidecarBaseUrl()) {
-        void deleteProductEmbeddings(product.id).catch(() => {
-          /* vector store optional */
-        });
-      }
+      void deleteProductEmbeddings(product.id).catch(() => {
+        /* vector store optional */
+      });
       setConfirmOpen(false);
       void fetchProducts();
     } catch (e) {

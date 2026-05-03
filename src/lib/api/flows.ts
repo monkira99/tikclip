@@ -62,18 +62,18 @@ export async function restartFlowRun(flowId: number): Promise<RestartFlowRunResu
   return invoke<RestartFlowRunResult>("restart_flow_run", { flowId });
 }
 
-export type SidecarFlowRuntimeHint =
+export type FlowRuntimeHint =
   | "clip_ready"
   | "caption_ready";
 
 /** Rust maps `hint` to `flows` / Start-node telemetry (no transition logic in JS). */
-export async function applySidecarFlowRuntimeHint(input: {
+export async function applyFlowRuntimeHint(input: {
   account_id: number;
-  hint: SidecarFlowRuntimeHint;
+  hint: FlowRuntimeHint;
   /** Desktop SQLite `clips.id` for `clip_ready` / `caption_ready` pipeline node runs. */
   clip_id?: number | null;
 }): Promise<void> {
-  await invoke("apply_sidecar_flow_runtime_hint", {
+  await invoke("apply_flow_runtime_hint", {
     input: {
       account_id: input.account_id,
       hint: input.hint,

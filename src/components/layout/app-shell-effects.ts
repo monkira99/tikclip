@@ -9,16 +9,9 @@ import {
 import * as api from "@/lib/api";
 import { hydrateNotificationsFromDb } from "@/lib/notifications-sync";
 import {
-  insertClipFromSidecarWsPayload,
-  insertSpeechSegmentFromWsPayload,
-  syncClipCaptionFromWsPayload,
-} from "@/lib/sidecar-db-sync";
-import {
-  dispatchSidecarNotification,
+  dispatchRuntimeNotification,
   displayRuntimeNotification,
-} from "@/lib/sidecar-notifications";
-import { parseBooleanSetting } from "@/lib/settings-value";
-import { wsClient } from "@/lib/ws";
+} from "@/lib/runtime-notifications";
 import { useAppStore } from "@/stores/app-store";
 import { useClipStore } from "@/stores/clip-store";
 import { useFlowStore } from "@/stores/flow-store";
@@ -28,7 +21,6 @@ import type { PageId } from "./app-shell-pages";
 
 const CAPTION_RETRY_BASE_MS = 250;
 const CAPTION_GENERATE_MAX_ATTEMPTS = 3;
-const CAPTION_SYNC_NOT_FOUND_MAX_ATTEMPTS = 4;
 
 function delayMs(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -68,56 +60,8 @@ function isTransientCaptionGenerationError(err: unknown): boolean {
     message.includes("502") ||
     message.includes("503") ||
     message.includes("504") ||
-    message.includes("sidecar request failed")
+    message.includes("runtime request failed")
   );
-}
-
-function isClipCaptionNotFoundError(err: unknown): boolean {
-  return errorMessage(err).toLowerCase().includes("not found");
-}
-
-function logSidecarDbSyncError(context: string, err: unknown): void {
-  if (import.meta.env.DEV) {
-    console.warn(`[TikClip] ${context}`, err);
-  }
-}
-
-async function maybeAutoTagClipAfterInsert(
-  clipId: number,
-  data: Record<string, unknown>,
-): Promise<void> {
-  try {
-    if (!api.getSidecarBaseUrl()) {
-      return;
-    }
-    const raw = await api.getSetting("auto_tag_clip_product_enabled");
-    if (!parseBooleanSetting(raw, false)) {
-      return;
-    }
-    const videoPath = typeof data.path === "string" ? data.path : "";
-    if (!videoPath) {
-      return;
-    }
-    const thumbnailPath =
-      typeof data.thumbnail_path === "string" && data.thumbnail_path.trim() !== ""
-        ? data.thumbnail_path
-        : null;
-    const transcriptText =
-      typeof data.transcript_text === "string" && data.transcript_text.trim() !== ""
-        ? data.transcript_text
-        : null;
-    const res = await api.suggestProductForClip({
-      video_path: videoPath,
-      thumbnail_path: thumbnailPath,
-      transcript_text: transcriptText,
-    });
-    if (res.product_id != null) {
-      await api.tagClipProduct(clipId, res.product_id);
-      useClipStore.getState().bumpClipsRevision();
-    }
-  } catch {
-    /* sidecar/Gemini optional */
-  }
 }
 
 async function maybeGenerateCaptionAfterInsert(
@@ -125,9 +69,6 @@ async function maybeGenerateCaptionAfterInsert(
   data: Record<string, unknown>,
 ): Promise<void> {
   try {
-    if (!api.getSidecarBaseUrl()) {
-      return;
-    }
     const usernameRaw = data.username;
     const username = typeof usernameRaw === "string" ? usernameRaw.trim() : "";
     if (!username) {
@@ -157,6 +98,18 @@ async function maybeGenerateCaptionAfterInsert(
           transcript_text: transcriptText,
           clip_title: clipTitle,
         });
+        useClipStore.getState().bumpClipsRevision();
+        try {
+          const accountId = parseAccountId(data.account_id);
+          await api.applyFlowRuntimeHint({
+            account_id: accountId ?? 0,
+            hint: "caption_ready",
+            clip_id: clipId,
+          });
+        } catch {
+          /* No matching flow is normal. */
+        }
+        void refreshRuntimeState();
         return;
       } catch (err) {
         if (attempt >= CAPTION_GENERATE_MAX_ATTEMPTS || !isTransientCaptionGenerationError(err)) {
@@ -239,16 +192,16 @@ export function useNavigationTargetSync(setCurrentPage: Dispatch<SetStateAction<
   }, [navigationTarget, setCurrentPage]);
 }
 
-export function useNotificationBootstrap(sidecarConnected: boolean): void {
+export function useNotificationBootstrap(): void {
   const notifyWarmupDone = useRef(false);
 
   useEffect(() => {
     void hydrateNotificationsFromDb();
   }, []);
 
-  /** Desktop OSes: prompt once when sidecar is up so OS alerts work before the first event. */
+  /** Desktop OSes: prompt once so OS alerts work before the first runtime event. */
   useEffect(() => {
-    if (!sidecarConnected || notifyWarmupDone.current || !isTauri()) {
+    if (notifyWarmupDone.current || !isTauri()) {
       return;
     }
     notifyWarmupDone.current = true;
@@ -262,7 +215,7 @@ export function useNotificationBootstrap(sidecarConnected: boolean): void {
         /* ignore */
       }
     })();
-  }, [sidecarConnected]);
+  }, []);
 }
 
 export function useTauriRuntimeEvents(): void {
@@ -330,13 +283,12 @@ export function useTauriRuntimeEvents(): void {
         return;
       }
       const data = event.payload;
-      dispatchSidecarNotification("clip_ready", data);
+      dispatchRuntimeNotification("clip_ready", data);
       useAppStore.getState().bumpDashboardRevision();
       useClipStore.getState().bumpClipsRevision();
       const clipId = parseClipId(data.clip_id);
       if (clipId != null) {
         void maybeGenerateCaptionAfterInsert(clipId, data);
-        void maybeAutoTagClipAfterInsert(clipId, data);
       }
       void refreshRuntimeState();
     }).then((fn) => {
@@ -399,104 +351,4 @@ export function useStorageRuntimeEvents(): void {
       unlistenStorageWarn?.();
     };
   }, []);
-}
-
-export function useSidecarWsSync(sidecarPort: number | null): void {
-  useEffect(() => {
-    if (sidecarPort == null) {
-      wsClient.disconnect();
-      return;
-    }
-
-    const scheduleRuntimeRefresh = () => {
-      void refreshRuntimeState();
-    };
-
-    const unsubClip = wsClient.on("clip_ready", (data) => {
-      dispatchSidecarNotification("clip_ready", data);
-      useAppStore.getState().bumpDashboardRevision();
-      void (async () => {
-        try {
-          const clipId = await insertClipFromSidecarWsPayload(data);
-          useClipStore.getState().bumpClipsRevision();
-          const accountId = parseAccountId(data.account_id);
-          if (accountId != null) {
-            await api.applySidecarFlowRuntimeHint({
-              account_id: accountId,
-              hint: "clip_ready",
-              clip_id: clipId ?? undefined,
-            });
-          }
-          if (clipId != null) {
-            void maybeGenerateCaptionAfterInsert(clipId, data);
-            void maybeAutoTagClipAfterInsert(clipId, data);
-          }
-        } catch (err) {
-          logSidecarDbSyncError("clip_ready → SQLite insert failed", err);
-        } finally {
-          scheduleRuntimeRefresh();
-        }
-      })();
-    });
-
-    const unsubCaptionReady = wsClient.on("caption_ready", (data) => {
-      void (async () => {
-        try {
-          for (let attempt = 1; attempt <= CAPTION_SYNC_NOT_FOUND_MAX_ATTEMPTS; attempt += 1) {
-            try {
-              const updated = await syncClipCaptionFromWsPayload(data);
-              if (updated) {
-                useClipStore.getState().bumpClipsRevision();
-              }
-              return;
-            } catch (err) {
-              const canRetry =
-                attempt < CAPTION_SYNC_NOT_FOUND_MAX_ATTEMPTS && isClipCaptionNotFoundError(err);
-              if (!canRetry) {
-                logSidecarDbSyncError("caption_ready → SQLite update failed", err);
-                return;
-              }
-            }
-            await delayMs(CAPTION_RETRY_BASE_MS * attempt);
-          }
-        } finally {
-          try {
-            const clipId = parseClipId(data.clip_id);
-            const accountId = parseAccountId(data.account_id);
-            if (clipId != null || accountId != null) {
-              await api.applySidecarFlowRuntimeHint({
-                account_id: accountId ?? 0,
-                hint: "caption_ready",
-                clip_id: clipId ?? undefined,
-              });
-            }
-          } catch {
-            /* No matching flow is normal. */
-          }
-          scheduleRuntimeRefresh();
-        }
-      })();
-    });
-
-    const unsubSpeechSeg = wsClient.on("speech_segment_ready", (data) => {
-      void (async () => {
-        try {
-          await insertSpeechSegmentFromWsPayload(data);
-        } catch (err) {
-          logSidecarDbSyncError("speech_segment_ready → SQLite insert failed", err);
-        } finally {
-          scheduleRuntimeRefresh();
-        }
-      })();
-    });
-
-    wsClient.connect(sidecarPort);
-
-    return () => {
-      unsubClip();
-      unsubCaptionReady();
-      unsubSpeechSeg();
-      wsClient.disconnect();
-    };
-  }, [sidecarPort]);
 }

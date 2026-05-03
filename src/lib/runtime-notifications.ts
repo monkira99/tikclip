@@ -34,7 +34,7 @@ function pickNotificationId(data: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
-function formatSidecarMessage(
+function formatRuntimeMessage(
   eventType: string,
   data: Record<string, unknown>,
 ): { kind: NotificationKind; title: string; body: string } {
@@ -152,12 +152,12 @@ async function trySendOsNotification(title: string, body: string): Promise<void>
 /**
  * Persist to SQLite, in-app store + toast, and OS notification (Tauri) after permission check.
  */
-export function dispatchSidecarNotification(
+export function dispatchRuntimeNotification(
   eventType: string,
   data: Record<string, unknown>,
 ): void {
   void (async () => {
-    const { kind, title, body } = formatSidecarMessage(eventType, data);
+    const { kind, title, body } = formatRuntimeMessage(eventType, data);
     const accountId = pickAccountId(data);
     let idStr: string | undefined;
     const createdAt = Date.now();
@@ -206,7 +206,7 @@ export function displayRuntimeNotification(
   data: Record<string, unknown>,
 ): void {
   void (async () => {
-    const { kind, title, body } = formatSidecarMessage(eventType, data);
+    const { kind, title, body } = formatRuntimeMessage(eventType, data);
     useNotificationStore.getState().addNotification({
       kind,
       title,

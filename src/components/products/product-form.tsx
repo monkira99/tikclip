@@ -15,7 +15,6 @@ import {
   createProduct,
   fetchProductFromUrl,
   type FetchProductFromUrlResult,
-  getSidecarBaseUrl,
   indexProductEmbeddings,
   updateProduct,
 } from "@/lib/api";
@@ -217,7 +216,7 @@ export function ProductForm({
       } else {
         savedId = await createProduct({ name, ...base });
       }
-      if (parsedMedia?.length && getSidecarBaseUrl()) {
+      if (parsedMedia?.length) {
         const items = parsedMedia
           .filter((row): row is Record<string, unknown> => row !== null && typeof row === "object")
           .filter(
@@ -236,7 +235,7 @@ export function ProductForm({
             product_description: form.description,
             items,
           }).catch(() => {
-            /* optional: indexing disabled or sidecar error */
+            /* optional: indexing disabled or Gemini/vector error */
           });
         }
       }
