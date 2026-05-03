@@ -72,19 +72,43 @@ impl LiveRuntimeManager {
     pub fn poll_flow_once(&self, conn: &Connection, flow_id: i64) -> Result<(), String> {
         let config = load_flow_runtime_config(conn, flow_id)?;
         if !config.enabled {
+            log::info!(
+                "live runtime poll skipped flow_id={} reason=disabled",
+                flow_id
+            );
             return Ok(());
         }
 
         let Some(token) = self.poll_iteration_token(flow_id)? else {
+            log::info!(
+                "live runtime poll skipped flow_id={} reason=no_active_task",
+                flow_id
+            );
             return Ok(());
         };
         if self.is_poll_iteration_stale(flow_id, &token)? {
+            log::info!(
+                "live runtime poll skipped flow_id={} reason=stale_task",
+                flow_id
+            );
             return Ok(());
         }
 
+        log::info!(
+            "live runtime poll started flow_id={} username={} interval_seconds={}",
+            flow_id,
+            config.username,
+            config.poll_interval_seconds
+        );
         let live_status = match self.resolve_live_status_for_poll(&config) {
             Ok(status) => status,
             Err(err) => {
+                log::warn!(
+                    "live runtime poll failed flow_id={} username={} error={}",
+                    flow_id,
+                    config.username,
+                    err
+                );
                 self.mark_poll_retry(flow_id, config.poll_interval_seconds)?;
                 let _ = self.log_runtime_event(
                     flow_id,
@@ -115,13 +139,30 @@ impl LiveRuntimeManager {
             }
         }
         if self.is_poll_iteration_stale(flow_id, &token)? {
+            log::info!(
+                "live runtime poll result ignored flow_id={} reason=stale_after_resolve",
+                flow_id
+            );
             return Ok(());
         }
 
         if let Some(status) = live_status {
+            log::info!(
+                "live runtime poll result flow_id={} username={} live=true room_id={} viewer_count={:?} has_stream_url={}",
+                flow_id,
+                config.username,
+                status.room_id,
+                status.viewer_count,
+                status.stream_url.is_some()
+            );
             self.mark_poll_checked(flow_id, true, config.poll_interval_seconds)?;
             let _ = self.handle_live_detected(conn, flow_id, &status)?;
         } else {
+            log::info!(
+                "live runtime poll result flow_id={} username={} live=false",
+                flow_id,
+                config.username
+            );
             self.mark_poll_checked(flow_id, false, config.poll_interval_seconds)?;
             self.mark_source_offline(flow_id)?;
         }

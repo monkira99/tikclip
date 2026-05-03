@@ -111,7 +111,16 @@ pub fn index_product_embeddings_with_db_lock(
     storage_root: &Path,
     input: &IndexProductEmbeddingsInput,
 ) -> Result<IndexProductEmbeddingsResponse, String> {
+    log::info!(
+        "product embedding index requested product_id={} media_items={}",
+        input.product_id,
+        input.items.len()
+    );
     if input.product_id < 1 {
+        log::warn!(
+            "product embedding index rejected invalid product_id={}",
+            input.product_id
+        );
         return Err("product_id must be positive".to_string());
     }
     let settings = {
@@ -119,6 +128,10 @@ pub fn index_product_embeddings_with_db_lock(
         ProductVectorSettings::from_conn(&conn)?
     };
     if !settings.enabled {
+        log::info!(
+            "product embedding index skipped product_id={} reason=disabled",
+            input.product_id
+        );
         return Ok(IndexProductEmbeddingsResponse {
             skipped: i64::try_from(input.items.len()).unwrap_or(i64::MAX),
             message: Some("Product vector indexing is disabled in settings".to_string()),
@@ -126,6 +139,10 @@ pub fn index_product_embeddings_with_db_lock(
         });
     }
     if settings.api_key.is_none() {
+        log::info!(
+            "product embedding index skipped product_id={} reason=missing_gemini_api_key",
+            input.product_id
+        );
         return Ok(IndexProductEmbeddingsResponse {
             skipped: i64::try_from(input.items.len()).unwrap_or(i64::MAX),
             message: Some("Gemini API key is not configured".to_string()),
@@ -137,6 +154,14 @@ pub fn index_product_embeddings_with_db_lock(
     let conn = db.lock().map_err(|e| e.to_string())?;
     delete_media_docs_for_product(&conn, input.product_id)?;
     commit_index_rows(&conn, input.product_id, &rows)?;
+    log::info!(
+        "product embedding index completed product_id={} indexed={} skipped={} errors={} rows_committed={}",
+        input.product_id,
+        response.indexed,
+        response.skipped,
+        response.errors.len(),
+        rows.len()
+    );
     Ok(response)
 }
 
@@ -157,19 +182,43 @@ fn build_index_rows(
     let product_description = input.product_description.trim();
 
     for (index, item) in input.items.iter().enumerate() {
+        log::info!(
+            "product embedding media item started product_id={} index={} kind={}",
+            input.product_id,
+            index,
+            item.kind
+        );
         if item.kind != "image" && item.kind != "video" {
+            log::info!(
+                "product embedding media item skipped product_id={} index={} reason=unsupported_kind kind={}",
+                input.product_id,
+                index,
+                item.kind
+            );
             skipped += 1;
             continue;
         }
         let path = match resolve_storage_media_path(storage_root, item.path.as_str()) {
             Ok(path) => path,
             Err(err) => {
+                log::warn!(
+                    "product embedding media item skipped product_id={} index={} reason=path_error error={}",
+                    input.product_id,
+                    index,
+                    err
+                );
                 errors.push(format!("{}: {err}", item.path));
                 skipped += 1;
                 continue;
             }
         };
         if path.extension().is_some_and(|ext| ext == "m3u8") {
+            log::info!(
+                "product embedding media item skipped product_id={} index={} reason=m3u8 path={}",
+                input.product_id,
+                index,
+                path.display()
+            );
             skipped += 1;
             continue;
         }
@@ -183,12 +232,26 @@ fn build_index_rows(
         ) {
             Ok(vector) => vector,
             Err(err) => {
+                log::warn!(
+                    "product embedding media item failed product_id={} index={} path={} error={}",
+                    input.product_id,
+                    index,
+                    path.display(),
+                    err
+                );
                 errors.push(format!("{}: {err}", item.path));
                 skipped += 1;
                 continue;
             }
         };
         if vector.len() != settings.dim {
+            log::warn!(
+                "product embedding media item skipped product_id={} index={} reason=dimension_mismatch got={} expected={}",
+                input.product_id,
+                index,
+                vector.len(),
+                settings.dim
+            );
             errors.push(format!(
                 "{}: embedding length {} != configured {}",
                 item.path,
@@ -212,9 +275,22 @@ fn build_index_rows(
             vector,
         });
         indexed += 1;
+        log::info!(
+            "product embedding media item indexed product_id={} index={} kind={} dim={}",
+            input.product_id,
+            index,
+            item.kind,
+            settings.dim
+        );
     }
 
     if !product_name.is_empty() || !product_description.is_empty() {
+        log::info!(
+            "product text embedding started product_id={} name_present={} description_present={}",
+            input.product_id,
+            !product_name.is_empty(),
+            !product_description.is_empty()
+        );
         match build_product_text_row(
             api_key,
             settings,
@@ -225,9 +301,20 @@ fn build_index_rows(
             Ok(Some(row)) => {
                 rows.push(row);
                 indexed += 1;
+                log::info!(
+                    "product text embedding indexed product_id={}",
+                    input.product_id
+                );
             }
             Ok(None) => {}
-            Err(err) => errors.push(err),
+            Err(err) => {
+                log::warn!(
+                    "product text embedding failed product_id={} error={}",
+                    input.product_id,
+                    err
+                );
+                errors.push(err);
+            }
         }
     }
 
@@ -246,11 +333,17 @@ pub fn delete_product_embeddings(
     conn: &Connection,
     input: &DeleteProductEmbeddingsInput,
 ) -> Result<DeleteProductEmbeddingsResponse, String> {
-    conn.execute(
-        "DELETE FROM product_embedding_vectors WHERE product_id = ?1",
-        [input.product_id],
-    )
-    .map_err(|e| e.to_string())?;
+    let deleted = conn
+        .execute(
+            "DELETE FROM product_embedding_vectors WHERE product_id = ?1",
+            [input.product_id],
+        )
+        .map_err(|e| e.to_string())?;
+    log::info!(
+        "product embeddings deleted product_id={} rows={}",
+        input.product_id,
+        deleted
+    );
     Ok(DeleteProductEmbeddingsResponse { ok: true })
 }
 
@@ -260,6 +353,11 @@ pub fn search_by_text(
     top_k: i64,
 ) -> Result<Vec<ProductEmbeddingSearchHit>, String> {
     let settings = require_search_settings(conn)?;
+    log::info!(
+        "product embedding text search started top_k={} query_chars={}",
+        top_k,
+        query.chars().count()
+    );
     let vector = embed_text(
         settings.api_key.as_deref().unwrap_or(""),
         &settings,
@@ -268,7 +366,12 @@ pub fn search_by_text(
         None,
     )?;
     let docs = load_all_vectors(conn, Some("text"), 100_000)?;
-    Ok(top_dense_hits(&vector, docs, top_k, ScoreMode::Similarity))
+    let hits = top_dense_hits(&vector, docs, top_k, ScoreMode::Similarity);
+    log::info!(
+        "product embedding text search completed hits={}",
+        hits.len()
+    );
+    Ok(hits)
 }
 
 pub fn search_by_text_with_db_lock(
@@ -289,7 +392,14 @@ pub fn search_by_text_with_db_lock(
         "query",
         None,
     )?;
-    Ok(top_dense_hits(&vector, docs, top_k, ScoreMode::Similarity))
+    let docs_len = docs.len();
+    let hits = top_dense_hits(&vector, docs, top_k, ScoreMode::Similarity);
+    log::info!(
+        "product embedding text search completed hits={} docs={}",
+        hits.len(),
+        docs_len
+    );
+    Ok(hits)
 }
 
 pub fn search_by_media_path(
@@ -302,6 +412,12 @@ pub fn search_by_media_path(
 ) -> Result<Vec<ProductEmbeddingSearchHit>, String> {
     let settings = require_search_settings(conn)?;
     let fs_path = resolve_storage_media_path(storage_root, media_path)?;
+    log::info!(
+        "product embedding media search started kind={} top_k={} path={}",
+        kind,
+        top_k,
+        fs_path.display()
+    );
     let vector = embed_file(
         settings.api_key.as_deref().unwrap_or(""),
         &settings,
@@ -310,7 +426,12 @@ pub fn search_by_media_path(
         companion_text,
     )?;
     let docs = load_media_vectors(conn, 100_000)?;
-    Ok(top_dense_hits(&vector, docs, top_k, ScoreMode::Distance))
+    let hits = top_dense_hits(&vector, docs, top_k, ScoreMode::Distance);
+    log::info!(
+        "product embedding media search completed hits={}",
+        hits.len()
+    );
+    Ok(hits)
 }
 
 pub fn search_by_media_path_with_db_lock(
@@ -322,6 +443,12 @@ pub fn search_by_media_path_with_db_lock(
     companion_text: Option<&str>,
 ) -> Result<Vec<ProductEmbeddingSearchHit>, String> {
     let fs_path = resolve_storage_media_path(storage_root, media_path)?;
+    log::info!(
+        "product embedding media search started kind={} top_k={} path={}",
+        kind,
+        top_k,
+        fs_path.display()
+    );
     let (settings, docs) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let settings = require_search_settings(&conn)?;
@@ -335,7 +462,14 @@ pub fn search_by_media_path_with_db_lock(
         kind,
         companion_text,
     )?;
-    Ok(top_dense_hits(&vector, docs, top_k, ScoreMode::Distance))
+    let docs_len = docs.len();
+    let hits = top_dense_hits(&vector, docs, top_k, ScoreMode::Distance);
+    log::info!(
+        "product embedding media search completed hits={} docs={}",
+        hits.len(),
+        docs_len
+    );
+    Ok(hits)
 }
 
 fn require_search_settings(conn: &Connection) -> Result<ProductVectorSettings, String> {

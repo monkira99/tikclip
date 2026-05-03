@@ -88,8 +88,8 @@ fn is_sensitive_context_key(key: &str) -> bool {
         || normalized.contains("authorization")
         || normalized.contains("secret")
         || normalized.contains("password")
-        || normalized.contains("stream_url")
-        || normalized.contains("proxy_url")
+        || normalized == "stream_url"
+        || normalized == "proxy_url"
 }
 
 fn redact_sensitive_context(value: &Value) -> Value {
@@ -255,6 +255,7 @@ mod tests {
         let formatted = super::format_terminal_context(&json!({
             "username": "shop_abc",
             "stream_url": "https://example.com/live.flv",
+            "has_stream_url": true,
             "cookies_json": "very-secret",
             "token": "abc123",
             "nested": {
@@ -265,6 +266,7 @@ mod tests {
 
         assert!(formatted.contains("shop_abc"));
         assert!(formatted.contains("\"stream_url\":\"[redacted]\""));
+        assert!(formatted.contains("\"has_stream_url\":true"));
         assert!(formatted.contains("\"cookies_json\":\"[redacted]\""));
         assert!(formatted.contains("\"token\":\"[redacted]\""));
         assert!(formatted.contains("\"authorization\":\"[redacted]\""));
@@ -287,6 +289,7 @@ mod tests {
             json!({
                 "username": "shop_abc",
                 "stream_url": "https://example.com/live.flv",
+                "has_stream_url": true,
                 "cookies_json": "very-secret",
                 "nested": {
                     "authorization": "Bearer secret",
@@ -297,6 +300,7 @@ mod tests {
 
         assert_eq!(entry.context["username"], json!("shop_abc"));
         assert_eq!(entry.context["stream_url"], json!("[redacted]"));
+        assert_eq!(entry.context["has_stream_url"], json!(true));
         assert_eq!(entry.context["cookies_json"], json!("[redacted]"));
         assert_eq!(
             entry.context["nested"]["authorization"],

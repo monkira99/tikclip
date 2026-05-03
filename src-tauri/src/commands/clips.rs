@@ -135,10 +135,28 @@ pub fn generate_clip_caption(
     state: State<'_, AppState>,
     input: GenerateClipCaptionInput,
 ) -> Result<GenerateClipCaptionOutput, String> {
+    log::info!(
+        "command generate_clip_caption invoked clip_id={} username_present={} transcript_present={} title_present={}",
+        input.clip_id,
+        !input.username.trim().is_empty(),
+        input
+            .transcript_text
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty()),
+        input
+            .clip_title
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+    );
     if input.clip_id <= 0 {
+        log::warn!(
+            "command generate_clip_caption rejected invalid clip_id={}",
+            input.clip_id
+        );
         return Err("clip_id must be positive".to_string());
     }
     if input.username.trim().is_empty() {
+        log::warn!("command generate_clip_caption rejected reason=username_required");
         return Err("username is required".to_string());
     }
 
@@ -157,6 +175,11 @@ pub fn generate_clip_caption(
         None,
     )?;
 
+    log::info!(
+        "command generate_clip_caption completed clip_id={} caption_chars={}",
+        input.clip_id,
+        caption_text.chars().count()
+    );
     Ok(GenerateClipCaptionOutput {
         clip_id: input.clip_id,
         caption_text,
@@ -168,11 +191,30 @@ pub fn suggest_product_for_clip(
     state: State<'_, AppState>,
     input: SuggestProductForClipInput,
 ) -> Result<ClipSuggestProductResponse, String> {
-    product_suggest::suggest_product_for_clip_with_db_lock(
+    log::info!(
+        "command suggest_product_for_clip invoked video_path_present={} thumbnail_present={} transcript_present={}",
+        !input.video_path.trim().is_empty(),
+        input
+            .thumbnail_path
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty()),
+        input
+            .transcript_text
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+    );
+    let result = product_suggest::suggest_product_for_clip_with_db_lock(
         &state.db,
         state.storage_path.as_path(),
         &input,
-    )
+    )?;
+    log::info!(
+        "command suggest_product_for_clip completed matched={} product_id={:?} skipped_reason={:?}",
+        result.matched,
+        result.product_id,
+        result.skipped_reason
+    );
+    Ok(result)
 }
 
 #[derive(Debug, Deserialize)]

@@ -69,7 +69,22 @@ pub fn process_recording_clips(
     input: &ClipProcessingInput,
     config: &ClipProcessingConfig,
 ) -> Result<ClipProcessingResult, String> {
+    log::info!(
+        "clip processing started external_recording_id={} account_id={} source={} speech_segments={} min={} max={} scene_threshold={}",
+        input.external_recording_id,
+        input.account_id,
+        input.source_path.display(),
+        input.speech_segments.len(),
+        config.clip_min_duration,
+        config.clip_max_duration,
+        config.scene_threshold
+    );
     if !input.source_path.is_file() {
+        log::warn!(
+            "clip processing failed external_recording_id={} reason=source_missing path={}",
+            input.external_recording_id,
+            input.source_path.display()
+        );
         return Err(format!(
             "Source file not found: {}",
             input.source_path.display()
@@ -77,9 +92,28 @@ pub fn process_recording_clips(
     }
 
     let total_duration = probe_duration_seconds(&input.source_path)?;
+    log::info!(
+        "clip processing probed duration external_recording_id={} duration_sec={:.3}",
+        input.external_recording_id,
+        total_duration
+    );
     let scenes = detect_scenes(&input.source_path, config.scene_threshold, total_duration)?;
+    log::info!(
+        "clip processing detected scenes external_recording_id={} scenes={}",
+        input.external_recording_id,
+        scenes.len()
+    );
     let grouped = group_scenes_with_speech(&scenes, &input.speech_segments, total_duration, config);
+    log::info!(
+        "clip processing grouped clip ranges external_recording_id={} groups={}",
+        input.external_recording_id,
+        grouped.len()
+    );
     if grouped.is_empty() {
+        log::info!(
+            "clip processing completed external_recording_id={} clips=0 reason=no_groups",
+            input.external_recording_id
+        );
         return Ok(ClipProcessingResult { clips: Vec::new() });
     }
 
@@ -96,11 +130,26 @@ pub fn process_recording_clips(
     for (offset, (start_sec, end_sec)) in grouped.into_iter().enumerate() {
         let duration_sec = (end_sec - start_sec).max(0.0);
         if duration_sec <= 0.0 {
+            log::info!(
+                "clip processing skipped empty range external_recording_id={} offset={} start={:.3} end={:.3}",
+                input.external_recording_id,
+                offset,
+                start_sec,
+                end_sec
+            );
             continue;
         }
         let clip_index = start_idx + i64::try_from(offset).map_err(|e| e.to_string())?;
         let clip_path = out_dir.join(format!("clip_{clip_index:03}.mp4"));
         let thumbnail_path = clip_path.with_extension("jpg");
+        log::info!(
+            "clip processing extracting clip external_recording_id={} clip_index={} start={:.3} duration={:.3} path={}",
+            input.external_recording_id,
+            clip_index,
+            start_sec,
+            duration_sec,
+            clip_path.display()
+        );
         extract_clip(&input.source_path, &clip_path, start_sec, duration_sec)?;
         extract_thumbnail(&clip_path, &thumbnail_path, duration_sec)?;
 
@@ -119,6 +168,13 @@ pub fn process_recording_clips(
             },
         )?;
         append_pipeline_hint_node_run(conn, "clip_ready", clip_id)?;
+        log::info!(
+            "clip processing persisted clip external_recording_id={} clip_id={} clip_index={} thumbnail={}",
+            input.external_recording_id,
+            clip_id,
+            clip_index,
+            thumbnail_path.display()
+        );
 
         if let Err(err) = maybe_auto_tag_clip(
             conn,
@@ -130,7 +186,7 @@ pub fn process_recording_clips(
                 transcript_text: transcript_text.clone(),
             },
         ) {
-            log::debug!("optional clip auto-tag failed for clip {clip_id}: {err}");
+            log::warn!("optional clip auto-tag failed for clip {clip_id}: {err}");
         }
 
         let payload = RustClipReadyPayload {
@@ -149,10 +205,20 @@ pub fn process_recording_clips(
         if let Some(app) = app_handle {
             app.emit("rust-clip-ready", payload.clone())
                 .map_err(|e| e.to_string())?;
+            log::info!(
+                "clip processing emitted rust-clip-ready external_recording_id={} clip_id={}",
+                input.external_recording_id,
+                clip_id
+            );
         }
         clips.push(payload);
     }
 
+    log::info!(
+        "clip processing completed external_recording_id={} clips={}",
+        input.external_recording_id,
+        clips.len()
+    );
     Ok(ClipProcessingResult { clips })
 }
 

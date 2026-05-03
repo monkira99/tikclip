@@ -246,23 +246,44 @@ fn suggest_product_for_clip_inner(
 ) -> Result<ClipSuggestProductResponse, String> {
     let config = search.config()?;
     let mut response = config.base_response();
+    log::info!(
+        "clip product suggest started video_path_present={} thumbnail_present={} transcript_present={} frame_count={} weights=({:.2},{:.2})",
+        !input.video_path.trim().is_empty(),
+        input.thumbnail_path
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty()),
+        input
+            .transcript_text
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty()),
+        config.frame_count,
+        config.weight_image,
+        config.weight_text
+    );
 
     if !config.auto_tag_enabled {
         response.skipped_reason = Some("auto_tag_clip_product_enabled is off".to_string());
+        log::info!("clip product suggest skipped reason=auto_tag_disabled");
         return Ok(response);
     }
     if !config.product_vector_enabled {
         response.skipped_reason = Some("product_vector_enabled is off".to_string());
+        log::info!("clip product suggest skipped reason=product_vector_disabled");
         return Ok(response);
     }
     if !config.gemini_api_key_present {
         response.skipped_reason = Some("Gemini API key is not configured".to_string());
+        log::info!("clip product suggest skipped reason=missing_gemini_api_key");
         return Ok(response);
     }
 
     let video = match resolve_storage_media_path(storage_root, input.video_path.as_str()) {
         Ok(path) => path,
         Err(err) => {
+            log::warn!(
+                "clip product suggest skipped reason=video_path_error error={}",
+                err
+            );
             response.skipped_reason = Some(err);
             return Ok(response);
         }
@@ -271,6 +292,10 @@ fn suggest_product_for_clip_inner(
     response.video_relative_path = Some(video_rel.clone());
     if !video.is_file() {
         response.skipped_reason = Some("clip video file not found".to_string());
+        log::warn!(
+            "clip product suggest skipped reason=video_file_not_found path={}",
+            video.display()
+        );
         return Ok(response);
     }
 
@@ -287,6 +312,7 @@ fn suggest_product_for_clip_inner(
             "suggest_weight_image and suggest_weight_text are both zero (nothing to score)"
                 .to_string(),
         );
+        log::info!("clip product suggest skipped reason=zero_weights");
         return Ok(response);
     }
 
@@ -322,6 +348,13 @@ fn suggest_product_for_clip_inner(
             extracted = extract_frames_evenly(&video, config.frame_count, &dir)?;
             frame_paths.extend(extracted.iter().cloned());
             work_dir = Some(dir);
+            log::info!(
+                "clip product suggest frames prepared video={} thumbnail_used={} extracted={} total_frames={}",
+                video_rel,
+                thumbnail_used,
+                extracted.len(),
+                frame_paths.len()
+            );
         }
 
         response.thumbnail_used = thumbnail_used;
@@ -343,6 +376,11 @@ fn suggest_product_for_clip_inner(
         if weight_text > 0.0 && !transcript.is_empty() {
             text_hits = search.search_by_text(transcript, 5).unwrap_or_default();
             response.text_search_used = !text_hits.is_empty();
+            log::info!(
+                "clip product suggest transcript search completed transcript_chars={} hits={}",
+                transcript.chars().count(),
+                text_hits.len()
+            );
             response.text_search_hits = text_hits
                 .iter()
                 .map(|hit| ClipSuggestTextHit {
@@ -358,6 +396,7 @@ fn suggest_product_for_clip_inner(
 
         if weight_image > 0.0 && frame_paths.is_empty() {
             response.skipped_reason = Some("could not extract any frames".to_string());
+            log::warn!("clip product suggest skipped reason=no_frames");
             response.product_ranks = build_rankings(
                 response.frame_rows.as_slice(),
                 text_hits.as_slice(),
@@ -384,6 +423,12 @@ fn suggest_product_for_clip_inner(
                 companion_text,
             ) {
                 Ok(hits) if hits.is_empty() => {
+                    log::info!(
+                        "clip product suggest frame no_hit index={} source={} path={}",
+                        index,
+                        source,
+                        rel
+                    );
                     response.frame_rows.push(ClipSuggestFrameRow {
                         index: i64::try_from(index).unwrap_or(i64::MAX),
                         source: source.to_string(),
@@ -395,6 +440,13 @@ fn suggest_product_for_clip_inner(
                 Ok(hits) => {
                     response.frames_searched += 1;
                     let top = &hits[0];
+                    log::info!(
+                        "clip product suggest frame hit index={} source={} top_product_id={} top_score={:.4}",
+                        index,
+                        source,
+                        top.product_id,
+                        top.score
+                    );
                     let evidence = hits
                         .iter()
                         .take(3)
@@ -425,6 +477,12 @@ fn suggest_product_for_clip_inner(
                     });
                 }
                 Err(err) => {
+                    log::warn!(
+                        "clip product suggest frame search failed index={} source={} error={}",
+                        index,
+                        source,
+                        err
+                    );
                     response.frame_rows.push(ClipSuggestFrameRow {
                         index: i64::try_from(index).unwrap_or(i64::MAX),
                         source: source.to_string(),
@@ -449,6 +507,7 @@ fn suggest_product_for_clip_inner(
 
         if response.product_ranks.is_empty() {
             response.skipped_reason = Some("no vector hits from frames or transcript".to_string());
+            log::info!("clip product suggest skipped reason=no_vector_hits");
             return Ok(response);
         }
 
@@ -461,6 +520,12 @@ fn suggest_product_for_clip_inner(
             response.candidate_product_id = Some(winner.product_id);
             response.candidate_product_name = winner.product_name;
             response.candidate_score = Some(winner.final_score);
+            log::info!(
+                "clip product suggest rejected product_id={} final_score={:.4} min_fused_score={:.4}",
+                winner.product_id,
+                winner.final_score,
+                config.min_fused_score
+            );
             return Ok(response);
         }
         if weight_image > 0.0 {
@@ -473,6 +538,12 @@ fn suggest_product_for_clip_inner(
                     response.candidate_product_id = Some(winner.product_id);
                     response.candidate_product_name = winner.product_name;
                     response.candidate_score = Some(winner.final_score);
+                    log::info!(
+                        "clip product suggest rejected product_id={} avg_frame_distance={:.4} max_score={:.4}",
+                        winner.product_id,
+                        avg,
+                        config.max_score
+                    );
                     return Ok(response);
                 }
             }
@@ -482,6 +553,13 @@ fn suggest_product_for_clip_inner(
         response.product_id = Some(winner.product_id);
         response.product_name = winner.product_name;
         response.best_score = Some(winner.final_score);
+        log::info!(
+            "clip product suggest matched product_id={} final_score={:.4} frames_used={} text_used={}",
+            winner.product_id,
+            winner.final_score,
+            response.frames_used,
+            response.text_search_used
+        );
         Ok(response)
     })();
 
@@ -500,8 +578,17 @@ pub fn maybe_auto_tag_clip(
     clip_id: i64,
     input: &SuggestProductForClipInput,
 ) -> Result<Option<i64>, String> {
+    log::info!("clip auto-tag started clip_id={}", clip_id);
     let result = suggest_product_for_clip(conn, storage_root, input)?;
     let Some(product_id) = result.product_id else {
+        log::info!(
+            "clip auto-tag skipped clip_id={} reason={}",
+            clip_id,
+            result
+                .skipped_reason
+                .as_deref()
+                .unwrap_or("no_product_match")
+        );
         return Ok(None);
     };
     conn.execute(
@@ -509,6 +596,11 @@ pub fn maybe_auto_tag_clip(
         params![clip_id, product_id],
     )
     .map_err(|e| e.to_string())?;
+    log::info!(
+        "clip auto-tag linked clip_id={} product_id={}",
+        clip_id,
+        product_id
+    );
     Ok(Some(product_id))
 }
 

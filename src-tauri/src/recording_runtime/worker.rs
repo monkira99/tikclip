@@ -145,18 +145,35 @@ pub fn build_recording_output_path(input: &RecordingStartInput) -> String {
 
 #[allow(dead_code)]
 pub fn generate_external_recording_id(flow_run_id: i64) -> String {
-    format!("rust-recording-{flow_run_id}-{}", now_timestamp_hcm())
+    let timestamp = now_timestamp_hcm().replace(' ', "T").replace(':', "");
+    format!("rust-recording-{flow_run_id}-{timestamp}")
 }
 
 fn run_ffmpeg_recording(
     input: &RecordingStartInput,
     output_path: &str,
 ) -> Result<RecordingFinishInput, String> {
+    log::info!(
+        "recording ffmpeg run started flow_id={} flow_run_id={} external_recording_id={} max_duration_seconds={} output={}",
+        input.flow_id,
+        input.flow_run_id,
+        input.external_recording_id,
+        input.max_duration_seconds,
+        output_path
+    );
     let status = std::process::Command::new("ffmpeg")
         .args(build_ffmpeg_argv(input, output_path))
         .status()
         .map_err(|e| e.to_string())?;
     let success = status.success();
+    log::info!(
+        "recording ffmpeg run finished flow_id={} flow_run_id={} external_recording_id={} success={} status={}",
+        input.flow_id,
+        input.flow_run_id,
+        input.external_recording_id,
+        success,
+        status
+    );
     Ok(RecordingFinishInput {
         account_id: input.account_id,
         flow_id: input.flow_id,
@@ -183,6 +200,14 @@ fn spawn_ffmpeg_recording(
     input: &RecordingStartInput,
     output_path: &str,
 ) -> Result<RecordingProcessHandle, String> {
+    log::info!(
+        "recording ffmpeg spawn started flow_id={} flow_run_id={} external_recording_id={} max_duration_seconds={} output={}",
+        input.flow_id,
+        input.flow_run_id,
+        input.external_recording_id,
+        input.max_duration_seconds,
+        output_path
+    );
     let child = Command::new("ffmpeg")
         .args(build_ffmpeg_argv(input, output_path))
         .stdin(Stdio::null())
@@ -190,6 +215,13 @@ fn spawn_ffmpeg_recording(
         .stderr(Stdio::null())
         .spawn()
         .map_err(|e| e.to_string())?;
+    log::info!(
+        "recording ffmpeg spawned flow_id={} flow_run_id={} external_recording_id={} pid={}",
+        input.flow_id,
+        input.flow_run_id,
+        input.external_recording_id,
+        child.id()
+    );
     let child = Arc::new(Mutex::new(child));
     let wait_child = Arc::clone(&child);
     let cancel_child = Arc::clone(&child);
@@ -207,6 +239,12 @@ fn wait_ffmpeg_child(
     input: &RecordingStartInput,
     output_path: &str,
 ) -> Result<RecordingFinishInput, String> {
+    log::info!(
+        "recording ffmpeg wait started flow_id={} flow_run_id={} external_recording_id={}",
+        input.flow_id,
+        input.flow_run_id,
+        input.external_recording_id
+    );
     let status = child
         .lock()
         .map_err(|e| e.to_string())?
@@ -217,6 +255,14 @@ fn wait_ffmpeg_child(
     } else {
         RecordingOutcome::Failed
     };
+    log::info!(
+        "recording ffmpeg wait finished flow_id={} flow_run_id={} external_recording_id={} outcome={:?} status={}",
+        input.flow_id,
+        input.flow_run_id,
+        input.external_recording_id,
+        outcome,
+        status
+    );
     Ok(RecordingFinishInput {
         account_id: input.account_id,
         flow_id: input.flow_id,
@@ -236,6 +282,7 @@ fn wait_ffmpeg_child(
 }
 
 fn cancel_ffmpeg_child(child: &Arc<Mutex<Child>>) -> Result<(), String> {
+    log::info!("recording ffmpeg cancel requested");
     child
         .lock()
         .map_err(|e| e.to_string())?
@@ -315,6 +362,8 @@ mod tests {
         let external_id = generate_external_recording_id(11);
 
         assert!(external_id.starts_with("rust-recording-11-"));
+        assert!(!external_id.contains(' '));
+        assert!(!external_id.contains(':'));
     }
 
     #[test]

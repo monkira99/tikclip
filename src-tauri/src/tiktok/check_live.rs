@@ -19,12 +19,21 @@ pub fn resolve_live_status(config: &LiveCheckConfig<'_>) -> Result<Option<LiveSt
 
     let username = config.username.trim_start_matches('@');
     if username.is_empty() {
+        log::info!("tiktok live check skipped reason=empty_username");
         return Ok(None);
     }
+    log::info!(
+        "tiktok live check started username={} cookies_present={} proxy_present={} waf_bypass_enabled={}",
+        username,
+        !cookie_header.is_empty(),
+        proxy_url.is_some(),
+        config.waf_bypass_enabled
+    );
 
     let runtime = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
     let live_status = runtime.block_on(async {
         if config.waf_bypass_enabled {
+            log::info!("tiktok live check trying waf user room api username={}", username);
             let bypass_client = build_tiktok_waf_bypass_client(
                 cookie_header.as_str(),
                 proxy_url.as_deref(),
@@ -37,8 +46,24 @@ pub fn resolve_live_status(config: &LiveCheckConfig<'_>) -> Result<Option<LiveSt
             )
             .await
             {
-                Ok(status) => return Ok::<Option<LiveStatus>, String>(status),
+                Ok(status) => {
+                    log::info!(
+                        "tiktok live check waf user room api completed username={} live={}",
+                        username,
+                        status.is_some()
+                    );
+                    return Ok::<Option<LiveStatus>, String>(status);
+                }
                 Err(api_err) => {
+                    log::warn!(
+                        "tiktok live check waf user room api failed username={} error={}",
+                        username,
+                        api_err
+                    );
+                    log::info!(
+                        "tiktok live check trying signed waf fallback username={}",
+                        username
+                    );
                     match fetch_live_status_from_signed_user_room_api_waf(
                         &bypass_client,
                         username,
@@ -46,9 +71,25 @@ pub fn resolve_live_status(config: &LiveCheckConfig<'_>) -> Result<Option<LiveSt
                     )
                     .await
                     {
-                        Ok(status) => return Ok(status),
+                        Ok(status) => {
+                            log::info!(
+                                "tiktok live check signed waf fallback completed username={} live={}",
+                                username,
+                                status.is_some()
+                            );
+                            return Ok(status);
+                        }
                         Err(signed_err) => {
+                            log::warn!(
+                                "tiktok live check signed waf fallback failed username={} error={}",
+                                username,
+                                signed_err
+                            );
                             let combined_err = format!("{api_err}; signed fallback: {signed_err}");
+                            log::info!(
+                                "tiktok live check trying live HTML fallback username={}",
+                                username
+                            );
                             let html_status = fetch_live_status_from_live_html(
                                 &client,
                                 username,
@@ -63,10 +104,24 @@ pub fn resolve_live_status(config: &LiveCheckConfig<'_>) -> Result<Option<LiveSt
             }
         }
 
+        log::info!("tiktok live check trying user room api username={}", username);
         let api_status_result = fetch_live_status_from_user_room_api(&client, username).await;
         match api_status_result {
-            Ok(status) => Ok::<Option<LiveStatus>, String>(status),
+            Ok(status) => {
+                log::info!(
+                    "tiktok live check user room api completed username={} live={}",
+                    username,
+                    status.is_some()
+                );
+                Ok::<Option<LiveStatus>, String>(status)
+            }
             Err(api_err) => {
+                log::warn!(
+                    "tiktok live check user room api failed username={} error={}",
+                    username,
+                    api_err
+                );
+                log::info!("tiktok live check trying live HTML fallback username={}", username);
                 let html_status = fetch_live_status_from_live_html(
                     &client,
                     username,
@@ -79,6 +134,15 @@ pub fn resolve_live_status(config: &LiveCheckConfig<'_>) -> Result<Option<LiveSt
         }
     })?;
 
+    log::info!(
+        "tiktok live check completed username={} live={} room_id={}",
+        username,
+        live_status.is_some(),
+        live_status
+            .as_ref()
+            .map(|status| status.room_id.as_str())
+            .unwrap_or("")
+    );
     Ok(live_status)
 }
 

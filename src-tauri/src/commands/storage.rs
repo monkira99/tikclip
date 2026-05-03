@@ -640,6 +640,12 @@ fn run_cleanup_cycle(
         .unwrap_or(settings.archive_retention_days)
         .max(0);
     let today = today_hcm();
+    log::info!(
+        "storage cleanup cycle started root={} raw_retention_days={} archive_retention_days={}",
+        storage_root.display(),
+        raw_days,
+        archive_days
+    );
 
     let (deleted_recordings, freed_recordings) =
         delete_old_recordings(conn, storage_root, raw_days, today)?;
@@ -651,6 +657,12 @@ fn run_cleanup_cycle(
     };
     let stats = storage_stats(conn, storage_root)?;
     maybe_emit_cleanup_notifications(conn, app, settings, &summary, &stats);
+    log::info!(
+        "storage cleanup cycle completed deleted_recordings={} deleted_clips={} freed_bytes={}",
+        summary.deleted_recordings,
+        summary.deleted_clips,
+        summary.freed_bytes
+    );
     Ok(summary)
 }
 
@@ -662,13 +674,7 @@ fn run_background_cleanup_cycle(
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
     conn.execute_batch("PRAGMA foreign_keys=ON;")
         .map_err(|e| e.to_string())?;
-    let summary = run_cleanup_cycle(&conn, storage_root, None, None, Some(app))?;
-    log::debug!(
-        "storage cleanup cycle finished: deleted_recordings={} deleted_clips={} freed_bytes={}",
-        summary.deleted_recordings,
-        summary.deleted_clips,
-        summary.freed_bytes
-    );
+    run_cleanup_cycle(&conn, storage_root, None, None, Some(app))?;
     Ok(())
 }
 

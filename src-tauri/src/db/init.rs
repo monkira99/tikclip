@@ -6,9 +6,11 @@ pub fn initialize_database(db_path: &Path) -> Result<Connection, rusqlite::Error
         std::fs::create_dir_all(parent).ok();
     }
 
+    log::info!("opening sqlite database at {}", db_path.display());
     let conn = Connection::open(db_path)?;
     conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
     run_migrations(&conn)?;
+    log::info!("sqlite database initialized at {}", db_path.display());
     Ok(conn)
 }
 
@@ -26,6 +28,7 @@ fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
             |row| row.get(0),
         )
         .unwrap_or(0);
+    log::info!("database schema version detected: {}", current_version);
 
     let migrations: Vec<(i64, &str)> = vec![
         (1, include_str!("migrations/001_initial.sql")),
@@ -49,6 +52,7 @@ fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
 
     for (version, sql) in migrations {
         if version > current_version {
+            log::info!("applying database migration {}", version);
             let tx = conn.unchecked_transaction()?;
             tx.execute_batch(sql)?;
             tx.execute(
@@ -56,6 +60,7 @@ fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
                 [version],
             )?;
             tx.commit()?;
+            log::info!("database migration {} applied", version);
         }
     }
 

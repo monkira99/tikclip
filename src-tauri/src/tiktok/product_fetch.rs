@@ -47,6 +47,7 @@ pub async fn fetch_product_from_url(
 ) -> FetchProductResponse {
     let url_s = url.trim();
     if url_s.is_empty() {
+        log::info!("product fetch rejected: empty URL");
         return FetchProductResponse {
             success: false,
             incomplete: false,
@@ -56,10 +57,17 @@ pub async fn fetch_product_from_url(
     }
 
     let cookie_header = cookie_header_from_json(cookies_json.unwrap_or(""));
+    log::info!(
+        "product fetch started url={} cookies_present={} download_media={}",
+        safe_url_label(url_s),
+        !cookie_header.is_empty(),
+        download_media
+    );
     let client =
         match build_tiktok_reqwest_client(cookie_header.as_str(), None, Duration::from_secs(20)) {
             Ok(client) => client,
             Err(err) => {
+                log::warn!("product fetch client build failed: {}", err);
                 return FetchProductResponse {
                     success: false,
                     incomplete: true,
@@ -72,21 +80,47 @@ pub async fn fetch_product_from_url(
     let response = match client.get(url_s).send().await {
         Ok(response) => response,
         Err(_) => {
+            log::warn!(
+                "product fetch network request failed url={}",
+                safe_url_label(url_s)
+            );
             return incomplete_response("Network error while loading the page");
         }
     };
     let status = response.status();
     let final_url = response.url().to_string();
+    log::info!(
+        "product fetch response received status={} final_url={}",
+        status.as_u16(),
+        safe_url_label(final_url.as_str())
+    );
     if !status.is_success() {
+        log::warn!(
+            "product fetch incomplete: HTTP {} from {}",
+            status.as_u16(),
+            safe_url_label(final_url.as_str())
+        );
         return incomplete_response(format!("HTTP {} from TikTok", status.as_u16()).as_str());
     }
     let html = match response.text().await {
         Ok(text) => text,
-        Err(_) => return incomplete_response("Network error while loading the page"),
+        Err(_) => {
+            log::warn!("product fetch failed reading response body");
+            return incomplete_response("Network error while loading the page");
+        }
     };
+    log::info!("product fetch HTML loaded bytes={}", html.len());
 
     let mut data = parse_product_html(html.as_str(), final_url.as_str());
+    log::info!(
+        "product fetch parsed fields name_present={} images={} videos={} tiktok_shop_id_present={}",
+        data.name.is_some(),
+        data.image_urls.len(),
+        data.video_urls.len(),
+        data.tiktok_shop_id.is_some()
+    );
     if html_suggests_security_challenge(html.as_str()) {
+        log::warn!("product fetch blocked by TikTok security challenge");
         return FetchProductResponse {
             success: false,
             incomplete: true,
@@ -107,6 +141,12 @@ pub async fn fetch_product_from_url(
             .collect::<String>();
         let out_dir = storage_root.join("products").join("fetched").join(batch);
         if std::fs::create_dir_all(&out_dir).is_ok() {
+            log::info!(
+                "product fetch downloading media images={} videos={} out_dir={}",
+                data.image_urls.len(),
+                data.video_urls.len(),
+                out_dir.display()
+            );
             let mut items = data
                 .image_urls
                 .iter()
@@ -114,6 +154,10 @@ pub async fn fetch_product_from_url(
                 .collect::<Vec<_>>();
             items.extend(data.video_urls.iter().map(|url| ("video", url.as_str())));
             data.media_files = download_media_items(&client, &out_dir, &items).await;
+            log::info!(
+                "product fetch media download completed files={}",
+                data.media_files.len()
+            );
             if let Some(first_image) = data
                 .media_files
                 .iter()
@@ -122,6 +166,11 @@ pub async fn fetch_product_from_url(
             {
                 data.image_url = Some(first_image);
             }
+        } else {
+            log::warn!(
+                "product fetch media output directory could not be created: {}",
+                out_dir.display()
+            );
         }
     }
 
@@ -131,11 +180,27 @@ pub async fn fetch_product_from_url(
     } else {
         Some("Could not find product title on this page (layout may have changed).".to_string())
     };
+    log::info!(
+        "product fetch completed success={} incomplete={} media_files={}",
+        success,
+        !success,
+        data.media_files.len()
+    );
     FetchProductResponse {
         success,
         incomplete: !success,
         data: Some(data),
         error,
+    }
+}
+
+fn safe_url_label(raw: &str) -> String {
+    match reqwest::Url::parse(raw) {
+        Ok(url) => {
+            let host = url.host_str().unwrap_or("unknown-host");
+            format!("{}://{}{}", url.scheme(), host, url.path())
+        }
+        Err(_) => "<invalid-url>".to_string(),
     }
 }
 
@@ -454,10 +519,27 @@ async fn download_media_items(
 ) -> Vec<FetchedProductMediaFile> {
     let mut saved = Vec::new();
     for (index, (kind, url)) in items.iter().enumerate() {
+        log::info!(
+            "product fetch media request kind={} index={} url={}",
+            kind,
+            index,
+            safe_url_label(url)
+        );
         let Ok(response) = client.get(*url).send().await else {
+            log::warn!(
+                "product fetch media request failed kind={} index={}",
+                kind,
+                index
+            );
             continue;
         };
         if !response.status().is_success() {
+            log::warn!(
+                "product fetch media skipped kind={} index={} status={}",
+                kind,
+                index,
+                response.status().as_u16()
+            );
             continue;
         }
         let content_type = response
@@ -468,6 +550,11 @@ async fn download_media_items(
             .map(str::trim)
             .map(str::to_ascii_lowercase);
         let Ok(bytes) = response.bytes().await else {
+            log::warn!(
+                "product fetch media body failed kind={} index={}",
+                kind,
+                index
+            );
             continue;
         };
         let max_bytes = if *kind == "video" {
@@ -476,6 +563,13 @@ async fn download_media_items(
             MAX_IMAGE_BYTES
         };
         if bytes.len() > max_bytes {
+            log::warn!(
+                "product fetch media skipped kind={} index={} bytes={} max_bytes={}",
+                kind,
+                index,
+                bytes.len(),
+                max_bytes
+            );
             continue;
         }
         let path = out_dir.join(format!(
@@ -484,8 +578,21 @@ async fn download_media_items(
             file_extension(url, content_type.as_deref(), kind)
         ));
         if std::fs::write(path.as_path(), bytes.as_ref()).is_err() {
+            log::warn!(
+                "product fetch media write failed kind={} index={} path={}",
+                kind,
+                index,
+                path.display()
+            );
             continue;
         }
+        log::info!(
+            "product fetch media saved kind={} index={} bytes={} path={}",
+            kind,
+            index,
+            bytes.len(),
+            path.display()
+        );
         saved.push(FetchedProductMediaFile {
             kind: (*kind).to_string(),
             path: path

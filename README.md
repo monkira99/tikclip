@@ -67,6 +67,18 @@ npm run tauri dev
 - Vite chạy tại `http://localhost:1420` (theo `tauri.conf.json`).
 - Rust build lần đầu có thể mất vài phút.
 
+## Logging
+
+App mặc định bật log Rust ở mức `info` cho crate `tikclip_lib` và giữ dependency ở mức `warn`.
+
+```bash
+# Log chi tiết app, giữ dependency bớt ồn
+RUST_LOG=warn,tikclip_lib=info npm run tauri dev
+
+# Debug sâu khi cần điều tra live runtime / TikTok / product vectors
+RUST_LOG=warn,tikclip_lib=debug npm run tauri dev
+```
+
 ## Kiểm thử và chất lượng (nên chạy trước Phase 2)
 
 ```bash

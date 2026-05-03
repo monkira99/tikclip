@@ -21,11 +21,7 @@ pub struct AppState {
 }
 
 fn init_rust_logging() {
-    let default_filter = if cfg!(debug_assertions) {
-        "warn,tikclip_lib::commands::accounts=info,tikclip_lib::commands::live_runtime=debug,tikclip_lib::live_runtime=debug"
-    } else {
-        "warn,tikclip_lib::commands::accounts=warn,tikclip_lib::commands::live_runtime=info,tikclip_lib::live_runtime=info"
-    };
+    let default_filter = "warn,tikclip_lib=info";
     let _ =
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default_filter))
             .format_timestamp_millis()
@@ -35,6 +31,7 @@ fn init_rust_logging() {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     init_rust_logging();
+    log::info!("app bootstrap started");
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -88,6 +85,7 @@ pub fn run() {
             commands::paths::reset_storage_root_default,
         ])
         .setup(|app| {
+            log::info!("tauri setup started");
             let home_dir = app.path().home_dir().expect("failed to get home dir");
             let app_data_dir = app
                 .path()
@@ -101,12 +99,15 @@ pub fn run() {
                 app_paths::resolve_storage_root(home_dir, app_data_dir, app_config_dir)
                     .expect("failed to resolve storage path");
             std::fs::create_dir_all(&storage_path).ok();
+            log::info!("storage root resolved: {}", storage_path.display());
 
             let db_path = storage_path.join("data").join("app.db");
+            log::info!("initializing database: {}", db_path.display());
             let mut conn = initialize_database(&db_path).expect("failed to initialize database");
             let mut runtime_manager = LiveRuntimeManager::with_runtime_db_path(db_path.clone());
             runtime_manager.attach_storage_root(storage_path.clone());
             runtime_manager.attach_app_handle(app.handle().clone());
+            log::info!("bootstrapping enabled live runtime flows");
             if let Err(err) = runtime_manager.bootstrap_enabled_flows(&mut conn) {
                 log::warn!("failed to bootstrap enabled live runtime flows: {}", err);
             }
@@ -123,6 +124,7 @@ pub fn run() {
             ));
 
             tray::setup_tray(app.handle())?;
+            log::info!("tauri setup completed");
 
             Ok(())
         })
@@ -131,10 +133,12 @@ pub fn run() {
 
     app.run(|app_handle, event| {
         if let RunEvent::Exit = event {
+            log::info!("app exit requested; shutting down workers");
             let cleanup_worker = app_handle.state::<commands::storage::StorageCleanupWorker>();
             cleanup_worker.shutdown();
             let runtime_manager = app_handle.state::<LiveRuntimeManager>();
             let _ = runtime_manager.shutdown();
+            log::info!("app shutdown completed");
         }
     });
 }

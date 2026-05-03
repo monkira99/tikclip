@@ -177,6 +177,12 @@ pub fn build_tiktok_reqwest_client(
     proxy_url: Option<&str>,
     timeout: Duration,
 ) -> Result<reqwest::Client, String> {
+    log::info!(
+        "building TikTok reqwest client cookies_present={} proxy_present={} timeout_ms={}",
+        !cookie_header.trim().is_empty(),
+        proxy_url.is_some(),
+        timeout.as_millis()
+    );
     let mut headers = default_tiktok_headers();
     if !cookie_header.trim().is_empty() {
         headers.insert(

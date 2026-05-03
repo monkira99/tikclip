@@ -237,14 +237,26 @@ pub async fn fetch_product_from_url(
     state: State<'_, AppState>,
     input: FetchProductFromUrlInput,
 ) -> Result<FetchProductResponse, String> {
+    log::info!(
+        "command fetch_product_from_url invoked download_media={} url_chars={}",
+        input.download_media,
+        input.url.chars().count()
+    );
     let storage_path = state.storage_path.clone();
-    Ok(product_fetch::fetch_product_from_url(
+    let result = product_fetch::fetch_product_from_url(
         storage_path.as_path(),
         input.url.as_str(),
         input.cookies_json.as_deref(),
         input.download_media,
     )
-    .await)
+    .await;
+    log::info!(
+        "command fetch_product_from_url completed success={} incomplete={} error_present={}",
+        result.success,
+        result.incomplete,
+        result.error.is_some()
+    );
+    Ok(result)
 }
 
 #[tauri::command]
@@ -252,11 +264,24 @@ pub fn index_product_embeddings(
     state: State<'_, AppState>,
     input: IndexProductEmbeddingsInput,
 ) -> Result<IndexProductEmbeddingsResponse, String> {
-    product_vectors::index_product_embeddings_with_db_lock(
+    log::info!(
+        "command index_product_embeddings invoked product_id={} items={}",
+        input.product_id,
+        input.items.len()
+    );
+    let result = product_vectors::index_product_embeddings_with_db_lock(
         &state.db,
         state.storage_path.as_path(),
         &input,
-    )
+    )?;
+    log::info!(
+        "command index_product_embeddings completed product_id={} indexed={} skipped={} errors={}",
+        input.product_id,
+        result.indexed,
+        result.skipped,
+        result.errors.len()
+    );
+    Ok(result)
 }
 
 #[tauri::command]
@@ -264,6 +289,10 @@ pub fn delete_product_embeddings(
     state: State<'_, AppState>,
     input: DeleteProductEmbeddingsInput,
 ) -> Result<DeleteProductEmbeddingsResponse, String> {
+    log::info!(
+        "command delete_product_embeddings invoked product_id={}",
+        input.product_id
+    );
     let conn = state.db.lock().map_err(|e| e.to_string())?;
     product_vectors::delete_product_embeddings(&conn, &input)
 }

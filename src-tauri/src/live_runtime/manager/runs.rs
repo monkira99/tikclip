@@ -33,6 +33,13 @@ impl LiveRuntimeManager {
         stage: &str,
         err: &str,
     ) -> Result<(), String> {
+        log::warn!(
+            "live runtime downstream stage failed flow_id={} flow_run_id={} stage={} error={}",
+            flow_id,
+            flow_run_id,
+            stage,
+            err
+        );
         runtime_store::append_failed_pipeline_node_run(conn, flow_run_id, flow_id, "clip", err)?;
         update_flow_runtime_by_flow_id(
             conn,
@@ -59,6 +66,13 @@ impl LiveRuntimeManager {
         flow_id: i64,
         live_status: &LiveStatus,
     ) -> Result<Option<i64>, String> {
+        log::info!(
+            "live runtime handle live detected flow_id={} room_id={} has_stream_url={} viewer_count={:?}",
+            flow_id,
+            live_status.room_id,
+            live_status.stream_url.is_some(),
+            live_status.viewer_count
+        );
         let config = load_flow_runtime_config(conn, flow_id)?;
         let session_state = {
             let state = self.state.lock().map_err(|e| e.to_string())?;
@@ -77,9 +91,18 @@ impl LiveRuntimeManager {
         let last_completed_room_id = session_state.1;
 
         if session_active.is_some() {
+            log::info!(
+                "live runtime skipped live detected flow_id={} reason=session_active active_flow_run_id={:?}",
+                flow_id,
+                session_active
+            );
             return Ok(None);
         }
         if live_status.room_id.trim().is_empty() {
+            log::warn!(
+                "live runtime skipped live detected flow_id={} reason=empty_room_id",
+                flow_id
+            );
             return Ok(None);
         }
         let detected_at = now_timestamp_hcm();
@@ -114,6 +137,11 @@ impl LiveRuntimeManager {
             last_completed_room_id.as_deref(),
             true,
         ) {
+            log::info!(
+                "live runtime skipped run creation flow_id={} room_id={} reason=dedupe",
+                flow_id,
+                live_status.room_id
+            );
             let _ = self.log_runtime_event(
                 flow_id,
                 None,
@@ -131,6 +159,11 @@ impl LiveRuntimeManager {
             return Ok(None);
         }
         let Some(stream_url) = live_status.stream_url.as_deref() else {
+            log::warn!(
+                "live runtime skipped run creation flow_id={} room_id={} reason=missing_stream_url",
+                flow_id,
+                live_status.room_id
+            );
             let _ = self.log_runtime_event(
                 flow_id,
                 None,
@@ -167,6 +200,13 @@ impl LiveRuntimeManager {
             config.definition_version,
             output_json.as_str(),
         )?;
+        log::info!(
+            "live runtime flow run created flow_id={} flow_run_id={} account_id={} room_id={}",
+            flow_id,
+            flow_run_id,
+            account_id,
+            live_status.room_id
+        );
         runtime_store::upsert_running_record_node_run(conn, flow_run_id, flow_id)?;
         let start_input = RecordingStartInput {
             account_id,
@@ -208,8 +248,20 @@ impl LiveRuntimeManager {
             },
         );
         start_rust_recording_row(conn, &start_input)?;
+        log::info!(
+            "live runtime recording row started flow_id={} flow_run_id={} external_recording_id={}",
+            flow_id,
+            flow_run_id,
+            start_input.external_recording_id
+        );
         drop(state);
         if self.auto_spawn_recording_execution {
+            log::info!(
+                "live runtime spawning recording execution flow_id={} flow_run_id={} external_recording_id={}",
+                flow_id,
+                flow_run_id,
+                start_input.external_recording_id
+            );
             self.spawn_recording_execution(start_input.clone(), cancel_flag)?;
         }
         update_flow_runtime_by_flow_id(
@@ -231,6 +283,11 @@ impl LiveRuntimeManager {
         session.mark_flow_run_started(flow_run_id);
         drop(state);
         self.emit_runtime_update_for_flow(conn, flow_id)?;
+        log::info!(
+            "live runtime live detected handling completed flow_id={} flow_run_id={}",
+            flow_id,
+            flow_run_id
+        );
         Ok(Some(flow_run_id))
     }
 
