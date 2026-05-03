@@ -1,5 +1,4 @@
 use super::{
-    clips::ClipNodeExecutionHandoff,
     store::{
         finalize_latest_recording_row, load_flow_runtime_config, load_record_duration_seconds,
         open_runtime_connection, update_flow_runtime_by_flow_id,
@@ -26,6 +25,34 @@ use std::sync::{
 };
 
 impl LiveRuntimeManager {
+    fn fail_downstream_processing_stage(
+        &self,
+        conn: &mut Connection,
+        flow_id: i64,
+        flow_run_id: i64,
+        stage: &str,
+        err: &str,
+    ) -> Result<(), String> {
+        runtime_store::append_failed_pipeline_node_run(conn, flow_run_id, flow_id, "clip", err)?;
+        update_flow_runtime_by_flow_id(
+            conn,
+            flow_id,
+            &UpdateFlowRuntimeByAccountInput {
+                status: Some("error".to_string()),
+                current_node: Some(stage.to_string()),
+                last_live_at: None,
+                last_run_at: Some(now_timestamp_hcm()),
+                last_error: Some(err.to_string()),
+            },
+        )?;
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
+        if let Some(session) = state.sessions_by_flow.get_mut(&flow_id) {
+            session.mark_downstream_stage(flow_run_id, "error");
+        }
+        drop(state);
+        self.emit_runtime_update_for_flow(conn, flow_id)
+    }
+
     pub fn handle_live_detected(
         &self,
         conn: &Connection,
@@ -319,7 +346,7 @@ impl LiveRuntimeManager {
         type RecordingFinalizeRow = (i64, i64, i64, i64, Option<String>, Option<String>);
         let row: Option<RecordingFinalizeRow> = conn
             .query_row(
-                "SELECT id, account_id, flow_id, flow_run_id, room_id, file_path FROM recordings WHERE sidecar_recording_id = ?1",
+                "SELECT id, account_id, flow_id, flow_run_id, room_id, file_path FROM recordings WHERE external_recording_id = ?1",
                 [external_recording_id],
                 |row| {
                     Ok((
@@ -410,26 +437,17 @@ impl LiveRuntimeManager {
                     external_recording_id,
                     file_path,
                 );
-                if audio_handoff.completed_or_disabled() {
-                    let speech_segments = audio_handoff.speech_segments_or_empty();
-                    if matches!(
-                        self.run_clip_node_or_fallback(
-                            conn,
-                            flow_id,
-                            flow_run_id,
-                            external_recording_id,
-                            account_id,
-                            username.as_str(),
-                            file_path,
-                            speech_segments,
-                        ),
-                        ClipNodeExecutionHandoff::Completed
-                    ) {
-                        self.emit_runtime_update_for_flow(conn, flow_id)?;
-                        return Ok(());
-                    }
+                if !audio_handoff.completed_or_disabled() {
+                    self.fail_downstream_processing_stage(
+                        conn,
+                        flow_id,
+                        flow_run_id,
+                        "record",
+                        "Rust audio processing failed",
+                    )?;
+                    return Ok(());
                 }
-                if let Err(err) = self.handoff_recording_to_sidecar_processing(
+                if let Err(err) = self.run_clip_node(
                     conn,
                     flow_id,
                     flow_run_id,
@@ -437,34 +455,19 @@ impl LiveRuntimeManager {
                     account_id,
                     username.as_str(),
                     file_path,
-                    audio_handoff.speech_segments(),
+                    audio_handoff.speech_segments_or_empty(),
                 ) {
-                    runtime_store::append_failed_pipeline_node_run(
+                    self.fail_downstream_processing_stage(
                         conn,
-                        flow_run_id,
                         flow_id,
+                        flow_run_id,
                         "clip",
                         err.as_str(),
                     )?;
-                    update_flow_runtime_by_flow_id(
-                        conn,
-                        flow_id,
-                        &UpdateFlowRuntimeByAccountInput {
-                            status: Some("error".to_string()),
-                            current_node: Some("clip".to_string()),
-                            last_live_at: None,
-                            last_run_at: Some(now_timestamp_hcm()),
-                            last_error: Some(err.clone()),
-                        },
-                    )?;
-                    let mut state = self.state.lock().map_err(|e| e.to_string())?;
-                    if let Some(session) = state.sessions_by_flow.get_mut(&flow_id) {
-                        session.mark_downstream_stage(flow_run_id, "error");
-                    }
-                    drop(state);
-                    self.emit_runtime_update_for_flow(conn, flow_id)?;
                     return Ok(());
                 }
+                self.emit_runtime_update_for_flow(conn, flow_id)?;
+                return Ok(());
             }
             self.emit_runtime_update_for_flow(conn, flow_id)?;
         } else {

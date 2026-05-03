@@ -12,8 +12,8 @@ use tauri::State;
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
-pub struct SyncRecordingFromSidecarInput {
-    pub sidecar_recording_id: String,
+pub struct SyncRecordingInput {
+    pub external_recording_id: String,
     pub account_id: i64,
     pub status: String,
     pub duration_seconds: i64,
@@ -35,8 +35,8 @@ pub struct ActiveRustRecordingStatus {
     pub error_message: Option<String>,
 }
 
-fn map_sidecar_recording_status(sidecar: &str) -> &'static str {
-    match sidecar {
+fn map_external_recording_status(status: &str) -> &'static str {
+    match status {
         "completed" | "stopped" => "done",
         "error" => "error",
         "processing" => "processing",
@@ -68,7 +68,7 @@ pub fn upsert_rust_recording(
     let is_terminal = matches!(status, "done" | "error" | "cancelled");
     let existing_id: Option<i64> = conn
         .query_row(
-            "SELECT id FROM recordings WHERE sidecar_recording_id = ?1",
+            "SELECT id FROM recordings WHERE external_recording_id = ?1",
             [&input.external_recording_id],
             |row| row.get(0),
         )
@@ -152,7 +152,7 @@ pub fn upsert_rust_recording(
             &format!(
                 "INSERT INTO recordings (\
                    account_id, room_id, status, duration_seconds, file_size_bytes, flow_id, flow_run_id, \
-                   file_path, error_message, sidecar_recording_id, started_at, created_at, ended_at\
+                   file_path, error_message, external_recording_id, started_at, created_at, ended_at\
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, {}, {}, \
                    CASE WHEN ?11 != 0 THEN {} ELSE NULL END)",
                 SQL_NOW_HCM, SQL_NOW_HCM, SQL_NOW_HCM
@@ -245,13 +245,13 @@ pub fn list_active_rust_recordings(
     runtime_manager.list_active_rust_recordings(&conn)
 }
 
-/// Shared upsert used by the Tauri command and `insert_clip_from_sidecar`.
-pub(super) fn sync_recording_from_sidecar_conn(
+/// Shared upsert used by runtime clip/recording reconciliation.
+pub(super) fn sync_recording_from_external_key_conn(
     conn: &Connection,
-    input: &SyncRecordingFromSidecarInput,
+    input: &SyncRecordingInput,
 ) -> Result<i64, String> {
-    if input.sidecar_recording_id.trim().is_empty() {
-        return Err("sidecar_recording_id is required".to_string());
+    if input.external_recording_id.trim().is_empty() {
+        return Err("external_recording_id is required".to_string());
     }
 
     let acct_ok: i64 = conn
@@ -265,7 +265,7 @@ pub(super) fn sync_recording_from_sidecar_conn(
         return Err(format!("unknown account_id {}", input.account_id));
     }
 
-    let mapped = map_sidecar_recording_status(input.status.trim());
+    let mapped = map_external_recording_status(input.status.trim());
     let path = input.file_path.as_deref();
     let err = input.error_message.as_deref();
     let flow_id = find_flow_id_for_account(conn, input.account_id)?;
@@ -285,8 +285,8 @@ pub(super) fn sync_recording_from_sidecar_conn(
 
     let existing_id: Option<i64> = conn
         .query_row(
-            "SELECT id FROM recordings WHERE sidecar_recording_id = ?1",
-            [&input.sidecar_recording_id],
+            "SELECT id FROM recordings WHERE external_recording_id = ?1",
+            [&input.external_recording_id],
             |row| row.get(0),
         )
         .optional()
@@ -331,7 +331,7 @@ pub(super) fn sync_recording_from_sidecar_conn(
             &format!(
                 "INSERT INTO recordings (\
                    account_id, room_id, status, duration_seconds, file_size_bytes, flow_id, flow_run_id, \
-                   file_path, error_message, sidecar_recording_id, started_at, created_at, ended_at\
+                   file_path, error_message, external_recording_id, started_at, created_at, ended_at\
                  ) VALUES (?1, NULL, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, {}, {}, \
                    CASE WHEN ?10 != 0 THEN {} ELSE NULL END)",
                 SQL_NOW_HCM, SQL_NOW_HCM, SQL_NOW_HCM
@@ -345,7 +345,7 @@ pub(super) fn sync_recording_from_sidecar_conn(
                 flow_run_id,
                 path,
                 err,
-                &input.sidecar_recording_id,
+                &input.external_recording_id,
                 ended_flag,
             ],
         )
@@ -357,8 +357,8 @@ pub(super) fn sync_recording_from_sidecar_conn(
 #[cfg(test)]
 mod tests {
     use super::{
-        map_rust_recording_status, sync_recording_from_sidecar_conn, upsert_rust_recording,
-        SyncRecordingFromSidecarInput,
+        map_rust_recording_status, sync_recording_from_external_key_conn, upsert_rust_recording,
+        SyncRecordingInput,
     };
     use crate::recording_runtime::types::RustRecordingUpsertInput;
     use rusqlite::Connection;
@@ -423,9 +423,9 @@ mod tests {
                 created_at TEXT NOT NULL DEFAULT (datetime('now', '+7 hours')),
                 flow_id INTEGER REFERENCES flows(id) ON DELETE SET NULL,
                 flow_run_id INTEGER REFERENCES flow_runs(id) ON DELETE SET NULL,
-                sidecar_recording_id TEXT
+                external_recording_id TEXT
             );
-            CREATE UNIQUE INDEX idx_recordings_sidecar_recording_id ON recordings(sidecar_recording_id) WHERE sidecar_recording_id IS NOT NULL;",
+            CREATE UNIQUE INDEX idx_recordings_external_recording_id ON recordings(external_recording_id) WHERE external_recording_id IS NOT NULL;",
         )
         .expect("create test schema");
         conn
@@ -492,7 +492,7 @@ mod tests {
     }
 
     #[test]
-    fn sync_recording_from_sidecar_keeps_existing_flow_and_run_binding_on_later_updates() {
+    fn sync_recording_from_external_key_keeps_existing_flow_and_run_binding_on_later_updates() {
         let conn = open_in_memory_db();
         insert_account_and_flow(&conn);
         conn.execute(
@@ -502,10 +502,10 @@ mod tests {
         )
         .expect("insert first running run");
 
-        let recording_id = sync_recording_from_sidecar_conn(
+        let recording_id = sync_recording_from_external_key_conn(
             &conn,
-            &SyncRecordingFromSidecarInput {
-                sidecar_recording_id: "ext-123".to_string(),
+            &SyncRecordingInput {
+                external_recording_id: "ext-123".to_string(),
                 account_id: 1,
                 status: "recording".to_string(),
                 duration_seconds: 5,
@@ -527,10 +527,10 @@ mod tests {
         )
         .expect("insert second running run");
 
-        sync_recording_from_sidecar_conn(
+        sync_recording_from_external_key_conn(
             &conn,
-            &SyncRecordingFromSidecarInput {
-                sidecar_recording_id: "ext-123".to_string(),
+            &SyncRecordingInput {
+                external_recording_id: "ext-123".to_string(),
                 account_id: 1,
                 status: "completed".to_string(),
                 duration_seconds: 15,

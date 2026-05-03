@@ -1,5 +1,10 @@
 use crate::db::models::Product;
+use crate::tiktok::product_fetch::{self, FetchProductResponse};
 use crate::time_hcm::SQL_NOW_HCM;
+use crate::workflow::clip_node::product_vectors::{
+    self, DeleteProductEmbeddingsInput, DeleteProductEmbeddingsResponse,
+    IndexProductEmbeddingsInput, IndexProductEmbeddingsResponse,
+};
 use crate::AppState;
 use rusqlite::{params, Row};
 use serde::Deserialize;
@@ -217,4 +222,48 @@ pub fn tag_clip_product(
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct FetchProductFromUrlInput {
+    pub url: String,
+    pub cookies_json: Option<String>,
+    pub download_media: bool,
+}
+
+#[tauri::command]
+pub async fn fetch_product_from_url(
+    state: State<'_, AppState>,
+    input: FetchProductFromUrlInput,
+) -> Result<FetchProductResponse, String> {
+    let storage_path = state.storage_path.clone();
+    Ok(product_fetch::fetch_product_from_url(
+        storage_path.as_path(),
+        input.url.as_str(),
+        input.cookies_json.as_deref(),
+        input.download_media,
+    )
+    .await)
+}
+
+#[tauri::command]
+pub fn index_product_embeddings(
+    state: State<'_, AppState>,
+    input: IndexProductEmbeddingsInput,
+) -> Result<IndexProductEmbeddingsResponse, String> {
+    product_vectors::index_product_embeddings_with_db_lock(
+        &state.db,
+        state.storage_path.as_path(),
+        &input,
+    )
+}
+
+#[tauri::command]
+pub fn delete_product_embeddings(
+    state: State<'_, AppState>,
+    input: DeleteProductEmbeddingsInput,
+) -> Result<DeleteProductEmbeddingsResponse, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    product_vectors::delete_product_embeddings(&conn, &input)
 }

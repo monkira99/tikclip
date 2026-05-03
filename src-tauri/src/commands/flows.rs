@@ -265,7 +265,7 @@ fn apply_flow_runtime_patch_for_account(
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub struct ApplySidecarFlowRuntimeHintInput {
+pub struct ApplyFlowRuntimeHintInput {
     pub account_id: i64,
     /// `clip_ready`, `caption_ready`
     pub hint: String,
@@ -504,19 +504,19 @@ pub fn create_flow(state: State<'_, AppState>, input: CreateFlowInput) -> Result
     Ok(flow_id)
 }
 
-/// Maps sidecar processing events to `flows` pipeline telemetry (desktop engine boundary).
+/// Maps runtime processing events to `flows` pipeline telemetry (desktop engine boundary).
 #[tauri::command]
-pub fn apply_sidecar_flow_runtime_hint(
+pub fn apply_flow_runtime_hint(
     state: State<'_, AppState>,
-    input: ApplySidecarFlowRuntimeHintInput,
+    input: ApplyFlowRuntimeHintInput,
 ) -> Result<(), String> {
     let mut conn = state.db.lock().map_err(|e| e.to_string())?;
-    apply_sidecar_flow_runtime_hint_with_conn(&mut conn, input)
+    apply_flow_runtime_hint_with_conn(&mut conn, input)
 }
 
-fn apply_sidecar_flow_runtime_hint_with_conn(
+fn apply_flow_runtime_hint_with_conn(
     conn: &mut Connection,
-    input: ApplySidecarFlowRuntimeHintInput,
+    input: ApplyFlowRuntimeHintInput,
 ) -> Result<(), String> {
     let hint = input.hint.trim();
     if hint.is_empty() {

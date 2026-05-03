@@ -40,6 +40,11 @@ fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
             9,
             include_str!("migrations/009_repair_flow_foreign_keys.sql"),
         ),
+        (
+            10,
+            include_str!("migrations/010_product_embedding_vectors.sql"),
+        ),
+        (11, include_str!("migrations/011_external_recording_id.sql")),
     ];
 
     for (version, sql) in migrations {
@@ -179,6 +184,78 @@ mod tests {
             [],
         )
         .expect("insert recording with flow_id");
+
+        drop(conn);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[test]
+    fn migration_011_renames_recording_external_key_without_losing_values() {
+        let db_path = temp_db_path("migration-011-external-recording-id");
+        {
+            let conn = Connection::open(&db_path).expect("open legacy db");
+            conn.execute_batch(include_str!("migrations/001_initial.sql"))
+                .expect("run migration 001");
+            conn.execute_batch(include_str!("migrations/002_sidecar_recording_id.sql"))
+                .expect("run migration 002");
+            conn.execute_batch(include_str!("migrations/003_timestamps_gmt_plus_7.sql"))
+                .expect("run migration 003");
+            conn.execute_batch(include_str!("migrations/004_product_enhancements.sql"))
+                .expect("run migration 004");
+            conn.execute_batch(include_str!("migrations/005_product_media_files.sql"))
+                .expect("run migration 005");
+            conn.execute_batch(include_str!("migrations/006_speech_segments.sql"))
+                .expect("run migration 006");
+            conn.execute_batch(include_str!("migrations/007_flows.sql"))
+                .expect("run migration 007");
+            conn.execute_batch(include_str!("migrations/008_flow_engine_rebuild.sql"))
+                .expect("run migration 008");
+            conn.execute_batch(include_str!("migrations/009_repair_flow_foreign_keys.sql"))
+                .expect("run migration 009");
+            conn.execute_batch(include_str!("migrations/010_product_embedding_vectors.sql"))
+                .expect("run migration 010");
+            conn.execute_batch("CREATE TABLE schema_version (version INTEGER PRIMARY KEY);")
+                .expect("create schema_version");
+            for version in 1..=10 {
+                conn.execute(
+                    "INSERT INTO schema_version (version) VALUES (?1)",
+                    [version],
+                )
+                .expect("insert schema version");
+            }
+            conn.execute(
+                "INSERT INTO accounts (id, username, display_name, type, created_at, updated_at) \
+                 VALUES (1, 'shop_abc', 'Shop', 'monitored', datetime('now', '+7 hours'), datetime('now', '+7 hours'))",
+                [],
+            )
+            .expect("insert account");
+            conn.execute(
+                "INSERT INTO recordings (account_id, status, sidecar_recording_id) \
+                 VALUES (1, 'recording', 'ext-legacy-123')",
+                [],
+            )
+            .expect("insert legacy recording");
+        }
+
+        let conn = initialize_database(&db_path).expect("migrate db");
+        let external_id: String = conn
+            .query_row(
+                "SELECT external_recording_id FROM recordings WHERE account_id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read migrated external recording id");
+        assert_eq!(external_id, "ext-legacy-123");
+
+        let column_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('recordings') \
+                 WHERE name = 'sidecar_recording_id'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count legacy column");
+        assert_eq!(column_count, 0);
 
         drop(conn);
         let _ = std::fs::remove_file(&db_path);

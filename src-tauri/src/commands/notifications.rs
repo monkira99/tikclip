@@ -26,7 +26,7 @@ pub struct NotificationListItem {
     pub created_at: String,
 }
 
-/// Insert a notification row (sidecar / in-app events).
+/// Insert a notification row (runtime / in-app events).
 #[tauri::command]
 pub fn insert_notification(
     state: State<'_, AppState>,

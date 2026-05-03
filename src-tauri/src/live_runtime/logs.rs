@@ -282,8 +282,8 @@ mod tests {
             "record",
             "handoff_failed",
             FlowRuntimeLogLevel::Warn,
-            Some("handoff.sidecar_unavailable"),
-            "Sidecar handoff failed",
+            Some("runtime.handoff_failed"),
+            "Runtime handoff failed",
             json!({
                 "username": "shop_abc",
                 "stream_url": "https://example.com/live.flv",
@@ -323,8 +323,8 @@ mod tests {
             "record",
             "handoff_failed",
             FlowRuntimeLogLevel::Warn,
-            Some("handoff.sidecar_unavailable"),
-            "Sidecar handoff failed",
+            Some("runtime.handoff_failed"),
+            "Runtime handoff failed",
             json!({
                 "username": "shop_abc",
                 "active_flow_run_id": 42,

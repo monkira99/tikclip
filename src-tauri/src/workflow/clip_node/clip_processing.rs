@@ -1,6 +1,9 @@
-use crate::commands::clips::{insert_clip_from_sidecar_with_conn, InsertClipFromSidecarInput};
+use crate::commands::clips::{insert_generated_clip_with_conn, InsertGeneratedClipInput};
 use crate::commands::flows::append_pipeline_hint_node_run;
 use crate::time_hcm::now_timestamp_hcm;
+use crate::workflow::clip_node::product_suggest::{
+    maybe_auto_tag_clip, SuggestProductForClipInput,
+};
 use crate::workflow::clip_node::ClipConfig;
 use crate::workflow::record_node::SpeechSpan;
 use rusqlite::Connection;
@@ -102,10 +105,10 @@ pub fn process_recording_clips(
         extract_thumbnail(&clip_path, &thumbnail_path, duration_sec)?;
 
         let transcript_text = transcript_for_clip_range(&input.speech_segments, start_sec, end_sec);
-        let clip_id = insert_clip_from_sidecar_with_conn(
+        let clip_id = insert_generated_clip_with_conn(
             conn,
-            &InsertClipFromSidecarInput {
-                sidecar_recording_id: input.external_recording_id.clone(),
+            &InsertGeneratedClipInput {
+                external_recording_id: input.external_recording_id.clone(),
                 account_id: input.account_id,
                 file_path: clip_path.to_string_lossy().into_owned(),
                 thumbnail_path: thumbnail_path.to_string_lossy().into_owned(),
@@ -116,6 +119,19 @@ pub fn process_recording_clips(
             },
         )?;
         append_pipeline_hint_node_run(conn, "clip_ready", clip_id)?;
+
+        if let Err(err) = maybe_auto_tag_clip(
+            conn,
+            &config.storage_root,
+            clip_id,
+            &SuggestProductForClipInput {
+                video_path: clip_path.to_string_lossy().into_owned(),
+                thumbnail_path: Some(thumbnail_path.to_string_lossy().into_owned()),
+                transcript_text: transcript_text.clone(),
+            },
+        ) {
+            log::debug!("optional clip auto-tag failed for clip {clip_id}: {err}");
+        }
 
         let payload = RustClipReadyPayload {
             clip_id,

@@ -102,8 +102,8 @@ pub fn get_dashboard_stats(
     let (clips_today, sum_columns, sum_disk, storage_quota_gb): (i64, i64, i64, Option<f64>) = {
         let conn = state.db.lock().map_err(|e| e.to_string())?;
 
-        // Match "today" by DB timestamp prefix OR by folder segment in file_path (sidecar uses
-        // `YYYY-MM-DD` in paths; `created_at` is stored as GMT+7 wall clock).
+        // Match "today" by DB timestamp prefix OR by folder segment in file_path
+        // (`YYYY-MM-DD` in paths; `created_at` is stored as GMT+7 wall clock).
         let needle = format!("/{today}/");
         let clips_today: i64 = conn
             .query_row(

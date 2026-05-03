@@ -80,7 +80,7 @@ pub fn pick_storage_root_folder(
     Ok(Some(path.to_string_lossy().into_owned()))
 }
 
-/// Writes `storage_root.json` and restarts the app so DB and sidecar reload from the new root.
+/// Writes `storage_root.json` and restarts the app so DB/runtime reload from the new root.
 #[tauri::command]
 pub fn apply_storage_root(app: AppHandle, path: String) -> Result<(), String> {
     let trimmed = path.trim();

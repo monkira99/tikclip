@@ -8,8 +8,6 @@ use crate::live_runtime::session::{
 use crate::recording_runtime::types::RecordingOutcome;
 use crate::tiktok::types::LiveStatus;
 use rusqlite::{params, Connection};
-use std::io::{Read, Write};
-use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -50,48 +48,6 @@ fn insert_flow(conn: &Connection, flow_id: i64, enabled: bool, username: &str) {
             params![flow_id],
         )
         .expect("insert record node");
-}
-
-fn sidecar_request_server() -> (String, Arc<Mutex<Vec<String>>>, std::thread::JoinHandle<()>) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind sidecar test server");
-    let addr = listener.local_addr().expect("test server addr");
-    let requests = Arc::new(Mutex::new(Vec::new()));
-    let requests_for_thread = Arc::clone(&requests);
-    let handle = std::thread::spawn(move || {
-        if let Ok((mut stream, _)) = listener.accept() {
-            stream
-                .set_read_timeout(Some(std::time::Duration::from_secs(2)))
-                .expect("set read timeout");
-            let mut buffer = Vec::new();
-            let mut chunk = [0u8; 4096];
-            loop {
-                match stream.read(&mut chunk) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        buffer.extend_from_slice(&chunk[..n]);
-                        if n < chunk.len() {
-                            break;
-                        }
-                    }
-                    Err(err)
-                        if err.kind() == std::io::ErrorKind::WouldBlock
-                            || err.kind() == std::io::ErrorKind::TimedOut =>
-                    {
-                        break;
-                    }
-                    Err(_) => break,
-                }
-            }
-            requests_for_thread
-                .lock()
-                .expect("lock requests")
-                .push(String::from_utf8_lossy(&buffer).to_string());
-            let _ = stream.write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{}",
-                );
-        }
-    });
-    (format!("http://{}", addr), requests, handle)
 }
 
 fn in_memory_runtime_schema(conn: &Connection) {

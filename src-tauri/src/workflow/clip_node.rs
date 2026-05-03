@@ -1,4 +1,7 @@
 mod clip_processing;
+mod common;
+pub mod product_suggest;
+pub mod product_vectors;
 
 use self::clip_processing::{
     process_recording_clips, ClipProcessingConfig, ClipProcessingInput, ClipProcessingResult,

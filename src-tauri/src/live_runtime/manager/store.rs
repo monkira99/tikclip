@@ -20,25 +20,6 @@ pub(super) struct FlowRuntimeConfig {
     pub(super) poll_interval_seconds: i64,
 }
 
-pub(super) fn load_sidecar_base_url(conn: &Connection) -> Result<Option<String>, String> {
-    let port: Option<String> = conn
-        .query_row(
-            "SELECT value FROM app_settings WHERE key = 'sidecar_port'",
-            [],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|e| e.to_string())?;
-    Ok(port.and_then(|raw| {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(format!("http://127.0.0.1:{trimmed}"))
-        }
-    }))
-}
-
 pub(super) fn load_flow_runtime_config(
     conn: &Connection,
     flow_id: i64,
@@ -194,7 +175,7 @@ pub(super) fn finalize_latest_recording_row(
 ) -> Result<(), String> {
     let recording: Option<(i64, i64, String, Option<String>, String)> = conn
         .query_row(
-            "SELECT account_id, flow_run_id, sidecar_recording_id, file_path, room_id FROM recordings WHERE flow_id = ?1 AND status = 'recording' ORDER BY id DESC LIMIT 1",
+            "SELECT account_id, flow_run_id, external_recording_id, file_path, room_id FROM recordings WHERE flow_id = ?1 AND status = 'recording' ORDER BY id DESC LIMIT 1",
             [flow_id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
         )

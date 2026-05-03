@@ -3,8 +3,6 @@ mod commands;
 mod db;
 mod live_runtime;
 mod recording_runtime;
-mod sidecar;
-mod sidecar_env;
 mod tiktok;
 mod time_hcm;
 mod tray;
@@ -13,7 +11,6 @@ mod workflow;
 use db::init::initialize_database;
 use live_runtime::manager::LiveRuntimeManager;
 use rusqlite::Connection;
-use sidecar::SidecarManager;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Manager, RunEvent};
@@ -43,24 +40,25 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            sidecar::get_sidecar_status,
-            sidecar::restart_sidecar,
             commands::accounts::list_accounts,
             commands::accounts::create_account,
             commands::accounts::delete_account,
             commands::accounts::sync_accounts_live_status,
-            commands::clips::insert_clip_from_sidecar,
-            commands::clips::insert_speech_segment,
             commands::clips::update_clip_caption,
+            commands::clips::generate_clip_caption,
+            commands::clips::suggest_product_for_clip,
             commands::products::list_products,
             commands::products::create_product,
             commands::products::update_product,
             commands::products::delete_product,
             commands::products::tag_clip_product,
+            commands::products::fetch_product_from_url,
+            commands::products::index_product_embeddings,
+            commands::products::delete_product_embeddings,
             commands::dashboard::get_dashboard_stats,
             commands::flows::list_flows,
             commands::flows::create_flow,
-            commands::flows::apply_sidecar_flow_runtime_hint,
+            commands::flows::apply_flow_runtime_hint,
             commands::flows::set_flow_enabled,
             commands::flows::delete_flow,
             commands::flow_engine::get_flow_definition,
@@ -106,8 +104,6 @@ pub fn run() {
 
             let db_path = storage_path.join("data").join("app.db");
             let mut conn = initialize_database(&db_path).expect("failed to initialize database");
-            let tikclip_env = sidecar_env::build_sidecar_env(&conn, &storage_path)
-                .expect("failed to build sidecar env from settings");
             let mut runtime_manager = LiveRuntimeManager::with_runtime_db_path(db_path.clone());
             runtime_manager.attach_storage_root(storage_path.clone());
             runtime_manager.attach_app_handle(app.handle().clone());
@@ -125,12 +121,6 @@ pub fn run() {
                 db_path.clone(),
                 storage_path.clone(),
             ));
-
-            let sidecar = SidecarManager::new();
-            if let Err(e) = sidecar.start(&tikclip_env) {
-                eprintln!("sidecar start failed: {e}");
-            }
-            app.manage(sidecar);
 
             tray::setup_tray(app.handle())?;
 

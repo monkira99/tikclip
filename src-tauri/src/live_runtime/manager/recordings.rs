@@ -33,13 +33,6 @@ impl RecordNodePostProcessHandoff {
             RecordNodePostProcessHandoff::Disabled | RecordNodePostProcessHandoff::Failed => &[],
         }
     }
-
-    pub(super) fn speech_segments(&self) -> Option<&[SpeechSpan]> {
-        match self {
-            RecordNodePostProcessHandoff::Completed { speech_segments } => Some(speech_segments),
-            RecordNodePostProcessHandoff::Disabled | RecordNodePostProcessHandoff::Failed => None,
-        }
-    }
 }
 
 impl LiveRuntimeManager {
@@ -120,7 +113,7 @@ impl LiveRuntimeManager {
                     "rust_audio_processing_failed",
                     FlowRuntimeLogLevel::Warn,
                     Some("audio.processing_failed"),
-                    "Record-node Rust audio processing failed; sidecar audio fallback remains enabled",
+                    "Record-node Rust audio processing failed; downstream pipeline will fail",
                     serde_json::json!({ "error": err }),
                 );
                 RecordNodePostProcessHandoff::Failed
@@ -148,11 +141,11 @@ impl LiveRuntimeManager {
         for key in active_keys {
             let row = conn
                 .query_row(
-                    "SELECT r.sidecar_recording_id, r.account_id, a.username, r.status, \
+                    "SELECT r.external_recording_id, r.account_id, a.username, r.status, \
                             r.duration_seconds, r.file_size_bytes, r.file_path, r.error_message \
                      FROM recordings r \
                      JOIN accounts a ON a.id = r.account_id \
-                     WHERE r.sidecar_recording_id = ?1",
+                     WHERE r.external_recording_id = ?1",
                     [key.as_str()],
                     |row| {
                         Ok(crate::commands::recordings::ActiveRustRecordingStatus {

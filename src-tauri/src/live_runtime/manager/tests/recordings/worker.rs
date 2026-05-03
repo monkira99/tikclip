@@ -22,7 +22,7 @@ fn handle_live_detected_starts_rust_owned_execution_without_waiting_for_sidecar_
 
     let row: (String, Option<String>, Option<String>) = conn
             .query_row(
-                "SELECT status, file_path, sidecar_recording_id FROM recordings WHERE flow_run_id = ?1 ORDER BY id DESC LIMIT 1",
+                "SELECT status, file_path, external_recording_id FROM recordings WHERE flow_run_id = ?1 ORDER BY id DESC LIMIT 1",
                 [flow_run_id],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -43,7 +43,7 @@ fn handle_live_detected_starts_rust_owned_execution_without_waiting_for_sidecar_
 }
 
 #[test]
-fn rust_owned_recording_worker_completes_without_sidecar_finish_signal() {
+fn rust_owned_recording_worker_completion_fails_downstream_without_sidecar_fallback() {
     let (conn, path) = open_temp_db();
     insert_flow(&conn, 1, true, "shop_abc");
     let manager = LiveRuntimeManager::with_recording_runner_autospawn_for_test(
@@ -96,7 +96,7 @@ fn rust_owned_recording_worker_completes_without_sidecar_finish_signal() {
         .expect("read flow run status");
 
     assert_eq!(status, "done");
-    assert_eq!(flow_run_status, "running");
+    assert_eq!(flow_run_status, "failed");
 
     drop(conn);
     let _ = std::fs::remove_file(path);
@@ -140,7 +140,7 @@ fn manager_with_runtime_db_path_does_not_skip_rust_execution() {
 
     let recording_key: String = conn
             .query_row(
-                "SELECT sidecar_recording_id FROM recordings WHERE flow_run_id = ?1 ORDER BY id DESC LIMIT 1",
+                "SELECT external_recording_id FROM recordings WHERE flow_run_id = ?1 ORDER BY id DESC LIMIT 1",
                 [flow_run_id],
                 |row| row.get(0),
             )

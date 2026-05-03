@@ -24,7 +24,7 @@ fn finalize_active_recording_uses_durable_external_recording_key() {
         .expect("created flow run");
     let external_recording_id: String = conn
             .query_row(
-                "SELECT sidecar_recording_id FROM recordings WHERE flow_run_id = ?1 ORDER BY id DESC LIMIT 1",
+                "SELECT external_recording_id FROM recordings WHERE flow_run_id = ?1 ORDER BY id DESC LIMIT 1",
                 [flow_run_id],
                 |row| row.get(0),
             )
@@ -48,7 +48,7 @@ fn finalize_active_recording_uses_durable_external_recording_key() {
 
     let row: (String, Option<i64>) = conn
         .query_row(
-            "SELECT status, flow_run_id FROM recordings WHERE sidecar_recording_id = ?1",
+            "SELECT status, flow_run_id FROM recordings WHERE external_recording_id = ?1",
             [&external_recording_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -62,7 +62,7 @@ fn finalize_active_recording_uses_durable_external_recording_key() {
 }
 
 #[test]
-fn successful_finalization_keeps_session_active_run_and_moves_to_processing() {
+fn successful_finalization_with_downstream_failure_marks_session_error() {
     let (mut conn, path) = open_temp_db();
     insert_flow(&conn, 1, true, "shop_abc");
     let manager = LiveRuntimeManager::new();
@@ -82,7 +82,7 @@ fn successful_finalization_keeps_session_active_run_and_moves_to_processing() {
         .expect("created flow run");
     let external_recording_id: String = conn
             .query_row(
-                "SELECT sidecar_recording_id FROM recordings WHERE flow_run_id = ?1 ORDER BY id DESC LIMIT 1",
+                "SELECT external_recording_id FROM recordings WHERE flow_run_id = ?1 ORDER BY id DESC LIMIT 1",
                 [flow_run_id],
                 |row| row.get(0),
             )
@@ -108,14 +108,14 @@ fn successful_finalization_keeps_session_active_run_and_moves_to_processing() {
         .into_iter()
         .find(|snapshot| snapshot.flow_id == 1)
         .expect("session snapshot");
-    assert_eq!(snapshot.status, "processing");
+    assert_eq!(snapshot.status, "error");
 
     drop(conn);
     let _ = std::fs::remove_file(path);
 }
 
 #[test]
-fn successful_finalization_emits_runtime_update_event_on_stage_transition() {
+fn successful_finalization_emits_runtime_update_event_for_downstream_failure() {
     let (mut conn, path) = open_temp_db();
     insert_flow(&conn, 1, true, "shop_abc");
     let manager = LiveRuntimeManager::new();
@@ -135,7 +135,7 @@ fn successful_finalization_emits_runtime_update_event_on_stage_transition() {
         .expect("created flow run");
     let external_recording_id: String = conn
             .query_row(
-                "SELECT sidecar_recording_id FROM recordings WHERE flow_run_id = ?1 ORDER BY id DESC LIMIT 1",
+                "SELECT external_recording_id FROM recordings WHERE flow_run_id = ?1 ORDER BY id DESC LIMIT 1",
                 [flow_run_id],
                 |row| row.get(0),
             )
@@ -155,9 +155,9 @@ fn successful_finalization_emits_runtime_update_event_on_stage_transition() {
         .take_latest_runtime_event_for_test()
         .expect("runtime event snapshot");
     assert_eq!(snapshot.flow_id, 1);
-    assert_eq!(snapshot.status, "processing");
-    assert_eq!(snapshot.current_node.as_deref(), Some("clip"));
-    assert_eq!(snapshot.active_flow_run_id, Some(flow_run_id));
+    assert_eq!(snapshot.status, "error");
+    assert_eq!(snapshot.current_node.as_deref(), Some("record"));
+    assert_eq!(snapshot.active_flow_run_id, None);
 
     drop(conn);
     let _ = std::fs::remove_file(path);
@@ -184,7 +184,7 @@ fn finalize_by_external_recording_key_updates_targeted_run_not_latest_running_ru
         .expect("created first run");
     let first_recording_key: String = conn
             .query_row(
-                "SELECT sidecar_recording_id FROM recordings WHERE flow_run_id = ?1 ORDER BY id DESC LIMIT 1",
+                "SELECT external_recording_id FROM recordings WHERE flow_run_id = ?1 ORDER BY id DESC LIMIT 1",
                 [first_run_id],
                 |row| row.get(0),
             )
@@ -355,7 +355,7 @@ fn failure_finalization_closes_record_node_and_flow_run_failed() {
         .expect("created run");
     let external_recording_id: String = conn
         .query_row(
-            "SELECT sidecar_recording_id FROM recordings WHERE flow_run_id = ?1",
+            "SELECT external_recording_id FROM recordings WHERE flow_run_id = ?1",
             [flow_run_id],
             |row| row.get(0),
         )

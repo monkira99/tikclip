@@ -2,7 +2,7 @@ use reqwest::header::{
     HeaderMap, HeaderValue, ACCEPT, ACCEPT_LANGUAGE, ORIGIN, REFERER, USER_AGENT,
 };
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::time::Duration;
 use thiserror::Error;
 
@@ -25,32 +25,52 @@ pub fn normalize_cookie_header(raw: &str) -> Result<String, String> {
     }
 
     let value: Value = serde_json::from_str(raw).map_err(|e| e.to_string())?;
-    let object = value
-        .as_object()
-        .ok_or_else(|| "cookies_json must be a JSON object".to_string())?;
+    let mut cookie_values = HashMap::<String, String>::new();
+    let mut ordered_keys = Vec::<String>::new();
+    if let Some(object) = value.as_object() {
+        for (key, value) in object {
+            let Some(cookie_value) = value.as_str() else {
+                continue;
+            };
+            cookie_values.insert(key.to_string(), cookie_value.to_string());
+            ordered_keys.push(key.to_string());
+        }
+    } else if let Some(rows) = value.as_array() {
+        for row in rows {
+            let Some(object) = row.as_object() else {
+                continue;
+            };
+            let Some(name) = object.get("name").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(cookie_value) = object.get("value").and_then(Value::as_str) else {
+                continue;
+            };
+            cookie_values.insert(name.to_string(), cookie_value.to_string());
+            ordered_keys.push(name.to_string());
+        }
+    } else {
+        return Err("cookies_json must be a JSON object or cookie array".to_string());
+    }
 
-    let has_sessionid = object
+    let has_sessionid = cookie_values
         .get("sessionid")
-        .and_then(Value::as_str)
         .is_some_and(|value| !value.is_empty());
 
-    let mut pairs = object
-        .iter()
-        .filter_map(|(key, value)| {
-            value.as_str().and_then(|value| {
-                if key == "sessionid" && !has_sessionid {
-                    None
-                } else {
-                    Some(format!("{key}={value}"))
-                }
-            })
-        })
-        .collect::<Vec<_>>();
+    let mut pairs = Vec::new();
+    for key in ordered_keys {
+        let Some(value) = cookie_values.get(&key).filter(|value| !value.is_empty()) else {
+            continue;
+        };
+        if key == "sessionid" && !has_sessionid {
+            continue;
+        }
+        pairs.push(format!("{key}={value}"));
+    }
 
     if !has_sessionid {
-        if let Some(sessionid_ss) = object
+        if let Some(sessionid_ss) = cookie_values
             .get("sessionid_ss")
-            .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
         {
             pairs.push(format!("sessionid={sessionid_ss}"));
@@ -211,6 +231,19 @@ mod tests {
     fn normalize_cookie_header_treats_empty_sessionid_as_missing_without_duplicates() {
         let cookies = normalize_cookie_header(
             r#"{"sessionid":"","sessionid_ss":"abc","tt-target-idc":"useast2a"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            cookies,
+            "sessionid_ss=abc; tt-target-idc=useast2a; sessionid=abc"
+        );
+    }
+
+    #[test]
+    fn normalize_cookie_header_accepts_browser_cookie_array() {
+        let cookies = normalize_cookie_header(
+            r#"[{"name":"sessionid_ss","value":"abc"},{"name":"tt-target-idc","value":"useast2a"}]"#,
         )
         .unwrap();
 
