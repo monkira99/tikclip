@@ -2,77 +2,71 @@
 
 ## 1. Overview
 
-TikClip is a desktop workflow for watching TikTok Live accounts through flows, recording sessions, and managing clips, products, captions, and storage metadata. The repo combines a React/Tauri UI, a Rust desktop runtime with SQLite, and a Python sidecar for post-recording processing, captions, product scraping, embeddings, and cleanup.
+TikClip is a desktop workflow for monitoring TikTok Live accounts, running fixed recording flows, and managing recordings, clips, captions, products, storage, and product-suggestion metadata. The app is a React/Tauri desktop surface backed by a Rust runtime and local SQLite persistence.
 
 ## 2. Folder Structure
 
-- `src`: React desktop UI, app state, and frontend-side transport glue.
-  - `components`: feature UI plus shared primitives; `layout` owns the shell/sidebar/topbar, `flows` owns canvas, node modals, runtime strip, diagnostics, and flow-linked panels, and `ui` wraps base controls.
-  - `pages`: top-level screens selected by `AppShell` for dashboard, flows, products, settings, and placeholders.
-  - `stores`: Zustand mutation surfaces for accounts, clips, flows, products, notifications, recordings, and app shell state.
-  - `lib`: Tauri `invoke` wrappers, sidecar REST/WebSocket helpers, DB sync adapters, runtime-to-account live derivation, notification sync, product media helpers, and error formatting.
-  - `hooks`: shell bootstrap hooks, especially sidecar status polling and WebSocket connection helpers.
-  - `types`: shared frontend domain types, request/result shapes, runtime snapshots, and runtime logs.
+- `src`: React desktop UI, feature components, frontend state, and Tauri command wrappers.
+  - `components`: UI by feature area plus shared primitives.
+    - `layout`: `AppShell`, top bar, sidebar, notification menu, and runtime/event bootstrap hooks.
+    - `flows`: flow list/detail screens, canvas rendering, node modals, runtime strip, publish dialog, and flow-specific tests.
+    - `dashboard`, `products`, `recordings`, `accounts`: page-level feature widgets and forms.
+    - `ui`: shared shadcn-style primitives such as buttons, cards, dialogs, inputs, tabs, badges, and switches.
+  - `features/settings`: settings page config and path-row controls for storage/runtime options.
+  - `pages`: top-level page components selected by the app shell.
+  - `stores`: Zustand stores for accounts, app shell state, clips, flows, notifications, products, and recordings.
+  - `lib`: frontend boundary helpers, including `@/lib/api/*` Tauri `invoke` wrappers, flow-node form parsing, formatting, notification sync, product-image helpers, settings value parsing, and runtime notification mapping.
+  - `types`: shared TypeScript domain types, request/result shapes, closed status unions, runtime snapshots, and runtime logs.
 - `src-tauri`: Rust desktop shell, SQLite persistence layer, live runtime, and recording runtime.
-  - `src/commands`: thin Tauri command modules for accounts, clips, flows, flow engine, live runtime, notifications, paths, products, recordings, settings, storage, and dashboard queries.
-  - `src/db`: SQLite initialization, timestamp-aware schema migrations, and DB model structs.
-  - `src/live_runtime`: flow-owned live polling sessions, account binding, username normalization, runtime log buffering, recording handoff, and Tauri event emission.
-  - `src/recording_runtime`: ffmpeg command construction, recording process spawning/cancelation, output paths, and finish payloads.
-  - `src/workflow`: fixed flow-node pipeline (`start -> record -> clip -> caption -> upload`), node config canonicalization, node runners, and `flow_runs` / `flow_node_runs` persistence helpers.
-  - `src/tiktok`: TikTok live-status resolution, HTTP transport, cookie/proxy normalization, stream URL extraction, and payload parsing.
-  - `src/sidecar`: Python sidecar lifecycle, `SIDECAR_PORT=...` discovery, restart/status commands, and process shutdown.
-  - `src/lib.rs`, `src/main.rs`, `src/tray.rs`, `src/sidecar_env.rs`, `src/app_paths.rs`, `src/time_hcm.rs`: app bootstrap, shared state registration, tray setup, sidecar env construction, storage root resolution, and GMT+7 helpers.
+  - `src/commands`: thin Tauri command modules for accounts, clips, dashboard, flows, flow engine, live runtime, notifications, paths, products, recordings, settings, and storage.
+  - `src/db`: SQLite initialization, ordered schema migrations, migration tests, and DB model structs.
+  - `src/live_runtime`: flow-owned polling sessions, account binding, generation-based cancellation, runtime log buffering, recording coordination, snapshots, and Tauri event emission.
+  - `src/recording_runtime`: ffmpeg input/output construction, recording process spawn/cancel handling, output paths, and finish payloads.
+  - `src/workflow`: fixed-node pipeline (`start -> record -> clip -> caption -> upload`), node config parsing/canonicalization, node runners, runtime persistence helpers, clip extraction, caption generation, product suggestions, and product embedding vectors.
+  - `src/tiktok`: TikTok live-status and product fetching, HTTP transport, cookie/proxy normalization, stream URL extraction, and payload parsing.
+  - `src/lib.rs`, `src/main.rs`, `src/tray.rs`, `src/app_paths.rs`, `src/time_hcm.rs`: app bootstrap, shared state registration, tray setup, storage root resolution, shutdown wiring, and GMT+7 timestamp helpers.
   - `tauri.conf.json`, `capabilities`, `icons`, `gen`: desktop runtime capabilities, generated schemas, and packaging assets.
-- `sidecar`: Python FastAPI service for processing completed recordings and product/caption assistance.
-  - `src/routes`: thin endpoints for video processing/status, speech segments, captions, product scraping/embeddings/search, trim, storage cleanup, and health.
-  - `src/core`: post-recording video/audio processing, caption generation, model preload/status, storage cleanup worker, and HCM date helpers.
-  - `src/models`: Pydantic request/response schemas shared by routes.
-  - `src/tiktok`: product scraping and TikTok HTTP helpers used by product import workflows.
-  - `src/embeddings`: Gemini/zvec product media and text indexing, search, clip-to-product suggestion, frame extraction, and vector runtime setup.
-  - `src/ws`: process-local WebSocket manager that broadcasts sidecar events to the desktop shell.
-  - `src/config.py`, `src/logging_config.py`, `src/app.py`, `src/main.py`, `src/onnx_runtime_preload.py`: settings, logging, FastAPI assembly, port binding/startup, and ONNX runtime preload.
-  - `tests`: pytest coverage for clip scheduling, processing, and health behavior.
 - `docs/superpowers`: product specs and phased implementation plans; align behavior changes with these docs when relevant.
 - `public`: static assets used by the Vite frontend.
 - `DESIGN.md`: canonical design-system reference for frontend styling and interaction work.
 
 ## 3. Core Behaviors & Patterns
 
-- **Durability Boundary**: SQLite-backed state goes through Tauri `invoke(...)`; processing/caption/product work goes through sidecar HTTP and `/ws`. Durable sidecar events are normalized in `src/lib/sidecar-db-sync.ts` before SQLite writes, then stores refresh by revision or runtime sync.
-- **Runtime Ownership**: Rust owns live polling, flow execution state, account binding, and ffmpeg recording. `LiveRuntimeManager` keeps in-memory sessions/log buffers, persists flow/run transitions through `workflow::runtime_store`, emits `flow-runtime-updated` / `flow-runtime-log`, and hands completed recordings to sidecar processing.
-- **Shell Orchestration**: `src/components/layout/app-shell.tsx` is the frontend hub. It polls sidecar availability through `useSidecar`, registers Tauri runtime-event listeners, wires sidecar WebSocket handlers, hydrates stores from SQLite/runtime snapshots, and derives account live flags from active flow runtime state.
-- **Flow Lifecycle**: Flows use a fixed node sequence (`start`, `record`, `clip`, `caption`, `upload`). Draft node JSON is saved separately from published JSON; publishing canonicalizes start/record configs, bumps versions, and can restart active runs so runtime work reads only published definitions.
-- **Store Concurrency**: Zustand stores expose imperative async actions and keep stale responses from winning with tokens, generation counters, revision bumps, and capped runtime log buckets. UI components should call store actions rather than fetch or mutate shared state directly.
-- **Boundary Normalization**: Frontend and Rust boundary code use guard clauses and local coercion helpers for usernames, ids, optional strings, empty-string-as-null fields, JSON config, sidecar ports, malformed WebSocket messages, and partial sidecar payloads.
-- **Error Handling**: Tauri commands flatten boundary errors to `Result<_, String>` after input validation and explicit SQL. Sidecar routes raise `HTTPException` for client errors, return typed Pydantic responses for expected incomplete outcomes, and log unexpected processing failures.
-- **Resilience & Recovery**: WebSocket clients auto-reconnect and ignore malformed messages; Rust cancels superseded poll tasks by generation; sidecar startup falls back across ports; vector-store corruption is detected and recreated; DB upserts preserve existing values when incoming payloads are partial.
-- **Shared Resource Management**: SQLite is shared through `AppState.db: Mutex<Connection>`, Rust runtime through `LiveRuntimeManager`, sidecar process state through `SidecarManager`, product vectors through cached zvec collections, and sidecar WebSockets through `ws_manager`.
+- **Rust-Owned Runtime Boundary**: Durable data and processing work cross the frontend/backend boundary through Tauri `invoke(...)` wrappers in `src/lib/api/*`. Rust owns SQLite writes, TikTok requests, ffmpeg recording, clip extraction, caption generation, product fetching, product vectors, storage cleanup, and runtime event emission.
+- **Shell Event Orchestration**: `src/components/layout/app-shell.tsx` stays thin and delegates bootstrap to `app-shell-effects.ts`. Effects hydrate notifications, sync active recording counts, listen for `flow-runtime-updated`, `flow-runtime-log`, `rust-clip-ready`, `cleanup_completed`, and `storage_warning`, then bump the relevant Zustand revisions or runtime buckets.
+- **Flow Lifecycle**: Flows follow the closed pipeline `start -> record -> clip -> caption -> upload`. Draft node JSON is edited separately from published JSON; publishing validates and canonicalizes start/record/clip configs, bumps flow versions, reconciles enabled runtime sessions, and rolls back published state if runtime reconciliation fails.
+- **Runtime Ownership**: `LiveRuntimeManager` holds in-memory sessions, leases by normalized username, active poll tasks, active recordings, failed snapshots, and capped runtime logs. It persists flow/run/node-run transitions through workflow/runtime helpers, emits Tauri snapshots/logs, and coordinates recording completion into downstream workflow nodes.
+- **Concurrency Control**: Frontend stores use request tokens, per-flow log tokens, optimistic snapshots, revision bumps, and capped runtime log buckets to keep stale async responses from resurrecting deleted or outdated state. Rust polling uses generation tokens and cancellation flags to suppress superseded poll iterations and recording work.
+- **Boundary Normalization**: TypeScript parses and serializes flow-node forms in `src/lib/flow-node-forms.ts`; Rust revalidates and canonicalizes node config at publish/runtime boundaries. Usernames, IDs, optional strings, settings values, storage paths, cookies, proxy values, timestamps, and product media paths are normalized near the boundary that consumes them.
+- **Error Handling**: Tauri commands validate inputs, lock shared SQLite state, delegate longer work to focused runtime/workflow modules, and flatten errors to `Result<_, String>`. Rust workflow code logs operational context, records flow/node failures in SQLite, and emits runtime logs so the UI can show failures without duplicating backend state machines.
+- **Storage And Time Semantics**: App data is rooted through `app_paths`, persisted in `storage_root/data/app.db`, and timestamped with GMT+7 helpers from `time_hcm.rs`. Storage cleanup runs both as a command and a background worker, computes quota usage from SQLite plus file paths, emits desktop events, and stores notifications.
+- **Shared Resource Management**: SQLite is shared through `AppState.db: Mutex<Connection>`, live state through `LiveRuntimeManager`, cleanup scheduling through `StorageCleanupWorker`, media paths through storage-root helpers, product-vector settings through `app_settings`, and frontend durable mutations through the API wrappers rather than direct component calls.
 
 ## 4. Conventions
 
-- Use `@/` imports for frontend internals; keep cross-process transport in `src/lib` and store mutations in `src/stores` instead of embedding fetch or `invoke` logic deep in components.
+- Use `@/` imports for frontend internals; keep cross-process transport in `src/lib/api/*` and shared parsing/formatting helpers in `src/lib` instead of embedding `invoke` calls or coercion logic deep in components.
 - `DESIGN.md` is the source of truth for frontend styling, layout, and interaction changes unless the user explicitly asks to deviate.
-- Naming stays explicit by layer: React components/types use PascalCase, hooks use `useX`, component files are usually kebab-case, page/store/type modules stay lowercase, Python modules and Rust command ids use snake_case.
-- Boundary names must line up across layers: Rust `#[tauri::command]` names match frontend `invoke("...")` strings exactly, sidecar route paths match `src/lib/api.ts`, and WebSocket event names stay stable (`clip_ready`, `caption_ready`, `speech_segment_ready`, `storage_warning`, `cleanup_completed`).
-- Keep TypeScript normalization explicit with small helpers such as `normalizeUsername`, `parseClipId`, `deriveAccountLiveFlagsFromRuntime`, coercion utilities, and parse functions instead of dense inline casts.
-- Flow node keys and statuses are closed sets. Update frontend `FlowNodeKey` / `FlowStatus`, Rust `FLOW_NODE_KEYS` / status validators, workflow node runners, canvas/runtime UI, and migrations together when changing them.
-- Rust commands stay thin: validate inputs, lock the shared SQLite connection, use direct SQL or focused runtime-manager calls, and return `map_err(|e| e.to_string())` at the desktop boundary. Longer state machines belong in `live_runtime`, `recording_runtime`, or `workflow`.
-- Python routes stay thin: validate with Pydantic models, trim user input locally, delegate heavy work to `core/*`, `embeddings/*`, or `tiktok/*`, and broadcast runtime-visible side effects through `ws_manager`.
-- Config and settings use explicit boundary conversion: Tauri settings become `TIKCLIP_*` env pairs for the sidecar, empty frontend strings become omitted/null values where Rust expects option-like updates, and username/cookie/proxy normalization stays near the consuming boundary.
-- Comments are short and rare; add them only for desktop/sidecar coordination, race prevention, fallback behavior, storage/vector recovery, or TikTok-specific quirks that are not obvious from code.
-- Prefer explicit `null`/`Option`/error handling around sidecar payloads, cookies JSON, storage paths, recording ids, flow run ids, model/vector availability, and live-status synchronization paths.
+- Naming stays explicit by layer: React components/types use PascalCase, hooks use `useX`, component files are usually kebab-case, page/store/type modules stay lowercase, Rust modules/functions/command ids use snake_case, and serialized structs use `serde(rename_all = "snake_case")` or `camelCase` only where the existing boundary expects it.
+- Boundary names must line up across layers: Rust `#[tauri::command]` names match frontend `invoke("...")` strings exactly, event names stay stable (`flow-runtime-updated`, `flow-runtime-log`, `rust-clip-ready`, `cleanup_completed`, `storage_warning`), and TypeScript result types mirror Rust response structs.
+- Flow node keys and statuses are closed sets. Update frontend `FlowNodeKey` / `FlowStatus`, Rust workflow constants and node runners, flow canvas/runtime UI, command validation, DB migrations, and tests together when changing them.
+- Rust commands stay thin: validate input, lock `AppState.db` only for DB work, use direct SQL or focused runtime/workflow helpers, and return `map_err(|e| e.to_string())` at the desktop boundary. Long-running or stateful logic belongs in `live_runtime`, `recording_runtime`, `workflow`, `tiktok`, or storage helpers.
+- SQLite migrations are append-only and ordered in `src-tauri/src/db/init.rs`; schema changes should preserve older data, update models/types, and include migration coverage when behavior is non-trivial.
+- Settings and config use explicit string boundaries: frontend settings convert form state to string values, Rust reads `app_settings` through typed helpers, empty strings become `None` where appropriate, and defaults stay close to the Rust consumer.
+- Storage/media code must resolve relative paths against the configured storage root and reject media paths outside that root before reading, embedding, extracting frames, or deleting files.
+- Comments are short and rare; add them only for desktop/runtime coordination, race prevention, migration intent, fallback behavior, storage/vector safety, or TikTok-specific quirks that are not obvious from code.
+- Prefer explicit `null`/`Option`/error handling around cookies JSON, proxy URLs, storage paths, external recording ids, flow run ids, runtime snapshots, caption/vector availability, and live-status synchronization paths.
 
 ## 5. Working Agreements
 
 - Respond in Vietnamese unless the user asks for another language; keep technical terms in English and never translate code blocks.
-- Before editing, review related usages and the full frontend/Rust/sidecar flow for the feature you are changing.
+- Before editing, review related usages and the full frontend/Rust/runtime flow for the feature you are changing.
 - Treat `DESIGN.md` as the canonical design system document for the product and check it before making UI/UX changes.
 - Prefer simple, maintainable, production-friendly changes; avoid overengineering, clever abstractions, and extra layers for small features.
 - Keep APIs small, behavior explicit, naming clear, and new code colocated with the nearest existing feature/module.
 - Preserve current public behavior unless the user asks to change it; call out any unavoidable behavior change.
 - Do not add tests, lint tasks, formatting churn, or new dependencies unless the user explicitly asks for them or the change cannot be done safely without them.
 - Ask for clarification instead of guessing when a requirement is ambiguous or when a change would affect multiple layers in conflicting ways.
-- After code changes, run the verification for the layers you touched: `npm run lint:js` from the repo root for frontend work, `uv run ruff check src tests`, `uv run ruff format --check src tests`, `uv run ty check .`, and `uv run pytest tests/ -q` from `sidecar/` for Python work, and `cargo fmt --check` plus `cargo clippy --all-targets -- -D warnings` from `src-tauri/` for Rust/Tauri work.
+- After code changes, run the narrow verification for touched layers: `npm run lint:js` for frontend work and `npm run lint:rust` for Rust/Tauri work.
 
 ## 6. Execution Discipline
 

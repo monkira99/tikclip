@@ -9,8 +9,6 @@
 | **Frontend** (`src/`) | React 19, Vite, shadcn/ui, Zustand — gọi Tauri commands |
 | **Tauri / Rust** (`src-tauri/`) | SQLite, tray, live runtime, recording/clip/audio/caption/product runtime, Gemini embeddings và vector search |
 
-Không còn Python sidecar trong runtime app.
-
 ## Yêu cầu hệ thống
 
 - **Node.js** 20+ (khuyến nghị LTS) và npm
@@ -79,7 +77,7 @@ RUST_LOG=warn,tikclip_lib=info npm run tauri dev
 RUST_LOG=warn,tikclip_lib=debug npm run tauri dev
 ```
 
-## Kiểm thử và chất lượng (nên chạy trước Phase 2)
+## Kiểm thử và chất lượng
 
 ```bash
 # Toàn repo: ESLint + build frontend, rustfmt + clippy
@@ -89,12 +87,6 @@ npm run lint
 - **Lint JS:** `npm run lint:js` (gồm `tsc` + Vite build).
 - **Lint Rust:** `npm run lint:rust`.
 
-## Dữ liệu & Phase 1
-
-- **SQLite** (Rust): accounts, clips, settings, runtime telemetry, product metadata và product embedding vectors.
-- **Gemini embeddings**: cấu hình qua Settings trong app; sản phẩm cần re-index để tạo vector trong SQLite.
-- **E2E:** nên tự kiểm tra mở app, bật flow, ghi live, tách clip và import/index sản phẩm nếu có môi trường TikTok hợp lệ.
-
 ## Build bản phát hành
 
 ```bash
@@ -102,11 +94,4 @@ npm run tauri build
 ```
 
 Artifact nằm dưới `src-tauri/target/release/` (và thư mục bundle theo nền tảng).
-
-## Cấu trúc thư mục (rút gọn)
-
-```
-├── src/                 # React frontend
-├── src-tauri/           # Tauri + Rust runtime, SQLite, TikTok/Gemini/product vectors
-└── docs/superpowers/    # Spec & kế hoạch phase (chi tiết sản phẩm)
 ```
