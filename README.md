@@ -9,6 +9,10 @@
 | **Frontend** (`src/`) | React 19, Vite, shadcn/ui, Zustand — gọi Tauri commands |
 | **Tauri / Rust** (`src-tauri/`) | SQLite, tray, live runtime, recording/clip/audio/caption/product runtime, Gemini embeddings và vector search |
 
+## Tài liệu
+
+Docs canonical của dự án nằm trong [`docs/README.md`](docs/README.md). Khi thay đổi behavior, architecture hoặc boundary contract, cập nhật docs tương ứng trong `docs/product`, `docs/architecture`, `docs/contracts` hoặc `docs/features`.
+
 ## Yêu cầu hệ thống
 
 - **Node.js** 20+ (khuyến nghị LTS) và npm

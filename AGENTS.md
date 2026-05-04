@@ -26,7 +26,13 @@ TikClip is a desktop workflow for monitoring TikTok Live accounts, running fixed
   - `src/tiktok`: TikTok live-status and product fetching, HTTP transport, cookie/proxy normalization, stream URL extraction, and payload parsing.
   - `src/lib.rs`, `src/main.rs`, `src/tray.rs`, `src/app_paths.rs`, `src/time_hcm.rs`: app bootstrap, shared state registration, tray setup, storage root resolution, shutdown wiring, and GMT+7 timestamp helpers.
   - `tauri.conf.json`, `capabilities`, `icons`, `gen`: desktop runtime capabilities, generated schemas, and packaging assets.
-- `docs/superpowers`: product specs and phased implementation plans; align behavior changes with these docs when relevant.
+- `docs`: canonical Vietnamese project documentation for product intent, architecture, contracts, feature handbooks, operations, and ADRs. Start every non-trivial task at `docs/README.md`, then read the relevant docs before planning.
+  - `product`: product overview, terminology, and user workflows.
+  - `architecture`: layer ownership, data flow, Rust runtime, storage/time, frontend structure, and Tauri boundary.
+  - `contracts`: stable cross-layer contracts for Tauri commands, runtime events, flow pipeline, DB schema, settings, and media paths.
+  - `features`: feature handbooks for accounts, flows, recordings, clips, captions, products, notifications, and storage cleanup.
+  - `operations`: local development, verification, troubleshooting, and build/release guidance.
+  - `decisions`: ADRs for technical decisions such as Rust-owned runtime and fixed flow pipeline.
 - `public`: static assets used by the Vite frontend.
 - `DESIGN.md`: canonical design-system reference for frontend styling and interaction work.
 
@@ -45,6 +51,7 @@ TikClip is a desktop workflow for monitoring TikTok Live accounts, running fixed
 ## 4. Conventions
 
 - Use `@/` imports for frontend internals; keep cross-process transport in `src/lib/api/*` and shared parsing/formatting helpers in `src/lib` instead of embedding `invoke` calls or coercion logic deep in components.
+- `docs/README.md` is the entrypoint for canonical project docs. Do not duplicate detailed contracts in README or AGENTS; link or summarize and update the owning doc instead.
 - `DESIGN.md` is the source of truth for frontend styling, layout, and interaction changes unless the user explicitly asks to deviate.
 - Naming stays explicit by layer: React components/types use PascalCase, hooks use `useX`, component files are usually kebab-case, page/store/type modules stay lowercase, Rust modules/functions/command ids use snake_case, and serialized structs use `serde(rename_all = "snake_case")` or `camelCase` only where the existing boundary expects it.
 - Boundary names must line up across layers: Rust `#[tauri::command]` names match frontend `invoke("...")` strings exactly, event names stay stable (`flow-runtime-updated`, `flow-runtime-log`, `rust-clip-ready`, `cleanup_completed`, `storage_warning`), and TypeScript result types mirror Rust response structs.
@@ -59,22 +66,31 @@ TikClip is a desktop workflow for monitoring TikTok Live accounts, running fixed
 ## 5. Working Agreements
 
 - Respond in Vietnamese unless the user asks for another language; keep technical terms in English and never translate code blocks.
+- Work in this order for non-trivial tasks: read docs, understand the relevant contracts/flows, combine that context with the user request, state a short plan, write the failing test first, implement the plan, verify code and logic, then update docs if behavior/contracts changed.
 - Before editing, review related usages and the full frontend/Rust/runtime flow for the feature you are changing.
+- Use test-driven development for features, bug fixes, refactors, and behavior changes: write one focused failing test, run it and confirm the expected failure, write the smallest implementation to pass, then refactor only while tests stay green.
+- Treat `docs/README.md` as the entrypoint for canonical project docs. Update `docs/contracts/*` when changing Tauri commands, runtime events, flow nodes/statuses, DB schema, settings keys, or media path rules.
+- Update `docs/product/*` or `docs/features/*` when user-visible behavior changes, `docs/architecture/*` plus an ADR when ownership/architecture changes, and `docs/operations/*` when verification, local development, troubleshooting, or release workflow changes.
 - Treat `DESIGN.md` as the canonical design system document for the product and check it before making UI/UX changes.
 - Prefer simple, maintainable, production-friendly changes; avoid overengineering, clever abstractions, and extra layers for small features.
 - Keep APIs small, behavior explicit, naming clear, and new code colocated with the nearest existing feature/module.
 - Preserve current public behavior unless the user asks to change it; call out any unavoidable behavior change.
-- Do not add tests, lint tasks, formatting churn, or new dependencies unless the user explicitly asks for them or the change cannot be done safely without them.
+- Do not add broad test suites, unrelated lint tasks, formatting churn, or new dependencies unless the user explicitly asks for them or the change cannot be done safely without them. Focused tests required by TDD are part of code changes, not optional extras.
 - Ask for clarification instead of guessing when a requirement is ambiguous or when a change would affect multiple layers in conflicting ways.
-- After code changes, run the narrow verification for touched layers: `npm run lint:js` for frontend work and `npm run lint:rust` for Rust/Tauri work.
+- After code changes, run the narrow verification from `docs/operations/verification.md`: `npm run lint:js` for frontend work, `npm run lint:rust` for Rust/Tauri work, and both when a boundary change touches both layers.
 
 ## 6. Execution Discipline
 
+- Start by reading `docs/README.md`, then the relevant `docs/product`, `docs/architecture`, `docs/contracts`, `docs/features`, `docs/operations`, or `docs/decisions` files for the request. Summarize the applicable constraints before planning when the task is non-trivial.
 - Think before coding: state assumptions explicitly, surface tradeoffs, and do not silently choose between multiple reasonable interpretations.
 - Push back when needed: if a requirement is unclear or conflicting, stop and ask instead of implementing a guess.
+- For code changes, follow TDD strictly: no production code for a feature, bugfix, refactor, or behavior change before a failing test has been written and observed. If production code was written first, discard it and restart from the test.
+- Keep each TDD loop small: RED with one behavior-focused test using real code where practical, verify the expected failure, GREEN with minimal implementation, verify all relevant tests pass, then refactor without changing behavior.
+- Plan after reading docs and before editing. The plan should name what changes, what stays unchanged, which tests prove the behavior, which verification commands will run, and which docs must be updated.
 - Default to the simplest change that solves the request; avoid speculative flexibility, single-use abstractions, or defensive code for scenarios that cannot happen in this app flow.
 - Keep changes surgical: touch only files and lines needed for the request, match the surrounding style, and avoid cleanup or refactors outside the task.
 - Clean up only what your change makes stale, such as imports, variables, helpers, or branches that become unused because of your own edit.
 - If you notice unrelated dead code or design issues, mention them separately instead of deleting or rewriting them without approval.
-- For non-trivial work, define a short success path before editing: what will change, what should stay unchanged, and how the result will be verified.
+- Verify code and logic before finishing: run the focused test that drove the change, then the layer-level command from `docs/operations/verification.md`. For docs-only changes, inspect rendered Markdown structure and check paths/links with repository search.
+- Update docs after implementation when contracts, user-visible behavior, architecture, operations, settings, DB schema, media path rules, runtime events, or Tauri commands changed. Do not create date-stamped feature docs; only ADRs are numbered.
 - Each meaningful code change should trace directly back to the user request; if a diff cannot be justified in one sentence, it probably should not be there.
