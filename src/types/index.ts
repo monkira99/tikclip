@@ -1,6 +1,6 @@
 export type AccountType = "own" | "monitored";
 export type AccountStatus = "live" | "offline" | "recording";
-export type RecordingStatus = "recording" | "done" | "error" | "processing";
+export type RecordingStatus = "recording" | "done" | "error" | "processing" | "cancelled";
 export type ClipStatus = "draft" | "ready" | "posted" | "archived";
 export type ClipCaptionStatus = "pending" | "generating" | "completed" | "failed";
 export type SceneType = "product_intro" | "highlight" | "general";
